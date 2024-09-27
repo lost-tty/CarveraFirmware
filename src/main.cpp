@@ -25,6 +25,7 @@
 #include "modules/utils/configurator/Configurator.h"
 #include "modules/utils/player/Player.h"
 #include "modules/utils/mainbutton/MainButton.h"
+#include "modules/communication/GcodeDispatch.h"
 #include "modules/communication/WirelessProbe.h"
 #include "Config.h"
 #include "checksumm.h"
@@ -71,6 +72,7 @@ GPIO leds[4] = {
 
 Kernel THEKERNEL;
 Conveyor THECONVEYOR;
+GcodeDispatch gcode_dispatch;
 SimpleShell simpleshell;
 
 void init() {
@@ -84,6 +86,9 @@ void init() {
 
     THECONVEYOR.init();
     THEKERNEL.add_module(&THECONVEYOR);
+
+    gcode_dispatch.init();
+    THEKERNEL.add_module(&gcode_dispatch);
 
     THEKERNEL.add_module(&simpleshell);
 
