@@ -21,6 +21,7 @@
 #include "modules/utils/wifi/WifiProvider.h"
 #include "modules/utils/webserver/WebServer.h"
 #include "modules/robot/Conveyor.h"
+#include "modules/robot/Robot.h"
 #include "modules/utils/simpleshell/SimpleShell.h"
 #include "modules/utils/configurator/Configurator.h"
 #include "modules/utils/player/Player.h"
@@ -72,6 +73,7 @@ GPIO leds[4] = {
 
 Kernel THEKERNEL;
 Conveyor THECONVEYOR;
+Robot THEROBOT;
 GcodeDispatch gcode_dispatch;
 SimpleShell simpleshell;
 
@@ -89,6 +91,9 @@ void init() {
 
     gcode_dispatch.init();
     THEKERNEL.add_module(&gcode_dispatch);
+
+    THEROBOT.init();
+    THEKERNEL.add_module(&THEROBOT);
 
     THEKERNEL.add_module(&simpleshell);
 
@@ -204,7 +209,7 @@ void init() {
     }
 
     // start the timers and interrupts
-    THECONVEYOR.start(THEROBOT->get_number_registered_motors());
+    THECONVEYOR.start(THEROBOT.get_number_registered_motors());
     THEKERNEL.step_ticker->start();
     THEKERNEL.slow_ticker->start();
 }
