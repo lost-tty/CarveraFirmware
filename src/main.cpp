@@ -52,10 +52,6 @@
 #include "libs/Watchdog.h"
 
 #include "version.h"
-#include "system_LPC17xx.h"
-#include "platform_memory.h"
-
-#include "mbed.h"
 
 // disable MSD
 #define DISABLEMSD
