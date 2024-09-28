@@ -76,6 +76,8 @@ SimpleShell simpleshell;
 WifiProvider wifi_provider;
 WebServer web_server(&wifi_provider);
 
+Player player __attribute__((section("AHBSRAM0")));
+
 void init() {
     // Default pins to low status
     for (int i = 0; i < 4; i++){
@@ -107,7 +109,7 @@ void init() {
     #endif
 
     // Create and add main modules
-    THEKERNEL.add_module( new(AHB0) Player() );
+    THEKERNEL.add_module(&player);
     THEKERNEL.add_module( new(AHB0) ATCHandler() );
     THEKERNEL.add_module( new(AHB0) WirelessProbe() );
     THEKERNEL.add_module( new(AHB0) MainButton() );
