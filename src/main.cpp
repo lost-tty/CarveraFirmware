@@ -78,6 +78,7 @@ WebServer web_server(&wifi_provider);
 
 Player player __attribute__((section("AHBSRAM0")));
 WirelessProbe wireless_probe __attribute__((section("AHBSRAM0")));
+MainButton mainbutton __attribute__((section("AHBSRAM0")));
 
 void init() {
     // Default pins to low status
@@ -113,7 +114,7 @@ void init() {
     THEKERNEL.add_module(&player);
     THEKERNEL.add_module( new(AHB0) ATCHandler() );
     THEKERNEL.add_module(&wireless_probe);
-    THEKERNEL.add_module( new(AHB0) MainButton() );
+    THEKERNEL.add_module(&mainbutton);
 
     wifi_provider.init();
     THEKERNEL.add_module(&wifi_provider);
