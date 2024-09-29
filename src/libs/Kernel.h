@@ -98,7 +98,6 @@ class Kernel {
 
         ~Kernel() {
             delete this->i2c;
-            delete this->eeprom_data;
         }
 
         void init();
@@ -188,7 +187,7 @@ class Kernel {
         uint8_t get_state();
         uint8_t halt_reason;
         uint8_t atc_state;
-        EEPROM_data *eeprom_data;
+        EEPROM_data eeprom_data;
         float local_vars[20];
 
     private:
