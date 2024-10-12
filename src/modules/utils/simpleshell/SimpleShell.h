@@ -65,8 +65,9 @@ private:
     void md5sum_command( string parameters, StreamOutput *stream);
     void grblDP_command( string parameters, StreamOutput *stream);
 
-    void switch_command(string parameters, StreamOutput *stream );
-    void mem_command(string parameters, StreamOutput *stream );
+    void switch_command(string parameters, StreamOutput *stream);
+    void mem_command(string parameters, StreamOutput *stream);
+    void task_command(string parameters, StreamOutput *stream);
 
     void net_command( string parameters, StreamOutput *stream);
     void ap_command( string parameters, StreamOutput *stream);

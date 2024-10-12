@@ -100,6 +100,7 @@ const SimpleShell::ptentry_t SimpleShell::commands_table[] = {
 	{"ftype",	 &SimpleShell::ftype_command},
     {"version",  &SimpleShell::version_command},
     {"mem",      &SimpleShell::mem_command},
+    {"task",     &SimpleShell::task_command},
     {"get",      &SimpleShell::get_command},
     {"set_temp", &SimpleShell::set_temp_command},
     {"switch",   &SimpleShell::switch_command},
@@ -771,6 +772,65 @@ void SimpleShell::mem_command( string parameters, StreamOutput *stream)
     stream->printf("Total Free RAM: %lu bytes\r\n", m + f);
 
     stream->printf("Block size: %u bytes, Tickinfo size: %u bytes\n", sizeof(Block), sizeof(Block::tickinfo_t) * Block::n_actuators);
+}
+
+const char* getTaskStateString(eTaskState state)
+{
+    switch (state)
+    {
+        case eRunning:   return "Running";
+        case eReady:     return "Ready";
+        case eBlocked:   return "Blocked";
+        case eSuspended: return "Suspended";
+        case eDeleted:   return "Deleted";
+        default:         return "Invalid";
+    }
+}
+
+void SimpleShell::task_command(string parameters, StreamOutput *stream)
+{
+    // Get the number of tasks
+    UBaseType_t taskCount = uxTaskGetNumberOfTasks();
+    stream->printf("Total number of tasks: %lu\r\n", (unsigned long)taskCount);
+
+    // Allocate memory for task status information
+    TaskStatus_t *taskStatusArray = (TaskStatus_t *)pvPortMalloc(taskCount * sizeof(TaskStatus_t));
+    if (taskStatusArray == NULL)
+    {
+        stream->printf("Failed to allocate memory for task status array.\r\n");
+        return;
+    }
+
+    // Get task status information
+    UBaseType_t tasksFetched = uxTaskGetSystemState(taskStatusArray, taskCount, NULL);
+
+    // Iterate through each task and print task information with indentation
+    for (UBaseType_t i = 0; i < tasksFetched; i++)
+    {
+        TaskStatus_t *taskStatus = &taskStatusArray[i];
+
+        stream->printf("Task %lu: %s\r\n", (unsigned long)taskStatus->xTaskNumber, taskStatus->pcTaskName);
+        stream->printf("    State: %s\r\n", getTaskStateString(taskStatus->eCurrentState));  // Use the function to display the task state
+        stream->printf("    Base Priority: %lu\r\n", (unsigned long)taskStatus->uxBasePriority);
+        stream->printf("    Current Priority: %lu\r\n", (unsigned long)taskStatus->uxCurrentPriority);
+        stream->printf("    Handle: %p\r\n", taskStatus->xHandle);
+        stream->printf("    Stack: %p\r\n", taskStatus->pxStackBase);
+        stream->printf("    Stack High Water Mark (Unused): %lu bytes\r\n", (unsigned long)taskStatus->usStackHighWaterMark);
+        stream->printf("    Runtime Counter: %lu\r\n", (unsigned long)taskStatus->ulRunTimeCounter);
+
+        #if ( configGENERATE_RUN_TIME_STATS == 1 )
+        // If FreeRTOS runtime stats are enabled, print task CPU usage percentage
+        char cpuUsageBuffer[50];
+        vTaskGetRunTimeStats(cpuUsageBuffer);  // Fill the buffer with CPU stats
+        stream->printf("    CPU Usage:\r\n%s", cpuUsageBuffer);
+        #endif
+
+        // Add additional indentation for better structure
+        stream->printf("\r\n");  // Separate each task block
+    }
+
+    // Free allocated memory
+    vPortFree(taskStatusArray);
 }
 
 static uint32_t getDeviceType()
@@ -1727,6 +1787,7 @@ void SimpleShell::help_command( string parameters, StreamOutput *stream )
     stream->printf("Commands:\r\n");
     stream->printf("version\r\n");
     stream->printf("mem [-v]\r\n");
+    stream->printf("task [-v]\r\n");
     stream->printf("ls [-s] [-e] [folder]\r\n");
     stream->printf("cd folder\r\n");
     stream->printf("pwd\r\n");
