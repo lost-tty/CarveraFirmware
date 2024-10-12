@@ -97,6 +97,7 @@ private:
     typedef struct {
         const char* name;
         void (SimpleShell::*command)(std::string parameters, StreamOutput* stream);
+        const char *help;
     } ptentry_t;
 
     static const ptentry_t commands_table[];
