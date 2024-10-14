@@ -1685,16 +1685,14 @@ void SimpleShell::test_command( string parameters, StreamOutput *stream)
         uint32_t sps= strtol(stepspersec.c_str(), NULL, 10);
         sps= std::max(sps, 1UL);
 
-        uint32_t delayus= 1000000.0F / sps;
+        uint32_t delayus = 1000000.0F / sps;
         
         vTaskSuspendAll();
         for(int s= 0;s<steps;s++) {
             if(THEKERNEL.is_halted()) break;
             THEROBOT.actuators[a]->manual_step(dir);
 
-            uint32_t start = us_ticker_read();
-            while ((us_ticker_read() - start) < delayus) 
-                ;
+            wait_us(delayus);
         }
         xTaskResumeAll();
 
