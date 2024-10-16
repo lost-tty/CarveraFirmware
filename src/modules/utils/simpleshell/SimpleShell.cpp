@@ -184,58 +184,6 @@ void SimpleShell::system_reset_callback()
 void SimpleShell::on_module_loaded()
 {
     this->register_for_event(ON_CONSOLE_LINE_RECEIVED);
-    this->register_for_event(ON_GCODE_RECEIVED);
-}
-
-void SimpleShell::on_gcode_received(void *argument)
-{
-    Gcode *gcode = static_cast<Gcode *>(argument);
-    string args = get_arguments(gcode->get_command());
-
-    if (gcode->has_m) {
-        if (gcode->m == 331) { // change to vacuum mode
-			THEKERNEL.set_vacuum_mode(true);
-		    // get spindle state
-		    struct spindle_status ss;
-		    bool ok = PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss);
-		    if (ok) {
-		    	if (ss.state) {
-	        		// open vacuum
-	        		bool b = true;
-	                PublicData::set_value( switch_checksum, vacuum_checksum, state_checksum, &b );
-
-		    	}
-        	}
-		    // turn on vacuum mode
-			gcode->stream->printf("turning vacuum mode on\r\n");
-		} else if (gcode->m == 332) { // change to CNC mode
-			THEKERNEL.set_vacuum_mode(false);
-		    // get spindle state
-		    struct spindle_status ss;
-		    bool ok = PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss);
-		    if (ok) {
-		    	if (ss.state) {
-	        		// close vacuum
-	        		bool b = false;
-	                PublicData::set_value( switch_checksum, vacuum_checksum, state_checksum, &b );
-
-		    	}
-        	}
-			// turn off vacuum mode
-			gcode->stream->printf("turning vacuum mode off\r\n");
-
-		} else if (gcode->m == 333) { // turn off optional stop mode
-			THEKERNEL.set_optional_stop_mode(false);
-			// turn off optional stop mode
-			gcode->stream->printf("turning optional stop mode off\r\n");
-		} else if (gcode->m == 334) { // turn off optional stop mode
-			THEKERNEL.set_optional_stop_mode(true);
-			// turn on optional stop mode
-			gcode->stream->printf("turning optional stop mode on\r\n");
-		}
-
-        
-    }
 }
 
 bool SimpleShell::parse_command(const char *cmd, std::string args, StreamOutput *stream)

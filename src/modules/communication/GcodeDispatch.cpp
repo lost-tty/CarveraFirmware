@@ -26,6 +26,17 @@
 #include "utils.h"
 #include "LPC17xx.h"
 #include "version.h"
+#include "SpindlePublicAccess.h"
+
+#define switch_checksum              CHECKSUM("switch")
+#define state_checksum               CHECKSUM("state")
+#define state_value_checksum         CHECKSUM("state_value")
+#define spindlefan_checksum          CHECKSUM("spindlefan")
+#define vacuum_checksum              CHECKSUM("vacuum")
+#define light_checksum               CHECKSUM("light")
+#define toolsensor_checksum          CHECKSUM("toolsensor")
+#define probecharger_checksum        CHECKSUM("probecharger")
+#define air_checksum               	 CHECKSUM("air")
 
 #define panel_display_message_checksum CHECKSUM("display_message")
 #define panel_checksum             CHECKSUM("panel")
@@ -317,6 +328,52 @@ try_again:
 						new_message.stream->printf("ok\r\n");
 						return;
 					}
+
+			        case 331: // change to vacuum mode
+			        	{
+							THEKERNEL.set_vacuum_mode(true);
+						    // get spindle state
+						    struct spindle_status ss;
+						    bool ok = PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss);
+						    if (ok) {
+						    	if (ss.state) {
+					        		// open vacuum
+					        		bool b = true;
+					                PublicData::set_value( switch_checksum, vacuum_checksum, state_checksum, &b );
+
+						    	}
+				        	}
+						    // turn on vacuum mode
+							gcode->stream->printf("turning vacuum mode on\r\n");
+							return;
+						}
+					case 332: // change to CNC mode
+						{
+							THEKERNEL.set_vacuum_mode(false);
+						    // get spindle state
+						    struct spindle_status ss;
+						    bool ok = PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss);
+						    if (ok) {
+						    	if (ss.state) {
+					        		// close vacuum
+					        		bool b = false;
+					                PublicData::set_value(switch_checksum, vacuum_checksum, state_checksum, &b);
+						    	}
+				        	}
+							// turn off vacuum mode
+							gcode->stream->printf("turning vacuum mode off\r\n");
+							return;
+						}
+					case 333: // turn off optional stop mode
+						THEKERNEL.set_optional_stop_mode(false);
+						// turn off optional stop mode
+						gcode->stream->printf("turning optional stop mode off\r\n");
+						return;
+					case 334: // turn off optional stop mode
+						THEKERNEL.set_optional_stop_mode(true);
+						// turn on optional stop mode
+						gcode->stream->printf("turning optional stop mode on\r\n");
+						return;
 				}
 			}
 

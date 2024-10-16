@@ -32,7 +32,6 @@ public:
 
     void on_module_loaded();
     void on_console_line_received( void *argument );
-    void on_gcode_received(void *argument);
     bool parse_command(const char *cmd, string args, StreamOutput *stream);
     void print_mem(StreamOutput *stream) { mem_command("", stream); }
     void version_command(string parameters, StreamOutput *stream );
