@@ -25,11 +25,5 @@ public:
 
     uint8_t get_modal_command() const { return modal_group_1<4 ? modal_group_1 : 0; }
 private:
-    std::string upload_filename;
-    FILE *upload_fd;
-    StreamOutput* upload_stream{nullptr};
     uint8_t modal_group_1;
-    struct {
-        bool uploading: 1;
-    };
 };

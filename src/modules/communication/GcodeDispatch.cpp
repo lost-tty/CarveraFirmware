@@ -41,7 +41,6 @@ static bool is_allowed_mcode(int m) {
 
 void GcodeDispatch::init()
 {
-    uploading = false;
     modal_group_1= 0;
 }
 
@@ -157,269 +156,216 @@ try_again:
 				possible_command = possible_command.substr(cmd_pos);
 			}
 
-			if(!uploading || upload_stream != new_message.stream) {
 				// Prepare gcode for dispatch
-				// new_message.stream->printf("GCode1: %s!\n", single_command.c_str());
-				Gcode *gcode = new Gcode(single_command, new_message.stream, false, new_message.line);
+			// new_message.stream->printf("GCode1: %s!\n", single_command.c_str());
+			Gcode *gcode = new Gcode(single_command, new_message.stream, false, new_message.line);
 
-				if ( first_char == '#'){
-					gcode->set_variable_value();
-				}
+			if ( first_char == '#'){
+				gcode->set_variable_value();
+			}
 
-				if ( first_char == '#'){
-					gcode->set_variable_value();
-				}
+			if ( first_char == '#'){
+				gcode->set_variable_value();
+			}
 
-				if(THEKERNEL.is_halted()) {
-					// we ignore all commands until M999, unless it is in the exceptions list (like M105 get temp)
-					if(gcode->has_m && gcode->m == 999) {
-						if(THEKERNEL.is_halted()) {
-							THEKERNEL.call_event(ON_HALT, (void *)1); // clears on_halt
-							new_message.stream->printf("WARNING: After HALT you should HOME as position is currently unknown\n");
-						}
-						new_message.stream->printf("ok\n");
-						delete gcode;
-						return;
-
-					}else if(!is_allowed_mcode(gcode->m)) {
-						// ignore everything, return error string to host
-						if(THEKERNEL.is_grbl_mode()) {
-							new_message.stream->printf("error:Alarm lock\n");
-
-						}else{
-							new_message.stream->printf("!!\r\n");
-						}
-						delete gcode;
-						return;
+			if(THEKERNEL.is_halted()) {
+				// we ignore all commands until M999, unless it is in the exceptions list (like M105 get temp)
+				if(gcode->has_m && gcode->m == 999) {
+					if(THEKERNEL.is_halted()) {
+						THEKERNEL.call_event(ON_HALT, (void *)1); // clears on_halt
+						new_message.stream->printf("WARNING: After HALT you should HOME as position is currently unknown\n");
 					}
-				}
+					new_message.stream->printf("ok\n");
+					delete gcode;
+					return;
 
-				if(gcode->has_g) {
-					if(gcode->g == 53) { // G53 makes next movement command use machine coordinates
-						// this is ugly to implement as there may or may not be a G0/G1 on the same line
-						// valid version seem to include G53 G0 X1 Y2 Z3 G53 X1 Y2
-						if(possible_command.empty()) {
-							// use last gcode G1 or G0 if none on the line, and pass through as if it was a G0/G1
-							// TODO it is really an error if the last is not G0 thru G3
-							if(modal_group_1 > 3) {
-								delete gcode;
-								new_message.stream->printf("ok - Invalid G53\r\n");
-								return;
-							}
-							// use last G0 or G1
-							gcode->g= modal_group_1;
-
-						}else{
-							delete gcode;
-							// extract next G0/G1 from the rest of the line, ignore if it is not one of these
-							gcode = new Gcode(possible_command, new_message.stream);
-							possible_command= "";
-							if(!gcode->has_g || gcode->g > 1) {
-								// not G0 or G1 so ignore it as it is invalid
-								delete gcode;
-								new_message.stream->printf("ok - Invalid G53\r\n");
-								return;
-							}
-						}
-						// makes it handle the parameters as a machine position
-						THEROBOT.next_command_is_MCS= true;
-
-					} else if(gcode->g == 1) {
-						// optimize G1 to send ok immediately (one per line) before it is planned
-						if(!sent_ok) {
-							sent_ok= true;
-							new_message.stream->printf("ok\n");
-						}
-					}
-
-					// remember last modal group 1 code
-					if(gcode->g < 4) {
-						modal_group_1= gcode->g;
-					}
-				}
-
-				if(gcode->has_m) {
-					switch (gcode->m) {
-						case 28: // start upload command
-							delete gcode;
-
-							this->upload_filename = "/sd/" + single_command.substr(4); // rest of line is filename
-							// open file
-							upload_fd = fopen(this->upload_filename.c_str(), "w");
-							if(upload_fd != NULL) {
-								this->uploading = true;
-								new_message.stream->printf("Writing to file: %s\r\nok\r\n", this->upload_filename.c_str());
-							} else {
-								new_message.stream->printf("open failed, File: %s.\r\nok\r\n", this->upload_filename.c_str());
-							}
-
-							// only save stuff from this stream
-							upload_stream= new_message.stream;
-
-							//printf("Start Uploading file: %s, %p\n", upload_filename.c_str(), upload_fd);
-							continue;
-
-						case 30: // end of program
-							if(!THEKERNEL.is_grbl_mode()) break; // Special case M30 as it is also delete sd card file so only do this if in grbl mode
-							// fall through
-						case 2:
-							{
-								modal_group_1= 1; // set to G1
-								// issue M5 and M9 in case spindle and coolant are being used
-								Gcode gc1("M5", &StreamOutput::NullStream);
-								THEKERNEL.call_event(ON_GCODE_RECEIVED, &gc1);
-								Gcode gc2("M9", &StreamOutput::NullStream);
-								THEKERNEL.call_event(ON_GCODE_RECEIVED, &gc2);
-							}
-							break;
-
-						case 112: // emergency stop, do the best we can with this
-							// this is also handled out-of-band (it is now with ^X in the serial driver)
-							// disables heaters and motors, ignores further incoming Gcode and clears block queue
-							THEKERNEL.call_event(ON_HALT, nullptr);
-							THEKERNEL.set_halt_reason(MANUAL);
-							printk("ok Emergency Stop Requested - reset or M999 required to exit HALT state\r\n");
-							delete gcode;
-							return;
-
-						case 115: { // M115 Get firmware version and capabilities
-							Version vers;
-
-							new_message.stream->printf("FIRMWARE_NAME:Smoothieware, FIRMWARE_URL:http%%3A//smoothieware.org, X-SOURCE_CODE_URL:https://github.com/Smoothieware/Smoothieware, FIRMWARE_VERSION:%s, X-FIRMWARE_BUILD_DATE:%s, X-SYSTEM_CLOCK:%ldMHz, X-AXES:%d, X-GRBL_MODE:%d", vers.get_build(), vers.get_build_date(), SystemCoreClock / 1000000, MAX_ROBOT_ACTUATORS, THEKERNEL.is_grbl_mode());
-
-							#ifdef CNC
-							new_message.stream->printf(", X-CNC:1");
-							#else
-							new_message.stream->printf(", X-CNC:0");
-							#endif
-
-							#ifdef DISABLEMSD
-							new_message.stream->printf(", X-MSD:0");
-							#else
-							new_message.stream->printf(", X-MSD:1");
-							#endif
-
-							if(THEKERNEL.is_bad_mcu()) {
-								new_message.stream->printf(", X-WARNING:deprecated_MCU");
-							}
-							new_message.stream->printf("\nok\n");
-							return;
-						}
-
-						case 117: // M117 is a special non compliant Gcode as it allows arbitrary text on the line following the command
-						{    // concatenate the command again and send to panel if enabled
-							string str= single_command.substr(4) + possible_command;
-							PublicData::set_value( panel_checksum, panel_display_message_checksum, &str );
-							delete gcode;
-							new_message.stream->printf("ok\r\n");
-							return;
-						}
-
-						case 1000: // M1000 is a special command that will pass thru the raw lowercased command to the simpleshell (for hosts that do not allow such things)
-						{
-							// reconstruct entire command line again
-							string str= single_command.substr(5) + possible_command;
-							while(is_whitespace(str.front())){ str= str.substr(1); } // strip leading whitespace
-
-							delete gcode;
-
-							if(str.empty()) {
-								simpleshell.parse_command("help", "", new_message.stream);
-
-							}else{
-								string args= lc(str);
-								string cmd = shift_parameter(args);
-								// find command and execute it
-								if(!simpleshell.parse_command(cmd.c_str(), args, new_message.stream)) {
-									new_message.stream->printf("Command not found: %s\n", cmd.c_str());
-								}
-							}
-
-							new_message.stream->printf("ok\r\n");
-							return;
-						}
-					}
-				}
-
-				// new_message.stream->printf("dispatch gcode command: '%s' G%d M%d...", gcode->get_command(), gcode->g, gcode->m);
-				//Dispatch message!
-				THEKERNEL.call_event(ON_GCODE_RECEIVED, gcode );
-
-				if (gcode->is_error) {
-					// report error
+				}else if(!is_allowed_mcode(gcode->m)) {
+					// ignore everything, return error string to host
 					if(THEKERNEL.is_grbl_mode()) {
-						new_message.stream->printf("error:");
-					}else{
-						new_message.stream->printf("Error: ");
-					}
-
-					if(!gcode->txt_after_ok.empty()) {
-						new_message.stream->printf("%s\r\n", gcode->txt_after_ok.c_str());
-						gcode->txt_after_ok.clear();
+						new_message.stream->printf("error:Alarm lock\n");
 
 					}else{
-						new_message.stream->printf("unknown\r\n");
+						new_message.stream->printf("!!\r\n");
 					}
-
-					// we cannot continue safely after an error so we enter HALT state
-					new_message.stream->printf("Entering Alarm/Halt state\n");
-					THEKERNEL.call_event(ON_HALT, nullptr);
-
-				}else if(!sent_ok) {
-
-					if(gcode->add_nl)
-						new_message.stream->printf("\r\n");
-
-					if(!gcode->txt_after_ok.empty()) {
-						new_message.stream->printf("ok %s\r\n", gcode->txt_after_ok.c_str());
-						gcode->txt_after_ok.clear();
-
-					} else {
-						if(THEKERNEL.is_ok_per_line() || THEKERNEL.is_grbl_mode()) {
-							// only send ok once per line if this is a multi g code line send ok on the last one
-							if(possible_command.empty())
-								new_message.stream->printf("ok\r\n");
-						} else {
-							// maybe should do the above for all hosts?
-							new_message.stream->printf("ok\r\n");
-						}
-					}
-				}
-
-				delete gcode;
-
-			} else {
-				// we are uploading and it is the upload stream so so save it
-				if(single_command.substr(0, 3) == "M29") {
-					// done uploading, close file
-					fclose(upload_fd);
-					upload_fd = NULL;
-					uploading = false;
-					upload_filename.clear();
-					upload_stream= nullptr;
-					new_message.stream->printf("Done saving file.\r\nok\r\n");
-					continue;
-				}
-
-				if(upload_fd == NULL) {
-					// error detected writing to file so discard everything until it stops
-					new_message.stream->printf("ok\r\n");
-					continue;
-				}
-
-				single_command.append("\n");
-				if(fwrite(single_command.c_str(), 1, single_command.size(), upload_fd) != single_command.size()) {
-					// error writing to file
-					new_message.stream->printf("Error:error writing to file.\r\n");
-					fclose(upload_fd);
-					upload_fd = NULL;
-					continue;
-
-				} else {
-					 new_message.stream->printf("ok\r\n");
-					//printf("uploading file write ok\n");
+					delete gcode;
+					return;
 				}
 			}
+
+			if(gcode->has_g) {
+				if(gcode->g == 53) { // G53 makes next movement command use machine coordinates
+					// this is ugly to implement as there may or may not be a G0/G1 on the same line
+					// valid version seem to include G53 G0 X1 Y2 Z3 G53 X1 Y2
+					if(possible_command.empty()) {
+						// use last gcode G1 or G0 if none on the line, and pass through as if it was a G0/G1
+						// TODO it is really an error if the last is not G0 thru G3
+						if(modal_group_1 > 3) {
+							delete gcode;
+							new_message.stream->printf("ok - Invalid G53\r\n");
+							return;
+						}
+						// use last G0 or G1
+						gcode->g= modal_group_1;
+
+					}else{
+						delete gcode;
+						// extract next G0/G1 from the rest of the line, ignore if it is not one of these
+						gcode = new Gcode(possible_command, new_message.stream);
+						possible_command= "";
+						if(!gcode->has_g || gcode->g > 1) {
+							// not G0 or G1 so ignore it as it is invalid
+							delete gcode;
+							new_message.stream->printf("ok - Invalid G53\r\n");
+							return;
+						}
+					}
+					// makes it handle the parameters as a machine position
+					THEROBOT.next_command_is_MCS= true;
+
+				} else if(gcode->g == 1) {
+					// optimize G1 to send ok immediately (one per line) before it is planned
+					if(!sent_ok) {
+						sent_ok= true;
+						new_message.stream->printf("ok\n");
+					}
+				}
+
+				// remember last modal group 1 code
+				if(gcode->g < 4) {
+					modal_group_1= gcode->g;
+				}
+			}
+
+			if(gcode->has_m) {
+				switch (gcode->m) {
+					case 30: // end of program
+						if(!THEKERNEL.is_grbl_mode()) break; // Special case M30 as it is also delete sd card file so only do this if in grbl mode
+						// fall through
+					case 2:
+						{
+							modal_group_1= 1; // set to G1
+							// issue M5 and M9 in case spindle and coolant are being used
+							Gcode gc1("M5", &StreamOutput::NullStream);
+							THEKERNEL.call_event(ON_GCODE_RECEIVED, &gc1);
+							Gcode gc2("M9", &StreamOutput::NullStream);
+							THEKERNEL.call_event(ON_GCODE_RECEIVED, &gc2);
+						}
+						break;
+
+					case 112: // emergency stop, do the best we can with this
+						// this is also handled out-of-band (it is now with ^X in the serial driver)
+						// disables heaters and motors, ignores further incoming Gcode and clears block queue
+						THEKERNEL.call_event(ON_HALT, nullptr);
+						THEKERNEL.set_halt_reason(MANUAL);
+						printk("ok Emergency Stop Requested - reset or M999 required to exit HALT state\r\n");
+						delete gcode;
+						return;
+
+					case 115: { // M115 Get firmware version and capabilities
+						Version vers;
+
+						new_message.stream->printf("FIRMWARE_NAME:Smoothieware, FIRMWARE_URL:http%%3A//smoothieware.org, X-SOURCE_CODE_URL:https://github.com/Smoothieware/Smoothieware, FIRMWARE_VERSION:%s, X-FIRMWARE_BUILD_DATE:%s, X-SYSTEM_CLOCK:%ldMHz, X-AXES:%d, X-GRBL_MODE:%d", vers.get_build(), vers.get_build_date(), SystemCoreClock / 1000000, MAX_ROBOT_ACTUATORS, THEKERNEL.is_grbl_mode());
+
+						#ifdef CNC
+						new_message.stream->printf(", X-CNC:1");
+						#else
+						new_message.stream->printf(", X-CNC:0");
+						#endif
+
+						#ifdef DISABLEMSD
+						new_message.stream->printf(", X-MSD:0");
+						#else
+						new_message.stream->printf(", X-MSD:1");
+						#endif
+
+						if(THEKERNEL.is_bad_mcu()) {
+							new_message.stream->printf(", X-WARNING:deprecated_MCU");
+						}
+						new_message.stream->printf("\nok\n");
+						return;
+					}
+
+					case 117: // M117 is a special non compliant Gcode as it allows arbitrary text on the line following the command
+					{    // concatenate the command again and send to panel if enabled
+						string str= single_command.substr(4) + possible_command;
+						PublicData::set_value( panel_checksum, panel_display_message_checksum, &str );
+						delete gcode;
+						new_message.stream->printf("ok\r\n");
+						return;
+					}
+
+					case 1000: // M1000 is a special command that will pass thru the raw lowercased command to the simpleshell (for hosts that do not allow such things)
+					{
+						// reconstruct entire command line again
+						string str= single_command.substr(5) + possible_command;
+						while(is_whitespace(str.front())){ str= str.substr(1); } // strip leading whitespace
+
+						delete gcode;
+
+						if(str.empty()) {
+							simpleshell.parse_command("help", "", new_message.stream);
+
+						}else{
+							string args= lc(str);
+							string cmd = shift_parameter(args);
+							// find command and execute it
+							if(!simpleshell.parse_command(cmd.c_str(), args, new_message.stream)) {
+								new_message.stream->printf("Command not found: %s\n", cmd.c_str());
+							}
+						}
+
+						new_message.stream->printf("ok\r\n");
+						return;
+					}
+				}
+			}
+
+			// new_message.stream->printf("dispatch gcode command: '%s' G%d M%d...", gcode->get_command(), gcode->g, gcode->m);
+			//Dispatch message!
+			THEKERNEL.call_event(ON_GCODE_RECEIVED, gcode );
+
+			if (gcode->is_error) {
+				// report error
+				if(THEKERNEL.is_grbl_mode()) {
+					new_message.stream->printf("error:");
+				}else{
+					new_message.stream->printf("Error: ");
+				}
+
+				if(!gcode->txt_after_ok.empty()) {
+					new_message.stream->printf("%s\r\n", gcode->txt_after_ok.c_str());
+					gcode->txt_after_ok.clear();
+
+				}else{
+					new_message.stream->printf("unknown\r\n");
+				}
+
+				// we cannot continue safely after an error so we enter HALT state
+				new_message.stream->printf("Entering Alarm/Halt state\n");
+				THEKERNEL.call_event(ON_HALT, nullptr);
+
+			}else if(!sent_ok) {
+
+				if(gcode->add_nl)
+					new_message.stream->printf("\r\n");
+
+				if(!gcode->txt_after_ok.empty()) {
+					new_message.stream->printf("ok %s\r\n", gcode->txt_after_ok.c_str());
+					gcode->txt_after_ok.clear();
+
+				} else {
+					if(THEKERNEL.is_ok_per_line() || THEKERNEL.is_grbl_mode()) {
+						// only send ok once per line if this is a multi g code line send ok on the last one
+						if(possible_command.empty())
+							new_message.stream->printf("ok\r\n");
+					} else {
+						// maybe should do the above for all hosts?
+						new_message.stream->printf("ok\r\n");
+					}
+				}
+			}		
+
+			delete gcode;
 		}
     } else if ( first_char == ';' || first_char == '(' || first_char == '\n' || first_char == '\r' ) {
         // Ignore comments and blank lines
