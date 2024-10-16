@@ -305,6 +305,10 @@ try_again:
 						return;
 					}
 
+					case 118:
+ 			           printk("%s\n", gcode->get_command() + 4);
+ 			           return;
+
 					case 1000: // M1000 is a special command that will pass thru the raw lowercased command to the simpleshell (for hosts that do not allow such things)
 					{
 						// reconstruct entire command line again

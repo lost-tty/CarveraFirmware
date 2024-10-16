@@ -131,9 +131,6 @@ void Player::on_gcode_received(void *argument)
             if (THEKERNEL.get_optional_stop_mode()){
                 this->suspend_command((gcode->subcode == 1)?"h":"", gcode->stream);
             }
-        } else if (gcode->m == 118) { // print remainder of string to console
-            printk("%s \n", gcode->get_command() + 4);
-
         }
     } else if(gcode->has_g) {
         if (gcode->g == 28) { // homing cancels suspend
