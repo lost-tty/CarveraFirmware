@@ -29,7 +29,6 @@ class WifiProvider : public Module, public StreamOutput
 {
 public:
     void on_module_loaded();
-    void on_gcode_received(void *argument);
     void on_main_loop( void* argument );
     void on_second_tick(void* argument);
     void on_idle(void* argument);

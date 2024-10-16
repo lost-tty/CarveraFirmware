@@ -92,7 +92,6 @@ void WifiProvider::on_module_loaded()
 
     // Register for events
     this->register_for_event(ON_IDLE);
-    this->register_for_event(ON_GCODE_RECEIVED);
     this->register_for_event(ON_MAIN_LOOP);
     this->register_for_event(ON_SECOND_TICK);
     this->register_for_event(ON_GET_PUBLIC_DATA);
@@ -369,106 +368,6 @@ bool WifiProvider::has_char(char letter)
         index = this->buffer.next_block_index(index);
     }
     return false;
-}
-
-void WifiProvider::on_gcode_received(void* argument)
-{
-    Gcode* gcode = static_cast<Gcode*>(argument);
-    if (gcode->has_m) {
-        if (gcode->m == 481) {
-            // Basic WiFi operations
-            if (gcode->subcode == 1) {
-                // Reset WiFi module
-                wifi_init_ok = false;
-                init_wifi_module(true);
-            } else if (gcode->subcode == 2) {
-                // Set operation mode to STA+AP
-                set_wifi_op_mode(3);
-            } else if (gcode->subcode == 3) {
-                // Connect to AP
-                u8 connection_state;
-                printk("M8266WIFI_SPI_Query_Connection...\n");
-                if (M8266WIFI_SPI_Query_Connection(tcp_link_no, NULL, &connection_state, NULL, NULL, NULL, NULL) == 0) {
-                    printk("M8266WIFI_SPI_Query_Connection ERROR!\n");
-                } else {
-                    printk("connection_state : %d\n", connection_state);
-                }
-            } else if (gcode->subcode == 4) {
-                // Test data reception
-                gcode->stream->printf("M8266WIFI_SPI_Has_DataReceived...\n");
-                if (M8266WIFI_SPI_Has_DataReceived()) {
-                    gcode->stream->printf("Data Received, receive_wifi_data...\n");
-                    gcode->stream->printf("Data Received complete!\n");
-                }
-            } else if (gcode->subcode == 6) {
-                // Test broadcast address calculation
-                char ip_addr[16] = "192.168.1.2";
-                char netmask[16] = "255.255.255.0";
-                char broadcast[16];
-                get_broadcast_from_ip_and_netmask(broadcast, ip_addr, netmask);
-                gcode->stream->printf("broadcast: %s\n", broadcast);
-            }
-        } else if (gcode->m == 482) {
-            // Query STA parameters
-            u16 status = 0;
-            char param[64];
-            u8 param_len = 0;
-            memset(param, 0, sizeof(param));
-            STA_PARAM_TYPE param_type;
-            switch (gcode->subcode) {
-                case 0: param_type = STA_PARAM_TYPE_SSID; break;
-                case 1: param_type = STA_PARAM_TYPE_PASSWORD; break;
-                case 2: param_type = STA_PARAM_TYPE_CHANNEL; break;
-                case 3: param_type = STA_PARAM_TYPE_HOSTNAME; break;
-                case 4: param_type = STA_PARAM_TYPE_MAC; break;
-                case 5: param_type = STA_PARAM_TYPE_IP_ADDR; break;
-                case 6: param_type = STA_PARAM_TYPE_GATEWAY_ADDR; break;
-                case 7: param_type = STA_PARAM_TYPE_NETMASK_ADDR; break;
-                default: param_type = STA_PARAM_TYPE_SSID;
-            }
-            if (M8266WIFI_SPI_Query_STA_Param(param_type, (u8*)param, &param_len, &status) == 0) {
-                printk("Query WiFi STA parameters ERROR!\n");
-            } else {
-                if (param_type == STA_PARAM_TYPE_CHANNEL) {
-                    printk("STA param[%d]: %d\n", gcode->subcode, *param);
-                } else if (param_type == STA_PARAM_TYPE_MAC) {
-                    printk("STA param[%d]: %d\n", gcode->subcode, param_len);
-                } else {
-                    printk("STA param[%d]: %s\n", gcode->subcode, param);
-                }
-            }
-        } else if (gcode->m == 483) {
-            // Query AP parameters
-            u16 status = 0;
-            char param[64];
-            u8 param_len = 0;
-            memset(param, 0, sizeof(param));
-            AP_PARAM_TYPE param_type;
-            switch (gcode->subcode) {
-                case 0: param_type = AP_PARAM_TYPE_SSID; break;
-                case 1: param_type = AP_PARAM_TYPE_PASSWORD; break;
-                case 2: param_type = AP_PARAM_TYPE_CHANNEL; break;
-                case 3: param_type = AP_PARAM_TYPE_AUTHMODE; break;
-                case 4: param_type = AP_PARAM_TYPE_IP_ADDR; break;
-                case 5: param_type = AP_PARAM_TYPE_GATEWAY_ADDR; break;
-                case 6: param_type = AP_PARAM_TYPE_NETMASK_ADDR; break;
-                case 7: param_type = AP_PARAM_TYPE_PHY_MODE; break;
-                default: param_type = AP_PARAM_TYPE_SSID;
-            }
-            if (M8266WIFI_SPI_Query_AP_Param(param_type, (u8*)param, &param_len, &status) == 0) {
-                printk("Query WiFi AP parameters ERROR!\n");
-            } else {
-                if (param_type == AP_PARAM_TYPE_CHANNEL || param_type == AP_PARAM_TYPE_AUTHMODE || param_type == AP_PARAM_TYPE_PHY_MODE) {
-                    printk("AP param[%d]: %d\n", gcode->subcode, *param);
-                } else {
-                    printk("AP param[%d]: %s\n", gcode->subcode, param);
-                }
-            }
-        } else if (gcode->m == 489) {
-            // Query WiFi status
-            query_wifi_status();
-        }
-    }
 }
 
 void WifiProvider::set_wifi_op_mode(u8 op_mode)
