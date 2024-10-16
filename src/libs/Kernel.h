@@ -104,8 +104,6 @@ class Kernel {
 
         void init();
 
-        const char* config_override_filename(){ return "/sd/config-override"; }
-
         void printk(const char* format, ...) __attribute__ ((format(printf, 2, 3)));
         void vprintk(const char* format, va_list args);
 

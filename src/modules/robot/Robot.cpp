@@ -927,7 +927,6 @@ void Robot::on_gcode_received(void *argument)
                 THECONVEYOR.wait_for_idle();
                 break;
 
-            case 500: // M500 saves some volatile settings to config override file
             case 503: { // M503 just prints the settings
                 gcode->stream->printf(";Steps per unit:\nM92 ");
                 for (int i = 0; i < n_motors; ++i) {

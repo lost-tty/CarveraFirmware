@@ -76,9 +76,6 @@ private:
     void sleep_command( string parameters, StreamOutput *stream);
     void power_command( string parameters, StreamOutput *stream);
 
-    void load_command( string parameters, StreamOutput *stream);
-    void save_command( string parameters, StreamOutput *stream);
-
     void remount_command( string parameters, StreamOutput *stream);
 
     void test_command( string parameters, StreamOutput *stream);
