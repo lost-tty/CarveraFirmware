@@ -129,131 +129,14 @@ void Player::on_gcode_received(void *argument)
     if (gcode->has_m) {
         if (gcode->m == 1) { //optiional stop
             if (THEKERNEL.get_optional_stop_mode()){
-            this->suspend_command((gcode->subcode == 1)?"h":"", gcode->stream);
+                this->suspend_command((gcode->subcode == 1)?"h":"", gcode->stream);
             }
-
-        }      
-        else if (gcode->m == 21) { // Dummy code; makes Octoprint happy -- supposed to initialize SD card
-            mounter.remount();
-            gcode->stream->printf("SD card ok\r\n");
-
-        } else if (gcode->m == 23) { // select file
-            this->filename = "/sd/" + args; // filename is whatever is in args
-            this->current_stream = nullptr;
-
-            if(this->current_file_handler != NULL) {
-                this->playing_file = false;
-                fclose(this->current_file_handler);
-            }
-            this->current_file_handler = fopen( this->filename.c_str(), "r");
-
-            if(this->current_file_handler == NULL) {
-                gcode->stream->printf("file.open failed: %s\r\n", this->filename.c_str());
-                return;
-
-            } else {
-                // get size of file
-                int result = fseek(this->current_file_handler, 0, SEEK_END);
-                if (0 != result) {
-                    this->file_size = 0;
-                } else {
-                    this->file_size = ftell(this->current_file_handler);
-                    fseek(this->current_file_handler, 0, SEEK_SET);
-                }
-                gcode->stream->printf("File opened:%s Size:%ld\r\n", this->filename.c_str(), this->file_size);
-                gcode->stream->printf("File selected\r\n");
-            }
-
-
-            this->played_cnt = 0;
-            this->played_lines = 0;
-            this->start_time = xTaskGetTickCount();
-            this->playing_lines = 0;
-            this->goto_line = 0;
-
-        } else if (gcode->m == 24) { // start print
-            if (this->current_file_handler != NULL) {
-                this->playing_file = true;
-                // this would be a problem if the stream goes away before the file has finished,
-                // so we attach it to the kernel stream, however network connections from pronterface
-                // do not connect to the kernel streams so won't see this FIXME
-                this->reply_stream = &THEKERNEL.streams;
-            }
-
-        } else if (gcode->m == 25) { // pause print
-            this->playing_file = false;
-
-        } else if (gcode->m == 26) { // Reset print. Slightly different than M26 in Marlin and the rest
-            if(this->current_file_handler != NULL) {
-                string currentfn = this->filename.c_str();
-                unsigned long old_size = this->file_size;
-
-                // abort the print
-                abort_command("", gcode->stream);
-
-                if(!currentfn.empty()) {
-                    // reload the last file opened
-                    this->current_file_handler = fopen(currentfn.c_str() , "r");
-
-                    if(this->current_file_handler == NULL) {
-                        gcode->stream->printf("file.open failed: %s\r\n", currentfn.c_str());
-                    } else {
-                        this->filename = currentfn;
-                        this->file_size = old_size;
-                        this->current_stream = nullptr;
-                    }
-                }
-            } else {
-                gcode->stream->printf("No file loaded\r\n");
-            }
-
-        } else if (gcode->m == 27) { // report print progress, in format used by Marlin
-            progress_command("-b", gcode->stream);
-
-        } else if (gcode->m == 32) { // select file and start print
-            // Get filename
-            this->filename = "/sd/" + args; // filename is whatever is in args including spaces
-            this->current_stream = nullptr;
-
-            if(this->current_file_handler != NULL) {
-                this->playing_file = false;
-                fclose(this->current_file_handler);
-            }
-
-            this->current_file_handler = fopen( this->filename.c_str(), "r");
-            if(this->current_file_handler == NULL) {
-                gcode->stream->printf("file.open failed: %s\r\n", this->filename.c_str());
-            } else {
-                this->playing_file = true;
-
-                // get size of file
-                int result = fseek(this->current_file_handler, 0, SEEK_END);
-                if (0 != result) {
-                        file_size = 0;
-                } else {
-                        file_size = ftell(this->current_file_handler);
-                        fseek(this->current_file_handler, 0, SEEK_SET);
-                }
-            }
-
-            this->played_cnt = 0;
-            this->played_lines = 0;
-            this->start_time = xTaskGetTickCount();
-            this->playing_lines = 0;
-            this->goto_line = 0;
-
         } else if (gcode->m == 118) { // print remainder of string to console
             printk("%s \n", gcode->get_command() + 4);
 
-        } else if (gcode->m == 600) { // suspend print, Not entirely Marlin compliant, M600.1 will leave the heaters on
-            this->suspend_command((gcode->subcode == 1)?"h":"", gcode->stream);
-
-        } else if (gcode->m == 601) { // resume print
-            this->resume_command("", gcode->stream);
         }
-
-    }else if(gcode->has_g) {
-        if(gcode->g == 28) { // homing cancels suspend
+    } else if(gcode->has_g) {
+        if (gcode->g == 28) { // homing cancels suspend
             if (THEKERNEL.is_suspending()) {
                 // clean up
             	THEKERNEL.set_suspending(false);
