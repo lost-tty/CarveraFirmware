@@ -11,6 +11,7 @@
 #include <cstdint>
 #include "ActuatorCoordinates.h"
 
+#pragma pack(push, 1)
 class __attribute__((packed)) Block {
     public:
         Block();
@@ -89,3 +90,5 @@ class __attribute__((packed)) Block {
             uint16_t s_value:12;                 // for laser 1.11 Fixed point
         };
 };
+#pragma pack(pop)
+
