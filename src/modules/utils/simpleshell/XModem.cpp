@@ -335,8 +335,10 @@ bool XModem::upload(const std::string& filename, StreamOutput* stream) {
 					goto upload_error;	
 				}
 
-				strncpy(md5_str, recv_buff, 32);
-				fwrite(md5_str, sizeof(char), 32, fd_md5);
+				if (fd_md5 != NULL) {
+					strncpy(md5_str, recv_buff, 32);
+					fwrite(md5_str, sizeof(char), 32, fd_md5);
+				}
 
 				md5_received = true;
 			} else {
