@@ -193,15 +193,7 @@ void SimpleShell::on_gcode_received(void *argument)
     string args = get_arguments(gcode->get_command());
 
     if (gcode->has_m) {
-        if (gcode->m == 20) { // list sd card
-            gcode->stream->printf("Begin file list\r\n");
-            ls_command("/sd", gcode->stream);
-            gcode->stream->printf("End file list\r\n");
-
-        } else if (gcode->m == 30) { // remove file
-            if(!args.empty() && !THEKERNEL.is_grbl_mode())
-                rm_command("/sd/" + args, gcode->stream);
-        } else if (gcode->m == 331) { // change to vacuum mode
+        if (gcode->m == 331) { // change to vacuum mode
 			THEKERNEL.set_vacuum_mode(true);
 		    // get spindle state
 		    struct spindle_status ss;
