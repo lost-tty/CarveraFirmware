@@ -22,7 +22,6 @@
 #include "ConfigValue.h"
 #include "PublicDataRequest.h"
 #include "PublicData.h"
-#include "SimpleShell.h"
 #include "utils.h"
 #include "LPC17xx.h"
 #include "version.h"
@@ -266,30 +265,6 @@ try_again:
 					case 118:
  			           printk("%s\n", gcode->get_command() + 4);
  			           return;
-
-					case 1000: // M1000 is a special command that will pass thru the raw lowercased command to the simpleshell (for hosts that do not allow such things)
-					{
-						// reconstruct entire command line again
-						string str= single_command.substr(5) + possible_command;
-						while(is_whitespace(str.front())){ str= str.substr(1); } // strip leading whitespace
-
-						delete gcode;
-
-						if(str.empty()) {
-							simpleshell.parse_command("help", "", new_message.stream);
-
-						}else{
-							string args= lc(str);
-							string cmd = shift_parameter(args);
-							// find command and execute it
-							if(!simpleshell.parse_command(cmd.c_str(), args, new_message.stream)) {
-								new_message.stream->printf("Command not found: %s\n", cmd.c_str());
-							}
-						}
-
-						new_message.stream->printf("ok\r\n");
-						return;
-					}
 
 			        case 331: // change to vacuum mode
 			        	{
