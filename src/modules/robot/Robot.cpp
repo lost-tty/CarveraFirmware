@@ -923,10 +923,6 @@ void Robot::on_gcode_received(void *argument)
                 }
                 break;
 
-            case 118:
-               printk("%s\n", gcode->get_command() + 4);
-               break;
-
             case 331: // change to vacuum mode
                 {
                     THEKERNEL.set_vacuum_mode(true);
