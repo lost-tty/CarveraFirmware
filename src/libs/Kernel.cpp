@@ -51,7 +51,6 @@
 #define base_stepping_frequency_checksum            CHECKSUM("base_stepping_frequency")
 #define microseconds_per_step_pulse_checksum        CHECKSUM("microseconds_per_step_pulse")
 #define disable_leds_checksum                       CHECKSUM("leds_disable")
-#define grbl_mode_checksum                          CHECKSUM("grbl_mode")
 #define feed_hold_enable_checksum                   CHECKSUM("enable_feed_hold")
 #define ok_per_line_checksum                        CHECKSUM("ok_per_line")
 
@@ -106,13 +105,8 @@ void Kernel::init()
     //some boards don't have leds.. TOO BAD!
     this->use_leds = !this->config->value( disable_leds_checksum )->by_default(false)->as_bool();
 
-#ifdef CNC
-    this->grbl_mode = this->config->value( grbl_mode_checksum )->by_default(true)->as_bool();
-#else
-    this->grbl_mode = this->config->value( grbl_mode_checksum )->by_default(false)->as_bool();
-#endif
 
-    this->enable_feed_hold = this->config->value( feed_hold_enable_checksum )->by_default(this->grbl_mode)->as_bool();
+    this->enable_feed_hold = this->config->value( feed_hold_enable_checksum )->by_default(true)->as_bool();
 
     // we expect ok per line now not per G code, setting this to false will return to the old (incorrect) way of ok per G code
     this->ok_per_line = this->config->value( ok_per_line_checksum )->by_default(true)->as_bool();
@@ -353,22 +347,6 @@ std::string Kernel::get_query_string()
 		if(n > sizeof(buf)) n= sizeof(buf);
 		str.append(buf, n);
 	}
-
-    // if not grbl mode get temperatures
-    if(!is_grbl_mode()) {
-        struct pad_temperature temp;
-        // scan all temperature controls
-        std::vector<struct pad_temperature> controllers;
-        bool ok = PublicData::get_value(temperature_control_checksum, poll_controls_checksum, &controllers);
-        if (ok) {
-            char buf[32];
-            for (auto &c : controllers) {
-                size_t n= snprintf(buf, sizeof(buf), "|%s:%1.1f,%1.1f", c.designator.c_str(), c.current_temperature, c.target_temperature);
-                if(n > sizeof(buf)) n= sizeof(buf);
-                str.append(buf, n);
-            }
-        }
-    }
 
     // if doing atc
     if (atc_state != ATC_NONE) {

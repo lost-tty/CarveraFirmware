@@ -260,11 +260,7 @@ void WifiProvider::on_idle(void* argument)
 void WifiProvider::halt(void) {
     THEKERNEL.call_event(ON_HALT, nullptr);
     THEKERNEL.set_halt_reason(MANUAL);
-    if (THEKERNEL.is_grbl_mode()) {
-        puts("ALARM: Abort during cycle\r\n");
-    } else {
-        puts("HALTED, M999 or $X to exit HALT state\r\n");
-    }
+    puts("ALARM: Abort during cycle\r\n");
 }
 
 void WifiProvider::on_main_loop(void* argument)

@@ -599,7 +599,7 @@ void ZProbe::coordinated_move(float x, float y, float z, float feedrate, bool re
 // issue home command
 void ZProbe::home()
 {
-    Gcode gc(THEKERNEL.is_grbl_mode() ? "G28.2" : "G28", &(StreamOutput::NullStream));
+    Gcode gc("G28.2", &(StreamOutput::NullStream));
     THEKERNEL.call_event(ON_GCODE_RECEIVED, &gc);
 }
 

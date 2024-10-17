@@ -213,7 +213,7 @@ void Robot::load_config()
 
     this->segment_z_moves     = THEKERNEL.config->value(segment_z_moves_checksum     )->by_default(true)->as_bool();
     this->save_g92            = THEKERNEL.config->value(save_g92_checksum            )->by_default(false)->as_bool();
-    this->save_g54            = THEKERNEL.config->value(save_g54_checksum            )->by_default(THEKERNEL.is_grbl_mode())->as_bool();
+    this->save_g54            = THEKERNEL.config->value(save_g54_checksum            )->by_default(true)->as_bool();
     string g92                = THEKERNEL.config->value(set_g92_checksum             )->by_default("")->as_string();
     if(!g92.empty()) {
         // optional setting for a fixed G92 offset
@@ -510,15 +510,8 @@ void Robot::on_gcode_received(void *argument)
             case 4: { // G4 Dwell
                 uint32_t delay_ms = 0;
                 if (gcode->has_letter('P')) {
-                    if(THEKERNEL.is_grbl_mode()) {
-                        // in grbl mode (and linuxcnc) P is decimal seconds
-                        float f= gcode->get_value('P');
-                        delay_ms= f * 1000.0F;
-
-                    }else{
-                        // in reprap P is milliseconds, they always have to be different!
-                        delay_ms = gcode->get_int('P');
-                    }
+                    float f= gcode->get_value('P');
+                    delay_ms= f * 1000.0F;
                 }
                 if (gcode->has_letter('S')) {
                     delay_ms += gcode->get_int('S') * 1000;
@@ -711,11 +704,10 @@ void Robot::on_gcode_received(void *argument)
     } else if( gcode->has_m) {
         switch( gcode->m ) {
             // case 0: // M0 feed hold, (M0.1 is release feed hold, except we are in feed hold)
-            //     if(THEKERNEL.is_grbl_mode()) THEKERNEL.set_feed_hold(gcode->subcode == 0);
+            //     THEKERNEL.set_feed_hold(gcode->subcode == 0);
             //     break;
 
             case 30: // M30 end of program in grbl mode (otherwise it is delete sdcard file)
-                if(!THEKERNEL.is_grbl_mode()) break;
                 // fall through
             case 2: // M2 end of program
                 current_wcs = 0;
@@ -1367,13 +1359,7 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, unsigned int
             if(!is_homed(i)) continue;
             if( (!isnan(soft_endstop_min[i]) && transformed_target[i] < soft_endstop_min[i]) || (!isnan(soft_endstop_max[i]) && transformed_target[i] > soft_endstop_max[i]) ) {
                 if(soft_endstop_halt) {
-                    if(THEKERNEL.is_grbl_mode()) {
-                        printk("error:");
-                    }else{
-                        printk("Error: ");
-                    }
-
-                    printk("Soft Endstop %c was exceeded - reset or $X or M999 required\n", i+'X');
+                    printk("error:Soft Endstop %c was exceeded - reset or $X or M999 required\n", i+'X');
                     THEKERNEL.call_event(ON_HALT, nullptr);
                     THEKERNEL.set_halt_reason(SOFT_LIMIT);
                     return false;
@@ -1384,12 +1370,7 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, unsigned int
 
                 } else {
                     // ignore it
-                    if(THEKERNEL.is_grbl_mode()) {
-                        printk("error:");
-                    }else{
-                        printk("Error: ");
-                    }
-                    printk("Soft Endstop %c was exceeded - entire move ignored\n", i+'X');
+                    printk("error:Soft Endstop %c was exceeded - entire move ignored\n", i+'X');
                     return false;
                 }
             }

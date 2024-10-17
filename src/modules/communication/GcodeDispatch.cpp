@@ -192,12 +192,7 @@ try_again:
 
 				}else if(!is_allowed_mcode(gcode->m)) {
 					// ignore everything, return error string to host
-					if(THEKERNEL.is_grbl_mode()) {
-						new_message.stream->printf("error:Alarm lock\n");
-
-					}else{
-						new_message.stream->printf("!!\r\n");
-					}
+					new_message.stream->printf("error:Alarm lock\n");
 					delete gcode;
 					return;
 				}
@@ -250,7 +245,6 @@ try_again:
 			if(gcode->has_m) {
 				switch (gcode->m) {
 					case 30: // end of program
-						if(!THEKERNEL.is_grbl_mode()) break; // Special case M30 as it is also delete sd card file so only do this if in grbl mode
 						// fall through
 					case 2:
 						{
@@ -275,7 +269,7 @@ try_again:
 					case 115: { // M115 Get firmware version and capabilities
 						Version vers;
 
-						new_message.stream->printf("FIRMWARE_NAME:Smoothieware, FIRMWARE_URL:http%%3A//smoothieware.org, X-SOURCE_CODE_URL:https://github.com/Smoothieware/Smoothieware, FIRMWARE_VERSION:%s, X-FIRMWARE_BUILD_DATE:%s, X-SYSTEM_CLOCK:%ldMHz, X-AXES:%d, X-GRBL_MODE:%d", vers.get_build(), vers.get_build_date(), SystemCoreClock / 1000000, MAX_ROBOT_ACTUATORS, THEKERNEL.is_grbl_mode());
+						new_message.stream->printf("FIRMWARE_NAME:Smoothieware, FIRMWARE_URL:http%%3A//smoothieware.org, X-SOURCE_CODE_URL:https://github.com/Smoothieware/Smoothieware, FIRMWARE_VERSION:%s, X-FIRMWARE_BUILD_DATE:%s, X-SYSTEM_CLOCK:%ldMHz, X-AXES:%d", vers.get_build(), vers.get_build_date(), SystemCoreClock / 1000000, MAX_ROBOT_ACTUATORS);
 
 						#ifdef CNC
 						new_message.stream->printf(", X-CNC:1");
@@ -387,11 +381,7 @@ try_again:
 
 			if (gcode->is_error) {
 				// report error
-				if(THEKERNEL.is_grbl_mode()) {
-					new_message.stream->printf("error:");
-				}else{
-					new_message.stream->printf("Error: ");
-				}
+				new_message.stream->printf("error:");
 
 				if(!gcode->txt_after_ok.empty()) {
 					new_message.stream->printf("%s\r\n", gcode->txt_after_ok.c_str());
@@ -415,7 +405,7 @@ try_again:
 					gcode->txt_after_ok.clear();
 
 				} else {
-					if(THEKERNEL.is_ok_per_line() || THEKERNEL.is_grbl_mode()) {
+					if(THEKERNEL.is_ok_per_line()) {
 						// only send ok once per line if this is a multi g code line send ok on the last one
 						if(possible_command.empty())
 							new_message.stream->printf("ok\r\n");

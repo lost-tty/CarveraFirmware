@@ -235,16 +235,14 @@ void SimpleShell::on_console_line_received( void *argument )
                 break;
 
             case 'H':
-                if(THEKERNEL.is_halted()) THEKERNEL.call_event(ON_HALT, (void *)1); // clears on_halt
-                if(THEKERNEL.is_grbl_mode()) {
+                {
+                    if(THEKERNEL.is_halted()) THEKERNEL.call_event(ON_HALT, (void *)1); // clears on_halt
                     // issue G28.2 which is force homing cycle
                     Gcode gcode("G28.2", new_message.stream);
                     THEKERNEL.call_event(ON_GCODE_RECEIVED, &gcode);
-                }else{
-                    Gcode gcode("G28", new_message.stream);
-                    THEKERNEL.call_event(ON_GCODE_RECEIVED, &gcode);
+
+                    new_message.stream->printf("ok\n");
                 }
-                new_message.stream->printf("ok\n");
                 break;
 
             case 'S':
