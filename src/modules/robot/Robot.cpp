@@ -32,6 +32,7 @@
 #include "ActuatorCoordinates.h"
 #include "EndstopsPublicAccess.h"
 #include "ATCHandlerPublicAccess.h"
+#include "SpindlePublicAccess.h"
 
 #include "mbed.h" // for us_ticker_read()
 #include "mri.h"
@@ -102,6 +103,12 @@
 #define xmin_checksum                      CHECKSUM("x_min")
 #define ymin_checksum                      CHECKSUM("y_min")
 #define zmin_checksum                      CHECKSUM("z_min")
+
+#define switch_checksum              CHECKSUM("switch")
+#define state_checksum               CHECKSUM("state")
+#define state_value_checksum         CHECKSUM("state_value")
+#define spindlefan_checksum          CHECKSUM("spindlefan")
+#define vacuum_checksum              CHECKSUM("vacuum")
 
 #define PI 3.14159265358979323846F // force to be float, do not use M_PI
 
@@ -713,6 +720,13 @@ void Robot::on_gcode_received(void *argument)
                 current_wcs = 0;
                 absolute_mode = true;
                 seconds_per_minute= 60;
+                {
+                    // issue M5 and M9 in case spindle and coolant are being used
+                    Gcode gc1("M5", &StreamOutput::NullStream);
+                    THEKERNEL.call_event(ON_GCODE_RECEIVED, &gc1);
+                    Gcode gc2("M9", &StreamOutput::NullStream);
+                    THEKERNEL.call_event(ON_GCODE_RECEIVED, &gc2);
+                }
                 break;
             case 17:
                 THEKERNEL.call_event(ON_ENABLE, (void*)1); // turn all enable pins on
@@ -913,6 +927,59 @@ void Robot::on_gcode_received(void *argument)
                 } else {
                     gcode->stream->printf("Speed factor at %6.2f %%\n", 6000.0F / seconds_per_minute);
                 }
+                break;
+
+            case 118:
+               printk("%s\n", gcode->get_command() + 4);
+               break;
+
+            case 331: // change to vacuum mode
+                {
+                    THEKERNEL.set_vacuum_mode(true);
+                    // get spindle state
+                    struct spindle_status ss;
+                    bool ok = PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss);
+                    if (ok) {
+                        if (ss.state) {
+                            // open vacuum
+                            bool b = true;
+                            PublicData::set_value( switch_checksum, vacuum_checksum, state_checksum, &b );
+
+                        }
+                    }
+                    // turn on vacuum mode
+                    gcode->stream->printf("turning vacuum mode on\r\n");
+                }
+                break;
+
+            case 332: // change to CNC mode
+                {
+                    THEKERNEL.set_vacuum_mode(false);
+                    // get spindle state
+                    struct spindle_status ss;
+                    bool ok = PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss);
+                    if (ok) {
+                        if (ss.state) {
+                            // close vacuum
+                            bool b = false;
+                            PublicData::set_value(switch_checksum, vacuum_checksum, state_checksum, &b);
+                        }
+                    }
+                    // turn off vacuum mode
+                    gcode->stream->printf("turning vacuum mode off\r\n");
+                }
+                break;
+
+            case 333: // turn off optional stop mode
+                THEKERNEL.set_optional_stop_mode(false);
+                // turn off optional stop mode
+                gcode->stream->printf("turning optional stop mode off\r\n");
+                break;
+
+            case 334: // turn off optional stop mode
+                THEKERNEL.set_optional_stop_mode(true);
+                // turn on optional stop mode
+                gcode->stream->printf("turning optional stop mode on\r\n");
                 break;
 
             case 400: // wait until all moves are done up to this point

@@ -25,17 +25,6 @@
 #include "utils.h"
 #include "LPC17xx.h"
 #include "version.h"
-#include "SpindlePublicAccess.h"
-
-#define switch_checksum              CHECKSUM("switch")
-#define state_checksum               CHECKSUM("state")
-#define state_value_checksum         CHECKSUM("state_value")
-#define spindlefan_checksum          CHECKSUM("spindlefan")
-#define vacuum_checksum              CHECKSUM("vacuum")
-#define light_checksum               CHECKSUM("light")
-#define toolsensor_checksum          CHECKSUM("toolsensor")
-#define probecharger_checksum        CHECKSUM("probecharger")
-#define air_checksum               	 CHECKSUM("air")
 
 // goes in Flash, list of Mxxx codes that are allowed when in Halted state
 static const int allowed_mcodes[]= {2,5,9,30,105,114,119,80,81,911,503,106,107}; // get temp, get pos, get endstops etc
@@ -124,7 +113,6 @@ try_again:
             possible_command = possible_command.substr(0, comment);
         }
 
-		bool sent_ok= false; // used for G1 optimization
 		string single_command;
 		size_t cmd_pos = string::npos;
 		while (possible_command.size() > 0) {
@@ -223,94 +211,11 @@ try_again:
 					}
 					// makes it handle the parameters as a machine position
 					THEROBOT.next_command_is_MCS= true;
-
-				} else if(gcode->g == 1) {
-					// optimize G1 to send ok immediately (one per line) before it is planned
-					if(!sent_ok) {
-						sent_ok= true;
-						new_message.stream->printf("ok\n");
-					}
 				}
 
 				// remember last modal group 1 code
 				if(gcode->g < 4) {
 					modal_group_1= gcode->g;
-				}
-			}
-
-			if(gcode->has_m) {
-				switch (gcode->m) {
-					case 30: // end of program
-						// fall through
-					case 2:
-						{
-							modal_group_1= 1; // set to G1
-							// issue M5 and M9 in case spindle and coolant are being used
-							Gcode gc1("M5", &StreamOutput::NullStream);
-							THEKERNEL.call_event(ON_GCODE_RECEIVED, &gc1);
-							Gcode gc2("M9", &StreamOutput::NullStream);
-							THEKERNEL.call_event(ON_GCODE_RECEIVED, &gc2);
-						}
-						break;
-
-					case 112: // emergency stop, do the best we can with this
-						// this is also handled out-of-band (it is now with ^X in the serial driver)
-						// disables heaters and motors, ignores further incoming Gcode and clears block queue
-						THEKERNEL.call_event(ON_HALT, nullptr);
-						THEKERNEL.set_halt_reason(MANUAL);
-						printk("ok Emergency Stop Requested - reset or M999 required to exit HALT state\r\n");
-						delete gcode;
-						return;
-
-					case 118:
- 			           printk("%s\n", gcode->get_command() + 4);
- 			           return;
-
-			        case 331: // change to vacuum mode
-			        	{
-							THEKERNEL.set_vacuum_mode(true);
-						    // get spindle state
-						    struct spindle_status ss;
-						    bool ok = PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss);
-						    if (ok) {
-						    	if (ss.state) {
-					        		// open vacuum
-					        		bool b = true;
-					                PublicData::set_value( switch_checksum, vacuum_checksum, state_checksum, &b );
-
-						    	}
-				        	}
-						    // turn on vacuum mode
-							gcode->stream->printf("turning vacuum mode on\r\n");
-							return;
-						}
-					case 332: // change to CNC mode
-						{
-							THEKERNEL.set_vacuum_mode(false);
-						    // get spindle state
-						    struct spindle_status ss;
-						    bool ok = PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss);
-						    if (ok) {
-						    	if (ss.state) {
-					        		// close vacuum
-					        		bool b = false;
-					                PublicData::set_value(switch_checksum, vacuum_checksum, state_checksum, &b);
-						    	}
-				        	}
-							// turn off vacuum mode
-							gcode->stream->printf("turning vacuum mode off\r\n");
-							return;
-						}
-					case 333: // turn off optional stop mode
-						THEKERNEL.set_optional_stop_mode(false);
-						// turn off optional stop mode
-						gcode->stream->printf("turning optional stop mode off\r\n");
-						return;
-					case 334: // turn off optional stop mode
-						THEKERNEL.set_optional_stop_mode(true);
-						// turn on optional stop mode
-						gcode->stream->printf("turning optional stop mode on\r\n");
-						return;
 				}
 			}
 
@@ -334,7 +239,7 @@ try_again:
 				new_message.stream->printf("Entering Alarm/Halt state\n");
 				THEKERNEL.call_event(ON_HALT, nullptr);
 
-			}else if(!sent_ok) {
+			} else {
 
 				if(gcode->add_nl)
 					new_message.stream->printf("\r\n");
