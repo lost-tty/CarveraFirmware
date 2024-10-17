@@ -86,7 +86,6 @@ class Robot : public Module {
         struct {
             bool inch_mode:1;                                 // true for inch mode, false for millimeter mode ( default )
             bool absolute_mode:1;                             // true for absolute mode ( default ), false for relative mode
-            bool e_absolute_mode:1;                           // true for absolute mode for E ( default ), false for relative mode
             bool next_command_is_MCS:1;                       // set by G53
             bool disable_segmentation:1;                      // set to disable segmentation
             bool disable_arm_solution:1;                      // set to disable the arm solution
@@ -131,7 +130,7 @@ class Robot : public Module {
         std::tuple<float, float, float, uint8_t> last_probe_position{0,0,0,0};
 
         uint8_t current_motion_mode;
-        using saved_state_t= std::tuple<float, float, bool, bool, bool, bool, uint8_t>; // save current feedrate and absolute mode, e absolute mode, inch mode, is_g123, current_wcs
+        using saved_state_t= std::tuple<float, float, bool, bool, bool, uint8_t>; // save current feedrate and absolute mode, e absolute mode, inch mode, is_g123, current_wcs
         std::stack<saved_state_t> state_stack;               // saves state from M120
 
         float machine_position[k_max_actuators]; // Last requested position, in millimeters, which is what we were requested to move to in the gcode after offsets applied but before compensation transform

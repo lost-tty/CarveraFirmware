@@ -126,7 +126,6 @@ void Robot::init()
 {
     this->inch_mode = false;
     this->absolute_mode = true;
-    this->e_absolute_mode = true;
     this->select_plane(X_AXIS, Y_AXIS, Z_AXIS);
     memset(this->machine_position, 0, sizeof machine_position);
     memset(this->compensated_machine_position, 0, sizeof compensated_machine_position);
@@ -349,10 +348,9 @@ uint8_t Robot::register_motor(StepperMotor *motor)
 void  Robot::push_state()
 {
     bool am = this->absolute_mode;
-    bool em = this->e_absolute_mode;
     bool im = this->inch_mode;
     bool g123 = this->is_g123;
-    saved_state_t s(this->feed_rate, this->seek_rate, am, em, im, g123, current_wcs);
+    saved_state_t s(this->feed_rate, this->seek_rate, am, im, g123, current_wcs);
     state_stack.push(s);
 }
 
@@ -364,10 +362,9 @@ void Robot::pop_state()
         this->feed_rate = std::get<0>(s);
         this->seek_rate = std::get<1>(s);
         this->absolute_mode = std::get<2>(s);
-        this->e_absolute_mode = std::get<3>(s);
-        this->inch_mode = std::get<4>(s);
-        this->is_g123 = std::get<5>(s);
-        this->current_wcs = std::get<6>(s);
+        this->inch_mode = std::get<3>(s);
+        this->is_g123 = std::get<4>(s);
+        this->current_wcs = std::get<5>(s);
     }
 }
 
@@ -604,8 +601,8 @@ void Robot::on_gcode_received(void *argument)
                 }
                 break;
 
-            case 90: this->absolute_mode = true; this->e_absolute_mode = true; break;
-            case 91: this->absolute_mode = false; this->e_absolute_mode = false; break;
+            case 90: this->absolute_mode = true; break;
+            case 91: this->absolute_mode = false; break;
 
             case 92: {
                 if(gcode->subcode == 1 || gcode->subcode == 2 || gcode->get_num_args() == 0) {
@@ -759,9 +756,6 @@ void Robot::on_gcode_received(void *argument)
                 THECONVEYOR.wait_for_idle();
                 THEKERNEL.call_event(ON_ENABLE, nullptr); // turn all enable pins off
                 break;
-
-            case 82: e_absolute_mode= true; break;
-            case 83: e_absolute_mode= false; break;
 
             case 92: // M92 - set steps per mm
                 for (int i = 0; i < n_motors; ++i) {
@@ -1176,13 +1170,8 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
 
     // do E for the selected extruder
     if(selected_extruder > 0 && !isnan(param[E_AXIS])) {
-        if(this->e_absolute_mode) {
-            target[selected_extruder]= param[E_AXIS];
-            delta_e= target[selected_extruder] - machine_position[selected_extruder];
-        }else{
-            delta_e= param[E_AXIS];
-            target[selected_extruder] = delta_e + machine_position[selected_extruder];
-        }
+        delta_e= param[E_AXIS];
+        target[selected_extruder] = delta_e + machine_position[selected_extruder];
     }
 
     // process ABC axis, this is mutually exclusive to using E for an extruder, so if E is used and A then the results are undefined
