@@ -38,11 +38,8 @@
 #define probecharger_checksum        CHECKSUM("probecharger")
 #define air_checksum               	 CHECKSUM("air")
 
-#define panel_display_message_checksum CHECKSUM("display_message")
-#define panel_checksum             CHECKSUM("panel")
-
 // goes in Flash, list of Mxxx codes that are allowed when in Halted state
-static const int allowed_mcodes[]= {2,5,9,30,105,114,115,119,80,81,911,503,106,107}; // get temp, get pos, get endstops etc
+static const int allowed_mcodes[]= {2,5,9,30,105,114,119,80,81,911,503,106,107}; // get temp, get pos, get endstops etc
 static bool is_allowed_mcode(int m) {
     for (size_t i = 0; i < sizeof(allowed_mcodes)/sizeof(int); ++i) {
         if(allowed_mcodes[i] == m) return true;
@@ -265,39 +262,6 @@ try_again:
 						printk("ok Emergency Stop Requested - reset or M999 required to exit HALT state\r\n");
 						delete gcode;
 						return;
-
-					case 115: { // M115 Get firmware version and capabilities
-						Version vers;
-
-						new_message.stream->printf("FIRMWARE_NAME:Smoothieware, FIRMWARE_URL:http%%3A//smoothieware.org, X-SOURCE_CODE_URL:https://github.com/Smoothieware/Smoothieware, FIRMWARE_VERSION:%s, X-FIRMWARE_BUILD_DATE:%s, X-SYSTEM_CLOCK:%ldMHz, X-AXES:%d", vers.get_build(), vers.get_build_date(), SystemCoreClock / 1000000, MAX_ROBOT_ACTUATORS);
-
-						#ifdef CNC
-						new_message.stream->printf(", X-CNC:1");
-						#else
-						new_message.stream->printf(", X-CNC:0");
-						#endif
-
-						#ifdef DISABLEMSD
-						new_message.stream->printf(", X-MSD:0");
-						#else
-						new_message.stream->printf(", X-MSD:1");
-						#endif
-
-						if(THEKERNEL.is_bad_mcu()) {
-							new_message.stream->printf(", X-WARNING:deprecated_MCU");
-						}
-						new_message.stream->printf("\nok\n");
-						return;
-					}
-
-					case 117: // M117 is a special non compliant Gcode as it allows arbitrary text on the line following the command
-					{    // concatenate the command again and send to panel if enabled
-						string str= single_command.substr(4) + possible_command;
-						PublicData::set_value( panel_checksum, panel_display_message_checksum, &str );
-						delete gcode;
-						new_message.stream->printf("ok\r\n");
-						return;
-					}
 
 					case 118:
  			           printk("%s\n", gcode->get_command() + 4);
