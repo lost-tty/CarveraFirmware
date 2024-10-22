@@ -53,7 +53,7 @@
 #include "XModem.h"
 #include "utils.h"
 
-#include "mbed.h" // for wait_ms()
+#include "mbed.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -730,12 +730,15 @@ void SimpleShell::time_command( string parameters, StreamOutput *stream)
     	time_t new_time = strtol(parameters.c_str(), NULL, 10);
     	set_time(new_time);
     } else {
-    	time_t old_time = time(NULL);
-    	stream->printf("time = %lld\n", old_time);
+        time_t old_time = time(NULL);
+        struct tm *timeinfo = localtime(&old_time);
+        char buffer[80];
+
+        // Format the time as "YYYY-MM-DD HH:MM:SS"
+        strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
+        stream->printf("time = %s\n", buffer);
     }
 }
-
-
 
 // get network config
 void SimpleShell::net_command( string parameters, StreamOutput *stream)
