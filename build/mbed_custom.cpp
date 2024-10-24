@@ -25,18 +25,35 @@
 
 unsigned int g_maximumHeapAddress;
 
-static void fillUnusedRAM(void);
 static void configureStackSizeLimit(unsigned int stackSizeLimit);
 static unsigned int alignTo32Bytes(unsigned int value);
 static void configureMpuToCatchStackOverflowIntoHeap(unsigned int maximumHeapAddress);
 static void configureMpuRegionToAccessAllMemoryWithNoCaching(void);
 
-
 /* Symbols exposed from the linker script. */
 extern unsigned int     __bss_start__;
 extern unsigned int     __bss_end__;
 extern unsigned int     __StackTop;
+extern unsigned int     __HeapBase;
+extern unsigned int     __AHB_dyn_start;
+extern unsigned int     __AHB_end;
 extern "C" unsigned int __end__;
+
+HeapRegion_t xHeapRegions[3];
+
+void initHeapRegions() {
+    xHeapRegions[0].pucStartAddress = (uint8_t*)&__HeapBase;
+    xHeapRegions[0].xSizeInBytes = (uintptr_t)&__StackTop - (uintptr_t)&__HeapBase - __STACK_SIZE - 32;
+
+    xHeapRegions[1].pucStartAddress = (uint8_t*)&__AHB_dyn_start;
+    xHeapRegions[1].xSizeInBytes = (uintptr_t)&__AHB_end - (uintptr_t)&__AHB_dyn_start;
+
+    // Terminator entry
+    xHeapRegions[2].pucStartAddress = NULL;
+    xHeapRegions[2].xSizeInBytes = 0;
+
+    vPortDefineHeapRegions(xHeapRegions);
+}
 
 extern "C" int  main(void);
 extern "C" void __libc_init_array(void);
@@ -47,46 +64,33 @@ extern "C" void _start(void)
     int mainReturnValue;
 
     memset(&__bss_start__, 0, bssSize);
-    fillUnusedRAM();
 
     if (__STACK_SIZE) {
         configureStackSizeLimit(__STACK_SIZE);
     }
+
     if (WRITE_BUFFER_DISABLE) {
         disableMPU();
         configureMpuRegionToAccessAllMemoryWithNoCaching();
         enableMPU();
     }
+
     if (MRI_ENABLE) {
         mriInit(MRI_INIT_PARAMETERS);
         if (MRI_BREAK_ON_INIT)
             __debugbreak();
     }
 
+    initHeapRegions();
+
     __libc_init_array();
     mainReturnValue = main();
     exit(mainReturnValue);
 }
 
-static __attribute__((naked)) void fillUnusedRAM(void)
-{
-    __asm (
-        ".syntax unified\n"
-        ".thumb\n"
-        // Fill 2 words (8 bytes) at a time with 0xdeadbeef.
-        " ldr   r2, =__FillStart\n"
-        " movw  r0, #0xbeef\n"
-        " movt  r0, #0xdead\n"
-        " mov   r1, r0\n"
-        // Don't fill past current stack pointer value.
-        " mov   r3, sp\n"
-        " bics  r3, r3, #7\n"
-        "1$:\n"
-        " strd  r0, r1, [r2], #8\n"
-        " cmp   r2, r3\n"
-        " blo   1$\n"
-        " bx    lr\n"
-    );
+extern "C" void* _sbrk(ptrdiff_t incr) {
+    errno = ENOMEM;  // No more memory to allocate
+    return (void*)-1;
 }
 
 static void configureStackSizeLimit(unsigned int stackSizeLimit)
@@ -163,7 +167,6 @@ extern "C" int __wrap_semihost_connected(void)
 }
 
 
-
 extern "C" void abort(void)
 {
     if (MRI_ENABLE)
@@ -178,82 +181,13 @@ extern "C" void __cxa_pure_virtual(void)
     abort();
 }
 
-extern "C" void __malloc_lock(struct _reent *p)
+extern "C" void* __wrap__malloc_r(struct _reent *r, size_t size)
 {
-    (void)p;
-    configASSERT(!xPortIsInsideInterrupt());
-    vTaskSuspendAll();
+    return pvPortMalloc(size);
 }
 
-extern "C" void  __malloc_unlock(struct _reent *p)
+extern "C" void __wrap__free_r(struct _reent *r, void *ptr)
 {
-    (void)p;
-    (void)xTaskResumeAll();
+    vPortFree(ptr);
 }
 
-
-/* Turn off the errno macro and use actual external global variable instead. */
-extern int errno;
-
-static int doesHeapCollideWithStack(unsigned int newHeap);
-
-/* Dynamic memory allocation related syscalls. */
-extern "C" caddr_t _sbrk(int incr)
-{
-    static unsigned char *heap = (unsigned char *)&__end__;
-    unsigned char        *prev_heap = heap;
-    unsigned char        *new_heap = heap + incr;
-
-    if (doesHeapCollideWithStack((unsigned int)new_heap)) {
-        errno = ENOMEM;
-        return (caddr_t) - 1;
-    }
-
-    heap = new_heap;
-    return (caddr_t) prev_heap;
-}
-
-static int doesHeapCollideWithStack(unsigned int newHeap)
-{
-    return ((newHeap >= __get_MSP()) ||
-            (__STACK_SIZE && newHeap >= g_maximumHeapAddress));
-}
-
-/* Wrap memory allocation routines to make sure that they aren't being called from interrupt handler. */
-static void breakOnHeapOpFromInterruptHandler(void)
-{
-    if (__get_IPSR() != 0)
-        __debugbreak();
-}
-
-extern "C" void* __real_malloc(size_t size);
-extern "C" void* __wrap_malloc(size_t size)
-{
-    breakOnHeapOpFromInterruptHandler();
-    return __real_malloc(size);
-}
-
-extern "C" void *__real_realloc(void *ptr, size_t size);
-extern "C" void *__wrap_realloc(void *ptr, size_t size)
-{
-    breakOnHeapOpFromInterruptHandler();
-    return __real_realloc(ptr, size);
-}
-
-
-extern "C" void __real_free(void *ptr);
-extern "C" void __wrap_free(void *ptr)
-{
-    breakOnHeapOpFromInterruptHandler();
-    __real_free(ptr);
-}
-
-void *pvPortMalloc(size_t size) PRIVILEGED_FUNCTION
-{
-    return malloc(size);
-}
-
-void vPortFree(void *pv) PRIVILEGED_FUNCTION
-{
-    free(pv);
-}

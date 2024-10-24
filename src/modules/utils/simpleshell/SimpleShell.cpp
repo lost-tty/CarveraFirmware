@@ -59,7 +59,7 @@
 #include "task.h"
 #include "timers.h"
 
-extern unsigned int g_maximumHeapAddress;
+extern HeapRegion_t xHeapRegions[3];
 
 #include <malloc.h>
 #include <mri.h>
@@ -69,7 +69,6 @@ extern unsigned int g_maximumHeapAddress;
 
 extern "C" uint32_t  __end__;
 extern "C" uint32_t  __malloc_free_list;
-extern "C" caddr_t   _sbrk(int size);
 
 #define EOT 4
 #define CAN 24
@@ -120,61 +119,6 @@ const SimpleShell::ptentry_t SimpleShell::commands_table[] = {
     // Unknown command sentinel
     {nullptr, nullptr, nullptr}
 };
-
-// Adam Greens heap walk from http://mbed.org/forum/mbed/topic/2701/?page=4#comment-22556
-static uint32_t heapWalk(StreamOutput *stream, bool verbose)
-{
-    uint32_t chunkNumber = 1;
-    // The __end__ linker symbol points to the beginning of the heap.
-    uint32_t chunkCurr = (uint32_t)&__end__;
-    // __malloc_free_list is the head pointer to newlib-nano's link list of free chunks.
-    uint32_t freeCurr = __malloc_free_list;
-    // Calling _sbrk() with 0 reserves no more memory but it returns the current top of heap.
-    uint32_t heapEnd = (uint32_t)_sbrk(0);
-    // accumulate totals
-    uint32_t freeSize = 0;
-    uint32_t usedSize = 0;
-
-    stream->printf("Used Heap Size: %lu\n", heapEnd - chunkCurr);
-
-    // Walk through the chunks until we hit the end of the heap.
-    while (chunkCurr < heapEnd) {
-        // Assume the chunk is in use.  Will update later.
-        int      isChunkFree = 0;
-        // The first 32-bit word in a chunk is the size of the allocation.  newlib-nano over allocates by 8 bytes.
-        // 4 bytes for this 32-bit chunk size and another 4 bytes to allow for 8 byte-alignment of returned pointer.
-        uint32_t chunkSize = *(uint32_t *)chunkCurr;
-        // The start of the next chunk is right after the end of this one.
-        uint32_t chunkNext = chunkCurr + chunkSize;
-
-        // The free list is sorted by address.
-        // Check to see if we have found the next free chunk in the heap.
-        if (chunkCurr == freeCurr) {
-            // Chunk is free so flag it as such.
-            isChunkFree = 1;
-            // The second 32-bit word in a free chunk is a pointer to the next free chunk (again sorted by address).
-            freeCurr = *(uint32_t *)(freeCurr + 4);
-        }
-
-        // Skip past the 32-bit size field in the chunk header.
-        chunkCurr += 4;
-        // 8-byte align the data pointer.
-        chunkCurr = (chunkCurr + 7) & ~7;
-        // newlib-nano over allocates by 8 bytes, 4 bytes for the 32-bit chunk size and another 4 bytes to allow for 8
-        // byte-alignment of the returned pointer.
-        chunkSize -= 8;
-        if (verbose)
-            stream->printf("  Chunk: %lu  Address: 0x%08lX  Size: %lu  %s\n", chunkNumber, chunkCurr, chunkSize, isChunkFree ? "CHUNK FREE" : "");
-
-        if (isChunkFree) freeSize += chunkSize;
-        else usedSize += chunkSize;
-
-        chunkCurr = chunkNext;
-        chunkNumber++;
-    }
-    stream->printf("Allocated: %lu, Free: %lu\r\n", usedSize, freeSize);
-    return freeSize;
-}
 
 void SimpleShell::system_reset_callback()
 {
@@ -631,15 +575,72 @@ void SimpleShell::echo_command( string parameters, StreamOutput *stream )
 }
 
 // show free memory
-void SimpleShell::mem_command( string parameters, StreamOutput *stream)
+#define heapBLOCK_ALLOCATED_BITMASK    ( ( ( size_t ) 1 ) << ( ( sizeof( size_t ) * heapBITS_PER_BYTE ) - 1 ) )
+#define heapBITS_PER_BYTE         ( ( size_t ) 8 )
+typedef struct A_BLOCK_LINK
 {
-    bool verbose = shift_parameter( parameters ).find_first_of("Vv") != string::npos;
-    unsigned long heap = (unsigned long)_sbrk(0);
-    unsigned long m = g_maximumHeapAddress - heap;
-    stream->printf("Unused Heap: %lu bytes\r\n", m);
+    struct A_BLOCK_LINK * pxNextFreeBlock;
+    size_t xBlockSize;
+} BlockLink_t;
 
-    uint32_t f = heapWalk(stream, verbose);
-    stream->printf("Total Free RAM: %lu bytes\r\n", m + f);
+void SimpleShell::mem_command(string parameters, StreamOutput *stream)
+{
+    bool verbose = shift_parameter(parameters).find_first_of("Vv") != string::npos;
+
+    HeapStats_t heapStats;
+
+    vPortGetHeapStats(&heapStats);
+
+    size_t total_heap_size = 0;
+    const size_t MAX_BLOCK_SIZE = 0xFFFFF; // Define a maximum reasonable block size
+
+    // Print memory map header
+    stream->printf("Memory Map:\r\n");
+    stream->printf("Region    Start Address      Size (bytes)\r\n");
+
+    for (int i = 0; xHeapRegions[i].pucStartAddress != NULL; i++) {
+        total_heap_size += xHeapRegions[i].xSizeInBytes;
+        stream->printf("%d         0x%08X        %lu bytes\r\n",
+                       i,
+                       (unsigned int)xHeapRegions[i].pucStartAddress,
+                       xHeapRegions[i].xSizeInBytes);
+
+        if (verbose) {
+            stream->printf("  Block details for Region %d:\r\n", i);
+
+            uint8_t* currentBlock = xHeapRegions[i].pucStartAddress;
+            while (currentBlock < xHeapRegions[i].pucStartAddress + xHeapRegions[i].xSizeInBytes) {
+                BlockLink_t* pxBlock = (BlockLink_t*)currentBlock;
+
+                size_t blockSize = pxBlock->xBlockSize & ~heapBLOCK_ALLOCATED_BITMASK;
+                bool isFree = (pxBlock->xBlockSize & heapBLOCK_ALLOCATED_BITMASK) == 0;
+
+                if (blockSize == 0 || blockSize > MAX_BLOCK_SIZE) {
+                    break;
+                }
+
+                stream->printf("    Block at 0x%08X, %s Size: %lu bytes\r\n", 
+                               (unsigned int)currentBlock,
+                               isFree ? "FREE" : "    ",
+                               blockSize);
+
+                currentBlock += blockSize;
+            }
+        }
+    }
+
+    stream->printf("\nTotal Heap Size: %lu bytes\r\n", total_heap_size);
+    stream->printf("Free Heap: %lu bytes\r\n", heapStats.xAvailableHeapSpaceInBytes);
+    stream->printf("Used Heap: %lu bytes\r\n", total_heap_size - heapStats.xAvailableHeapSpaceInBytes);
+
+    if (verbose) {
+        stream->printf("Minimum Ever Free Heap: %lu bytes\r\n", heapStats.xMinimumEverFreeBytesRemaining);
+        stream->printf("Largest Free Block: %lu bytes\r\n", heapStats.xSizeOfLargestFreeBlockInBytes);
+        stream->printf("Smallest Free Block: %lu bytes\r\n", heapStats.xSizeOfSmallestFreeBlockInBytes);
+        stream->printf("Number of Free Blocks: %lu\r\n", heapStats.xNumberOfFreeBlocks);
+        stream->printf("Successful Allocations: %lu\r\n", heapStats.xNumberOfSuccessfulAllocations);
+        stream->printf("Successful Frees: %lu\r\n", heapStats.xNumberOfSuccessfulFrees);
+    }
 
     stream->printf("Block size: %u bytes, Tickinfo size: %u bytes\n", sizeof(Block), sizeof(Block::tickinfo_t) * Block::n_actuators);
 }

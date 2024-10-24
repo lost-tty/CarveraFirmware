@@ -135,7 +135,7 @@ OBJECTS += $(OUTDIR)/mbed_custom.o
 
 OBJECTS += $(OUTDIR)/configdefault.o
 
-OBJECTS += $(patsubst %.c,$(OUTDIR)/freertos/%.o,$(notdir $(FREERTOS_SRC)))
+OBJECTS += $(patsubst %.c,$(OUTDIR)/freertos/%.o,$(FREERTOS_SRC))
 
 # List of the header dependency files, one per object file.
 DEPFILES = $(patsubst %.o,%.d,$(OBJECTS))
@@ -154,7 +154,8 @@ FREERTOS_SRC = $(FREERTOS_DIR)/tasks.c \
                $(FREERTOS_DIR)/list.c \
                $(FREERTOS_DIR)/timers.c \
                $(FREERTOS_DIR)/event_groups.c \
-               $(FREERTOS_PORT)/port.c
+               $(FREERTOS_PORT)/port.c \
+               $(FREERTOS_DIR)/portable/MemMang/heap_5.c 
 
 SUBDIRS = $(wildcard $(SRC)/* $(SRC)/*/* $(SRC)/*/*/* $(SRC)/*/*/*/* $(SRC)/*/*/*/*/* $(SRC)/*/*/*/*/*/*)
 PROJINCS = $(sort $(dir $(SUBDIRS)))
@@ -216,7 +217,7 @@ AS_FLAGS += -g3 $(DEVICE_FLAGS)
 
 # Linker Options.
 LDFLAGS = $(DEVICE_FLAGS) -specs=$(BUILD_DIR)/startfile.spec
-LDFLAGS += -Wl,-Map=$(OUTDIR)/$(PROJECT).map,--cref,--gc-sections,--wrap=_isatty,--wrap=malloc,--wrap=realloc,--wrap=free$(MRI_WRAPS)
+LDFLAGS += -Wl,-Map=$(OUTDIR)/$(PROJECT).map,--cref,--gc-sections,--wrap=_isatty,--wrap=_malloc_r,--wrap=realloc,--wrap=_free_r$(MRI_WRAPS)
 LDFLAGS += -T$(LSCRIPT)  -L $(EXTERNAL_DIR)/gcc/LPC1768
 #LDFLAGS += -L $(BUILD_DIR) -lM8266WIFI
 ifneq "$(NO_FLOAT_SCANF)" "1"

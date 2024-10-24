@@ -105,9 +105,9 @@ void vApplicationGetTimerTaskMemory( StaticTask_t **ppxTimerTaskTCBBuffer,
 
 #endif // configSUPPORT_STATIC_ALLOCATION
 
-SDFileSystem sd __attribute__ ((section ("AHBSRAM"))) (P0_18, P0_17, P0_15, P0_16, 12000000);
+SDFileSystem sd (P0_18, P0_17, P0_15, P0_16, 12000000);
 
-SDFAT mounter __attribute__ ((section ("AHBSRAM"))) ("sd", &sd);
+SDFAT mounter ("sd", &sd);
 
 GPIO leds[4] = {
     GPIO(P4_29),
@@ -116,25 +116,25 @@ GPIO leds[4] = {
     GPIO(P1_17)
 };
 
-Watchdog watchdog __attribute__((section("AHBSRAM"))) (10000, WDT_RESET);  // 10 seconds default, WDT_RESET
-Kernel THEKERNEL __attribute__((section("AHBSRAM")));
+Watchdog watchdog (10000, WDT_RESET);  // 10 seconds default, WDT_RESET
+Kernel THEKERNEL;
 Conveyor THECONVEYOR __attribute__((section("AHBSRAM")));
-Robot THEROBOT __attribute__((section("AHBSRAM")));
-GcodeDispatch gcode_dispatch __attribute__((section("AHBSRAM")));
+Robot THEROBOT;
+GcodeDispatch gcode_dispatch;
 SimpleShell simpleshell __attribute__((section("AHBSRAM")));
-WifiProvider wifi_provider __attribute__((section("AHBSRAM")));
-WebServer web_server __attribute__((section("AHBSRAM"))) (&wifi_provider);
+WifiProvider wifi_provider;
+WebServer web_server (&wifi_provider);
 
-Player player __attribute__((section("AHBSRAM")));
-WirelessProbe wireless_probe __attribute__((section("AHBSRAM")));
-MainButton mainbutton __attribute__((section("AHBSRAM")));
-ATCHandler atc_handler __attribute__((section("AHBSRAM")));
-Endstops endstops __attribute__((section("AHBSRAM")));
-Laser laser __attribute__((section("AHBSRAM")));
-ZProbe zprobe __attribute__((section("AHBSRAM")));
-RotaryDeltaCalibration rotary_delta_calibration __attribute__((section("AHBSRAM")));
-TemperatureSwitch temperature_switch __attribute__((section("AHBSRAM")));
-Drillingcycles drilling_cycles __attribute__((section("AHBSRAM")));
+Player player;
+WirelessProbe wireless_probe;
+MainButton mainbutton;
+ATCHandler atc_handler;
+Endstops endstops;
+Laser laser;
+ZProbe zprobe;
+RotaryDeltaCalibration rotary_delta_calibration;
+TemperatureSwitch temperature_switch;
+Drillingcycles drilling_cycles;
 
 serial_t console;
 
@@ -277,8 +277,8 @@ void vTaskMainLoop(void *pvParameters) {
 
 #define MAINLOOP_STACK_SIZE 768
 
-StackType_t mainLoopStackBuffer[MAINLOOP_STACK_SIZE] __attribute__((section("AHBSRAM")));
-StaticTask_t mainLoopTaskBuffer __attribute__((section("AHBSRAM")));
+StackType_t mainLoopStackBuffer[MAINLOOP_STACK_SIZE];
+StaticTask_t mainLoopTaskBuffer;
 
 int main() {
     serial_init(&console, P2_8, P2_9);
