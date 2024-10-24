@@ -14,12 +14,9 @@ public:
 
 private:
     // Buffers
-
     static const size_t XBUFF_SIZE = COMPRESS_BUFFER_SIZE + BUFFER_PADDING;
-    char md5_str[33];
     unsigned char xbuff[XBUFF_SIZE];
     unsigned char lzbuff[DCOMPRESS_BUFFER_SIZE];
-    char info_msg[64];
 
     // Constants
     static const unsigned char SOH = 0x01;

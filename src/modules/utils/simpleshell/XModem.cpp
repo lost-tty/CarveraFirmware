@@ -193,8 +193,6 @@ bool XModem::upload(const std::string& filename, StreamOutput* stream) {
 	MD5 md5;
     std::string received_md5, computed_md5;
 
-    memset(info_msg, 0, sizeof(info_msg));
-
     string md5_filename = change_to_md5_path(filename);
     string lzfilename = change_to_lz_path(filename);
     check_and_make_path(md5_filename);
@@ -236,7 +234,7 @@ bool XModem::upload(const std::string& filename, StreamOutput* stream) {
 
     if (fd == NULL || (filename.find("firmware.bin") == string::npos && fd_md5 == NULL)) {
         stream->putc(EOT);
-        sprintf(info_msg, "Error: failed to open file [%s]!\r\n", fd == NULL ? filename.substr(0, 30).c_str() : md5_filename.substr(0, 30).c_str());
+        stream->printf("Error: failed to open file [%s]!\r\n", fd == NULL ? filename.substr(0, 30).c_str() : md5_filename.substr(0, 30).c_str());
         goto upload_error;
     }
 
@@ -261,14 +259,14 @@ bool XModem::upload(const std::string& filename, StreamOutput* stream) {
 				    computed_md5 = md5.finalize().hexdigest();
 
 				    if (received_md5 != computed_md5) {
-				        sprintf(info_msg, "Error: MD5 verification failed\r\n");
+				        stream->printf("Error: MD5 verification failed\r\n");
 				        remove(filename.c_str());
 				        goto upload_error;
 				    }
                     goto upload_success; /* normal end */
                 case CAN:
                     stream->putc(ACK);
-                    sprintf(info_msg, "Info: Upload canceled by remote!\r\n");
+                    stream->printf("Info: Upload canceled by remote!\r\n");
                     goto upload_error;
                 default:
                     break;
@@ -276,7 +274,7 @@ bool XModem::upload(const std::string& filename, StreamOutput* stream) {
         }
 
         cancel_transfer(stream);
-        sprintf(info_msg, "Error: upload sync error! get char [%d]\r\n", c);
+        stream->printf("Error: upload sync error! get char [%d]\r\n", c);
         goto upload_error;
 
     start_recv:
@@ -292,12 +290,12 @@ bool XModem::upload(const std::string& filename, StreamOutput* stream) {
         } while (c == 0 && retry--);
 
         if (c != header_size) {
-            sprintf(info_msg, "Error: header size mismatch: %i != %i\r\n", c, header_size);
+            stream->printf("Error: header size mismatch: %i != %i\r\n", c, header_size);
             goto upload_error;
         }
 
         if (recv_buff[0] != (unsigned char)(~recv_buff[1])) {
-            sprintf(info_msg, "Error: packet number error\r\n");
+            stream->printf("Error: packet number error\r\n");
             goto upload_error;
         }
 
@@ -323,7 +321,7 @@ bool XModem::upload(const std::string& filename, StreamOutput* stream) {
             } while (c == 0 && retry--);
 
             if (c < 0) {
-                sprintf(info_msg, "Error: could not receive data\r\n");
+                stream->printf("Error: could not receive data\r\n");
                 goto upload_error;
             }
 
@@ -333,7 +331,7 @@ bool XModem::upload(const std::string& filename, StreamOutput* stream) {
 
             if (packetno == 0 && !md5_received) {
                 if (length != 32 || c < 32) {
-                    sprintf(info_msg, "Error: could not parse md5 packet\r\n");
+                    stream->printf("Error: could not parse md5 packet\r\n");
                     goto upload_error;
                 }
                 received_md5.assign(recv_buff, 32);
@@ -380,7 +378,6 @@ upload_error:
 
     THEKERNEL.set_uploading(false);
 
-    stream->printf(info_msg);
     return false;
 
 upload_success:
@@ -422,9 +419,9 @@ bool XModem::download(const std::string& filename, StreamOutput* stream) {
     int crc = 0, is_stx = 1;
     unsigned char packetno = 0;
     int c = 0;
+    char md5_str[33];
 
     // open file
-	memset(info_msg, 0, sizeof(info_msg));
     string md5_filename = change_to_md5_path(filename);
     string lz_filename = change_to_lz_path(filename);
 
@@ -455,7 +452,7 @@ bool XModem::download(const std::string& filename, StreamOutput* stream) {
 		FILE *fd = fopen(filename.c_str(), "rb");
 		if (NULL == fd) {
 		    cancel_transfer(stream);
-			sprintf(info_msg, "Error: failed to open file [%s]!\r\n", filename.substr(0, 30).c_str());
+			stream->printf("Error: failed to open file [%s]!\r\n", filename.substr(0, 30).c_str());
 			goto download_error;
 	    }
 		
@@ -474,7 +471,7 @@ bool XModem::download(const std::string& filename, StreamOutput* stream) {
 	    fd = fopen(filename.c_str(), "rb");
 	    if (NULL == fd) {
 		    cancel_transfer(stream);
-			sprintf(info_msg, "Error: failed to open file [%s]!\r\n", filename.substr(0, 30).c_str());
+			stream->printf("Error: failed to open file [%s]!\r\n", filename.substr(0, 30).c_str());
 			goto download_error;
 	    }
 	}
@@ -491,7 +488,7 @@ bool XModem::download(const std::string& filename, StreamOutput* stream) {
 			case CAN:
 				stream->putc(ACK);
 				flush_input(stream);
-				sprintf(info_msg, "Info: canceled by remote!\r\n");
+				stream->printf("Info: canceled by remote!\r\n");
 				goto download_error;
 			default:
 				cancel_transfer(stream);
@@ -528,7 +525,7 @@ bool XModem::download(const std::string& filename, StreamOutput* stream) {
 						break;
 					case CAN:
 						stream->putc(ACK);
-						sprintf(info_msg, "Info: canceled by remote!\r\n");
+						stream->printf("Info: canceled by remote!\r\n");
 						goto download_error;
 					default:
 						cancel_transfer(stream);
@@ -567,7 +564,7 @@ bool XModem::download(const std::string& filename, StreamOutput* stream) {
     if (c == ACK) {
         goto download_success;
     } else {
-        sprintf(info_msg, "Error: No ACK for EOT, received [%02X]!\r\n", c);
+        stream->printf("Error: No ACK for EOT, received [%02X]!\r\n", c);
         goto download_error;
     }
 
@@ -585,7 +582,6 @@ download_error:
 
 	THEKERNEL.set_uploading(false);
 
-	stream->printf(info_msg);
 	return false;
 
 download_success:
