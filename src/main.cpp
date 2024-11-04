@@ -117,7 +117,7 @@ GPIO leds[4] = {
 };
 
 Watchdog watchdog (10000, WDT_RESET);  // 10 seconds default, WDT_RESET
-Kernel THEKERNEL;
+Kernel kernel;
 Conveyor THECONVEYOR __attribute__((section("AHBSRAM")));
 Robot THEROBOT;
 GcodeDispatch gcode_dispatch;
@@ -136,6 +136,8 @@ RotaryDeltaCalibration rotary_delta_calibration;
 TemperatureSwitch temperature_switch;
 Drillingcycles drilling_cycles;
 
+Kernel* THEKERNEL = &kernel;
+
 serial_t console;
 
 void init() {
@@ -145,21 +147,21 @@ void init() {
         leds[i]= 0;
     }
 
-    THEKERNEL.init();
+    THEKERNEL->init();
 
     THECONVEYOR.init();
-    THEKERNEL.add_module(&THECONVEYOR);
+    THEKERNEL->add_module(&THECONVEYOR);
 
     gcode_dispatch.init();
-    THEKERNEL.add_module(&gcode_dispatch);
+    THEKERNEL->add_module(&gcode_dispatch);
 
     THEROBOT.init();
-    THEKERNEL.add_module(&THEROBOT);
+    THEKERNEL->add_module(&THEROBOT);
 
-    THEKERNEL.add_module(&simpleshell);
+    THEKERNEL->add_module(&simpleshell);
 
     printk("Smoothie Running @%ldMHz\r\n", SystemCoreClock / 1000000);
-    simpleshell.version_command("", &THEKERNEL.streams);
+    simpleshell.version_command("", &THEKERNEL->streams);
 
     bool sdok = (sd.disk_initialize() == 0);
     if(!sdok) printk("SDCard failed to initialize\r\n");
@@ -169,12 +171,12 @@ void init() {
     #endif
 
     // Create and add main modules
-    THEKERNEL.add_module(&player);
-    THEKERNEL.add_module(&atc_handler);
-    THEKERNEL.add_module(&wireless_probe);
-    THEKERNEL.add_module(&mainbutton);
-    THEKERNEL.add_module(&wifi_provider);
-    THEKERNEL.add_module(&web_server);
+    THEKERNEL->add_module(&player);
+    THEKERNEL->add_module(&atc_handler);
+    THEKERNEL->add_module(&wireless_probe);
+    THEKERNEL->add_module(&mainbutton);
+    THEKERNEL->add_module(&wifi_provider);
+    THEKERNEL->add_module(&web_server);
 
     // these modules can be completely disabled in the Makefile by adding to EXCLUDE_MODULES
     #ifndef NO_TOOLS_SWITCH
@@ -191,10 +193,10 @@ void init() {
 
     // #endif
     #ifndef NO_TOOLS_ENDSTOPS
-    THEKERNEL.add_module(&endstops);
+    THEKERNEL->add_module(&endstops);
     #endif
     #ifndef NO_TOOLS_LASER
-    THEKERNEL.add_module(&laser);
+    THEKERNEL->add_module(&laser);
     #endif
 
     #ifndef NO_TOOLS_SPINDLE
@@ -203,38 +205,38 @@ void init() {
     delete sm;
     #endif
     #ifndef NO_TOOLS_ZPROBE
-    THEKERNEL.add_module(&zprobe);
+    THEKERNEL->add_module(&zprobe);
     #endif
     #ifndef NO_TOOLS_SCARACAL
-    THEKERNEL.add_module( new SCARAcal() );
+    THEKERNEL->add_module( new SCARAcal() );
     #endif
     #ifndef NO_TOOLS_ROTARYDELTACALIBRATION
-    THEKERNEL.add_module(&rotary_delta_calibration);
+    THEKERNEL->add_module(&rotary_delta_calibration);
     #endif
     #ifndef NO_TOOLS_TEMPERATURESWITCH
     // Must be loaded after TemperatureControl
-    THEKERNEL.add_module(&temperature_switch);
+    THEKERNEL->add_module(&temperature_switch);
     #endif
     #ifndef NO_TOOLS_DRILLINGCYCLES
-    THEKERNEL.add_module(&drilling_cycles);
+    THEKERNEL->add_module(&drilling_cycles);
     #endif
 
     // 10 second watchdog timeout (or config as seconds)
-    float t= THEKERNEL.config->value( watchdog_timeout_checksum )->by_default(10.0F)->as_number();
+    float t= THEKERNEL->config->value( watchdog_timeout_checksum )->by_default(10.0F)->as_number();
     if (t > 0.1F) {
         watchdog.configure(t * 1000000, WDT_RESET);
         watchdog.arm();
         // NOTE setting WDT_RESET with the current bootloader would leave it in DFU mode which would be suboptimal
-        THEKERNEL.add_module(&watchdog);
+        THEKERNEL->add_module(&watchdog);
         printk("Watchdog enabled for %1.3f seconds\n", t);
     } else {
         printk("WARNING Watchdog is disabled\n");
     }
 
     // clear up the config cache to save some memory
-    THEKERNEL.config->config_cache_clear();
+    THEKERNEL->config->config_cache_clear();
 
-    if(THEKERNEL.is_using_leds()) {
+    if(THEKERNEL->is_using_leds()) {
         // set some leds to indicate status... led0 init done, led1 mainloop running, led2 idle loop running, led3 sdcard ok
         leds[0]= 1; // indicate we are done with init
         leds[3]= sdok?1:0; // 4th led indicates sdcard is available (TODO maye should indicate config was found)
@@ -243,8 +245,8 @@ void init() {
     // start the timers and interrupts
     THECONVEYOR.start(THEROBOT.get_number_registered_motors());
     
-    THEKERNEL.step_ticker.start();
-    THEKERNEL.slow_ticker.start();
+    THEKERNEL->step_ticker.start();
+    THEKERNEL->slow_ticker.start();
 }
 
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
@@ -263,13 +265,13 @@ void vTaskMainLoop(void *pvParameters) {
     printk("Mainloop started\n");
 
     while (true) {
-        if(THEKERNEL.is_using_leds()) {
+        if(THEKERNEL->is_using_leds()) {
             // flash led 2 to show we are alive
             leds[1]= (cnt++ & 0x1000) ? 1 : 0;
         }
 
-        THEKERNEL.call_event(ON_MAIN_LOOP);
-        THEKERNEL.call_event(ON_IDLE);
+        THEKERNEL->call_event(ON_MAIN_LOOP);
+        THEKERNEL->call_event(ON_IDLE);
 
         vTaskDelay(1);
     }

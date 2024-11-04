@@ -18,6 +18,6 @@ void SlowTicker::timerCallback() {
 
 void SlowTicker::on_idle(void*) {
     if (ulTaskNotifyTake(pdTRUE, 0) > 0) {
-        THEKERNEL.call_event(ON_SECOND_TICK);
+        THEKERNEL->call_event(ON_SECOND_TICK);
     }
 }

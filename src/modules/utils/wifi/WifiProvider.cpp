@@ -55,7 +55,7 @@ void WifiProvider::on_module_loaded()
     connection_fail_count = 0;
 
     // Check if WiFi is enabled in the configuration
-    if (!THEKERNEL.config->value(wifi_checksum, wifi_enable)->by_default(true)->as_bool()) {
+    if (!THEKERNEL->config->value(wifi_checksum, wifi_enable)->by_default(true)->as_bool()) {
         // Not needed; free up resources
         return;
     }
@@ -63,18 +63,18 @@ void WifiProvider::on_module_loaded()
 	data_callbacks.clear();
 
     // Load configuration values
-    this->tcp_port = THEKERNEL.config->value(wifi_checksum, tcp_port_checksum)->by_default(2222)->as_int();
-    this->udp_send_port = THEKERNEL.config->value(wifi_checksum, udp_send_port_checksum)->by_default(3333)->as_int();
-    this->udp_recv_port = THEKERNEL.config->value(wifi_checksum, udp_recv_port_checksum)->by_default(4444)->as_int();
-    this->tcp_timeout_s = THEKERNEL.config->value(wifi_checksum, tcp_timeout_s_checksum)->by_default(10)->as_int();
-    this->machine_name = THEKERNEL.config->value(wifi_checksum, machine_name_checksum)->by_default("CARVERA")->as_string();
+    this->tcp_port = THEKERNEL->config->value(wifi_checksum, tcp_port_checksum)->by_default(2222)->as_int();
+    this->udp_send_port = THEKERNEL->config->value(wifi_checksum, udp_send_port_checksum)->by_default(3333)->as_int();
+    this->udp_recv_port = THEKERNEL->config->value(wifi_checksum, udp_recv_port_checksum)->by_default(4444)->as_int();
+    this->tcp_timeout_s = THEKERNEL->config->value(wifi_checksum, tcp_timeout_s_checksum)->by_default(10)->as_int();
+    this->machine_name = THEKERNEL->config->value(wifi_checksum, machine_name_checksum)->by_default("CARVERA")->as_string();
 
     // Initialize WiFi module
     this->init_wifi_module(false);
 
     // Set up interrupt for WiFi data reception
     Pin* smoothie_pin = new Pin();
-    smoothie_pin->from_string(THEKERNEL.config->value(wifi_checksum, wifi_interrupt_pin_checksum)->by_default("2.11")->as_string());
+    smoothie_pin->from_string(THEKERNEL->config->value(wifi_checksum, wifi_interrupt_pin_checksum)->by_default("2.11")->as_string());
     smoothie_pin->as_input();
     if (smoothie_pin->port_number == 0 || smoothie_pin->port_number == 2) {
         PinName pinname = port_pin((PortName)smoothie_pin->port_number, smoothie_pin->pin);
@@ -88,7 +88,7 @@ void WifiProvider::on_module_loaded()
     delete smoothie_pin;
 
     // Add this stream to the kernel's stream pool for broadcasting
-    THEKERNEL.streams.append_stream(this);
+    THEKERNEL->streams.append_stream(this);
 
     // Register for events
     this->register_for_event(ON_IDLE);
@@ -130,24 +130,24 @@ void WifiProvider::receive_wifi_data()
 				for (int i = 0; i < received; i++) {
 					// Handle special control characters
 					if (rxData[i] == '?') {
-                        puts(THEKERNEL.get_query_string().c_str());
+                        puts(THEKERNEL->get_query_string().c_str());
 						continue;
 					}
 					if (rxData[i] == '*') {
-                        puts(THEKERNEL.get_diagnose_string().c_str(), 0);
+                        puts(THEKERNEL->get_diagnose_string().c_str(), 0);
 						continue;
 					}
 					if (rxData[i] == 'X' - 'A' + 1) { // Ctrl+X
 						halt();
 						continue;
 					}
-					if (THEKERNEL.is_feed_hold_enabled()) {
+					if (THEKERNEL->is_feed_hold_enabled()) {
 						if (rxData[i] == '!') { // Safe pause
-							THEKERNEL.set_feed_hold(true);
+							THEKERNEL->set_feed_hold(true);
 							continue;
 						}
 						if (rxData[i] == '~') { // Safe resume
-							THEKERNEL.set_feed_hold(false);
+							THEKERNEL->set_feed_hold(false);
 							continue;
 						}
 					}
@@ -207,7 +207,7 @@ void WifiProvider::on_second_tick(void*)
     u8 client_num = 0;
     ClientInfo RemoteClients[15];
 
-    if (!wifi_init_ok || THEKERNEL.is_uploading()) return;
+    if (!wifi_init_ok || THEKERNEL->is_uploading()) return;
 
     // List clients connected to TCP server
     M8266WIFI_SPI_List_Clients_On_A_TCP_Server(tcp_link_no, &client_num, RemoteClients, &status);
@@ -248,7 +248,7 @@ void WifiProvider::on_second_tick(void*)
 
 void WifiProvider::on_idle(void* argument)
 {
-    if (THEKERNEL.is_uploading()) return;
+    if (THEKERNEL->is_uploading()) return;
 
     // Check for incoming data
     if (has_data_flag || M8266WIFI_SPI_Has_DataReceived()) {
@@ -258,8 +258,8 @@ void WifiProvider::on_idle(void* argument)
 }
 
 void WifiProvider::halt(void) {
-    THEKERNEL.call_event(ON_HALT, nullptr);
-    THEKERNEL.set_halt_reason(MANUAL);
+    THEKERNEL->call_event(ON_HALT, nullptr);
+    THEKERNEL->set_halt_reason(MANUAL);
     puts("ALARM: Abort during cycle\r\n");
 }
 
@@ -276,7 +276,7 @@ void WifiProvider::on_main_loop(void* argument)
                 struct SerialMessage message;
                 message.message = received;
                 message.stream = this;
-                THEKERNEL.call_event(ON_CONSOLE_LINE_RECEIVED, &message);
+                THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
                 break;
             } else {
                 received += c;
@@ -403,7 +403,7 @@ void WifiProvider::on_get_public_data(void* argument)
         if (signals == 0) {
             if ((status & 0xff) == 0x26) {
                 // Still scanning; wait
-                THEKERNEL.call_event(ON_IDLE, this);
+                THEKERNEL->call_event(ON_IDLE, this);
                 safe_delay_ms(1);
                 continue;
             } else {
@@ -481,7 +481,7 @@ void WifiProvider::on_set_public_data(void* argument)
                 M8266WIFI_SPI_Get_STA_Connection_Status(&connection_status, &status);
                 if (connection_status == 1) {
                     // Connecting; wait
-                    THEKERNEL.call_event(ON_IDLE, this);
+                    THEKERNEL->call_event(ON_IDLE, this);
                     safe_delay_ms(1);
                     continue;
                 } else if (connection_status == 5) {
@@ -583,7 +583,7 @@ void WifiProvider::init_wifi_module(bool reset)
         // Reset module: delete connections and remove stream
         M8266WIFI_SPI_Delete_Connection(udp_link_no, &status);
         M8266WIFI_SPI_Delete_Connection(tcp_link_no, &status);
-        THEKERNEL.streams.remove_stream(this);
+        THEKERNEL->streams.remove_stream(this);
     }
 
     // Initialize module via SPI
@@ -617,7 +617,7 @@ void WifiProvider::init_wifi_module(bool reset)
 
     if (reset) {
         // Re-append stream after reset
-        THEKERNEL.streams.append_stream(this);
+        THEKERNEL->streams.append_stream(this);
     }
 
     wifi_init_ok = true;

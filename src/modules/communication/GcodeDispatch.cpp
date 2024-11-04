@@ -163,11 +163,11 @@ try_again:
 				gcode->set_variable_value();
 			}
 
-			if(THEKERNEL.is_halted()) {
+			if(THEKERNEL->is_halted()) {
 				// we ignore all commands until M999, unless it is in the exceptions list (like M105 get temp)
 				if(gcode->has_m && gcode->m == 999) {
-					if(THEKERNEL.is_halted()) {
-						THEKERNEL.call_event(ON_HALT, (void *)1); // clears on_halt
+					if(THEKERNEL->is_halted()) {
+						THEKERNEL->call_event(ON_HALT, (void *)1); // clears on_halt
 						new_message.stream->printf("WARNING: After HALT you should HOME as position is currently unknown\n");
 					}
 					new_message.stream->printf("ok\n");
@@ -221,7 +221,7 @@ try_again:
 
 			// new_message.stream->printf("dispatch gcode command: '%s' G%d M%d...", gcode->get_command(), gcode->g, gcode->m);
 			//Dispatch message!
-			THEKERNEL.call_event(ON_GCODE_RECEIVED, gcode );
+			THEKERNEL->call_event(ON_GCODE_RECEIVED, gcode );
 
 			if (gcode->is_error) {
 				// report error
@@ -237,7 +237,7 @@ try_again:
 
 				// we cannot continue safely after an error so we enter HALT state
 				new_message.stream->printf("Entering Alarm/Halt state\n");
-				THEKERNEL.call_event(ON_HALT, nullptr);
+				THEKERNEL->call_event(ON_HALT, nullptr);
 
 			} else {
 
@@ -249,7 +249,7 @@ try_again:
 					gcode->txt_after_ok.clear();
 
 				} else {
-					if(THEKERNEL.is_ok_per_line()) {
+					if(THEKERNEL->is_ok_per_line()) {
 						// only send ok once per line if this is a multi g code line send ok on the last one
 						if(possible_command.empty())
 							new_message.stream->printf("ok\r\n");

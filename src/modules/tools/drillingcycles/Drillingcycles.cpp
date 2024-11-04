@@ -38,7 +38,7 @@
 void Drillingcycles::on_module_loaded()
 {
     // if the module is disabled -> do nothing
-    if(! THEKERNEL.config->value(drillingcycles_checksum, enable_checksum)->by_default(false)->as_bool()) {
+    if(! THEKERNEL->config->value(drillingcycles_checksum, enable_checksum)->by_default(false)->as_bool()) {
         // as this module is not needed free up the resource
         return;
     }
@@ -62,7 +62,7 @@ void Drillingcycles::on_module_loaded()
 void Drillingcycles::on_config_reload(void *argument)
 {
     // take the dwell units configured by user, or select S (seconds) by default
-    string dwell_units = THEKERNEL.config->value(drillingcycles_checksum, dwell_units_checksum)->by_default("S")->as_string();
+    string dwell_units = THEKERNEL->config->value(drillingcycles_checksum, dwell_units_checksum)->by_default("S")->as_string();
     this->dwell_units  = (dwell_units == "P") ? DWELL_UNITS_P : DWELL_UNITS_S;
 }
 
@@ -118,7 +118,7 @@ int Drillingcycles::send_gcode(const char* format, ...)
     //printk(">>> %s\r\n", line);
     // make gcode object and send it (right way)
     Gcode gc(line, &(StreamOutput::NullStream));
-    THEKERNEL.call_event(ON_GCODE_RECEIVED, &gc);
+    THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
     // return the gcode srting length
     return n;
 }

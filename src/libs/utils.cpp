@@ -201,10 +201,10 @@ void system_reset( bool dfu )
 // Convert a path indication ( absolute or relative ) into a path ( absolute )
 std::string absolute_from_relative( std::string path )
 {
-    string cwd = THEKERNEL.current_path;
+    string cwd = THEKERNEL->current_path;
 
     if ( path.empty() ) {
-        return THEKERNEL.current_path;
+        return THEKERNEL->current_path;
     }
 
     if ( path[0] == '/' ) {

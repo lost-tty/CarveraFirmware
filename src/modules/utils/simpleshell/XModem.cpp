@@ -157,7 +157,7 @@ bool XModem::decompress(const std::string& sfilename, const std::string& dfilena
         u32BlockNum += 1;
         if (++k > 10) {
             k = 0;
-            THEKERNEL.call_event(ON_IDLE);
+            THEKERNEL->call_event(ON_IDLE);
         }
 		stream->printf("#Info: decompart = %lu\r\n", u32BlockNum);
     }
@@ -210,7 +210,7 @@ bool XModem::upload(const std::string& filename, StreamOutput* stream) {
         return false;
     }
 
-    THEKERNEL.set_uploading(true);
+    THEKERNEL->set_uploading(true);
 
     unsigned int start_pos = filename.find(".lz");
     FILE *fd;
@@ -376,7 +376,7 @@ upload_error:
         set_serial_rx_irq(true);
     }
 
-    THEKERNEL.set_uploading(false);
+    THEKERNEL->set_uploading(false);
 
     return false;
 
@@ -398,7 +398,7 @@ upload_success:
         set_serial_rx_irq(true);
     }
 
-    THEKERNEL.set_uploading(false);
+    THEKERNEL->set_uploading(false);
 
     start_pos = filename.find(".lz");
     string srcfilename = lzfilename;
@@ -441,7 +441,7 @@ bool XModem::download(const std::string& filename, StreamOutput* stream) {
         return false;
     }
 
-	THEKERNEL.set_uploading(true);
+	THEKERNEL->set_uploading(true);
 
     FILE *fd = fopen(md5_filename.c_str(), "rb");
     if (fd != NULL) {
@@ -460,7 +460,7 @@ bool XModem::download(const std::string& filename, StreamOutput* stream) {
 		do {
 			size_t n = fread(xbuff, 1, sizeof(xbuff), fd);
 			if (n > 0) md5.update(xbuff, n);
-			THEKERNEL.call_event(ON_IDLE);
+			THEKERNEL->call_event(ON_IDLE);
 		} while (!feof(fd));
 		strcpy(md5_str, md5.finalize().hexdigest().c_str());
 		fclose(fd);
@@ -580,7 +580,7 @@ download_error:
     	set_serial_rx_irq(true);
     }
 
-	THEKERNEL.set_uploading(false);
+	THEKERNEL->set_uploading(false);
 
 	return false;
 
@@ -594,7 +594,7 @@ download_success:
     	set_serial_rx_irq(true);
 	}
 	
-	THEKERNEL.set_uploading(false);
+	THEKERNEL->set_uploading(false);
     
     return true;
 }

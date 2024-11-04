@@ -141,22 +141,22 @@ CartGridStrategy::~CartGridStrategy()
 bool CartGridStrategy::handleConfig()
 {
 
-    uint8_t grid_size = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, grid_size_checksum)->by_default(7)->as_number();
-    this->current_grid_x_size = this->configured_grid_x_size = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, grid_x_size_checksum)->by_default(grid_size)->as_number();
-    this->current_grid_y_size = this->configured_grid_y_size = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, grid_y_size_checksum)->by_default(grid_size)->as_number();
+    uint8_t grid_size = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, grid_size_checksum)->by_default(7)->as_number();
+    this->current_grid_x_size = this->configured_grid_x_size = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, grid_x_size_checksum)->by_default(grid_size)->as_number();
+    this->current_grid_y_size = this->configured_grid_y_size = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, grid_y_size_checksum)->by_default(grid_size)->as_number();
 
     // we use a different file format depending on whether it is square or not
     this->new_file_format= (configured_grid_x_size != configured_grid_y_size);
 
-    tolerance = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, tolerance_checksum)->by_default(0.03F)->as_number();
-    save = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, save_checksum)->by_default(false)->as_bool();
-    do_home = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, do_home_checksum)->by_default(true)->as_bool();
-    only_by_two_corners = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, only_by_two_corners_checksum)->by_default(false)->as_bool();
-    human_readable = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, human_readable_checksum)->by_default(false)->as_bool();
-    do_manual_attach = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, m_attach_checksum)->by_default(false)->as_bool();
+    tolerance = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, tolerance_checksum)->by_default(0.03F)->as_number();
+    save = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, save_checksum)->by_default(false)->as_bool();
+    do_home = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, do_home_checksum)->by_default(true)->as_bool();
+    only_by_two_corners = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, only_by_two_corners_checksum)->by_default(false)->as_bool();
+    human_readable = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, human_readable_checksum)->by_default(false)->as_bool();
+    do_manual_attach = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, m_attach_checksum)->by_default(false)->as_bool();
 
-    this->height_limit = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, height_limit_checksum)->by_default(NAN)->as_number();
-    this->dampening_start = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, dampening_start_checksum)->by_default(NAN)->as_number();
+    this->height_limit = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, height_limit_checksum)->by_default(NAN)->as_number();
+    this->dampening_start = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, dampening_start_checksum)->by_default(NAN)->as_number();
 
     if(!isnan(this->height_limit) && !isnan(this->dampening_start)) {
         this->damping_interval = height_limit - dampening_start;
@@ -166,8 +166,8 @@ bool CartGridStrategy::handleConfig()
 
     this->x_start = 0.0F;
     this->y_start = 0.0F;
-    this->x_size = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, x_size_checksum)->by_default(0.0F)->as_number();
-    this->y_size = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, y_size_checksum)->by_default(0.0F)->as_number();
+    this->x_size = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, x_size_checksum)->by_default(0.0F)->as_number();
+    this->y_size = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, y_size_checksum)->by_default(0.0F)->as_number();
     if (this->x_size == 0.0F || this->y_size == 0.0F) {
         printk("Error: Invalid config, x_size and y_size must be defined\n");
         return false;
@@ -175,12 +175,12 @@ bool CartGridStrategy::handleConfig()
 
     // the initial height above the bed we stop the intial move down after home to find the bed
     // this should be a height that is enough that the probe will not hit the bed and is an offset from max_z (can be set to 0 if max_z takes into account the probe offset)
-    this->initial_height = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, initial_height_checksum)->by_default(NAN)->as_number();
+    this->initial_height = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, initial_height_checksum)->by_default(NAN)->as_number();
     if(initial_height <= 0) initial_height= NAN;
 
     // Probe offsets xxx,yyy,zzz
     {
-        std::string po = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, probe_offsets_checksum)->by_default("0,0,0")->as_string();
+        std::string po = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, probe_offsets_checksum)->by_default("0,0,0")->as_string();
         std::vector<float> v = parse_number_list(po.c_str());
         if(v.size() >= 3) {
             this->probe_offsets = std::make_tuple(v[0], v[1], v[2]);
@@ -190,7 +190,7 @@ bool CartGridStrategy::handleConfig()
     //  manual attachment point xxx,yyy,zzz
     if (do_manual_attach)
     {
-        std::string ap = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, mount_position_checksum)->by_default("0,0,50")->as_string();
+        std::string ap = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, mount_position_checksum)->by_default("0,0,50")->as_string();
         std::vector<float> w = parse_number_list(ap.c_str());
         if(w.size() >= 3) {
             m_attach = new float[3];
@@ -206,8 +206,8 @@ bool CartGridStrategy::handleConfig()
         m_attach= nullptr;
     }
 
-    this->before_probe = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, before_probe_gcode_checksum)->by_default("")->as_string();
-    this->after_probe = THEKERNEL.config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, after_probe_gcode_checksum)->by_default("")->as_string();
+    this->before_probe = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, before_probe_gcode_checksum)->by_default("")->as_string();
+    this->after_probe = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, after_probe_gcode_checksum)->by_default("")->as_string();
 
     // for the gcode commands we need to replace _ for space
     std::replace(before_probe.begin(), before_probe.end(), '_', ' '); // replace _ with space
@@ -383,7 +383,7 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
 
             if(!before_probe.empty()) {
                 Gcode gc(before_probe, &(StreamOutput::NullStream));
-                THEKERNEL.call_event(ON_GCODE_RECEIVED, &gc);
+                THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
             }
 
             THEROBOT.disable_segmentation= true;
@@ -396,7 +396,7 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
 
             if(!after_probe.empty()) {
                 Gcode gc(after_probe, &(StreamOutput::NullStream));
-                THEKERNEL.call_event(ON_GCODE_RECEIVED, &gc);
+                THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
             }
 
             return true;
@@ -412,7 +412,7 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
 
             if(!before_probe.empty()) {
                 Gcode gc(before_probe, &(StreamOutput::NullStream));
-                THEKERNEL.call_event(ON_GCODE_RECEIVED, &gc);
+                THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
             }
 
             if(!scan_bed(gcode)) {
@@ -421,7 +421,7 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
 
             if(!after_probe.empty()) {
                 Gcode gc(after_probe, &(StreamOutput::NullStream));
-                THEKERNEL.call_event(ON_GCODE_RECEIVED, &gc);
+                THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
             }
             return true;
         }
@@ -636,8 +636,8 @@ bool CartGridStrategy::doProbe(Gcode *gc)
         gc->stream->printf(" ************************************************************\n");
 
         while( !zprobe->getProbeStatus()) {
-            if(THEKERNEL.is_halted()) return(false);
-            THEKERNEL.call_event(ON_IDLE);
+            if(THEKERNEL->is_halted()) return(false);
+            THEKERNEL->call_event(ON_IDLE);
         }
     }
 

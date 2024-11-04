@@ -42,7 +42,7 @@ void SerialConsole::on_module_loaded() {
     this->register_for_event(ON_SET_PUBLIC_DATA);
 
     // Add to the pack of streams kernel can call to, for example for broadcasting
-    THEKERNEL.streams.append_stream(this);
+    THEKERNEL->streams.append_stream(this);
 }
 
 void SerialConsole::attach_irq(bool enable_irq) {
@@ -82,13 +82,13 @@ void SerialConsole::on_serial_char_received() {
 			halt_flag = true;
 			continue;
 		}
-        if(THEKERNEL.is_feed_hold_enabled()) {
+        if(THEKERNEL->is_feed_hold_enabled()) {
             if(received == '!') { // safe pause
-                THEKERNEL.set_feed_hold(true);
+                THEKERNEL->set_feed_hold(true);
                 continue;
             }
             if(received == '~') { // safe resume
-                THEKERNEL.set_feed_hold(false);
+                THEKERNEL->set_feed_hold(false);
                 continue;
             }
         }
@@ -100,22 +100,22 @@ void SerialConsole::on_serial_char_received() {
 
 void SerialConsole::on_idle(void * argument)
 {
-	if (THEKERNEL.is_uploading()) return;
+	if (THEKERNEL->is_uploading()) return;
 
     if (query_flag ) {
         query_flag = false;
-        puts(THEKERNEL.get_query_string().c_str(), 0);
+        puts(THEKERNEL->get_query_string().c_str(), 0);
     }
 
     if (diagnose_flag) {
     	diagnose_flag = false;
-    	puts(THEKERNEL.get_diagnose_string().c_str(), 0);
+    	puts(THEKERNEL->get_diagnose_string().c_str(), 0);
     }
 
     if (halt_flag) {
         halt_flag= false;
-        THEKERNEL.call_event(ON_HALT, nullptr);
-        THEKERNEL.set_halt_reason(MANUAL);
+        THEKERNEL->call_event(ON_HALT, nullptr);
+        THEKERNEL->set_halt_reason(MANUAL);
         puts("ALARM: Abort during cycle\r\n", 0);
     }
 }
@@ -133,7 +133,7 @@ void SerialConsole::on_main_loop(void * argument){
                 message.message = received;
                 message.stream = this;
                 message.line = 0;
-                THEKERNEL.call_event(ON_CONSOLE_LINE_RECEIVED, &message );
+                THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
                 // this->puts(received.c_str());
                 return;
             }else{

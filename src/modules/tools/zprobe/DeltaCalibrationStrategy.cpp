@@ -28,16 +28,16 @@
 bool DeltaCalibrationStrategy::handleConfig()
 {
     // default is probably wrong
-    float r= THEKERNEL.config->value(leveling_strategy_checksum, delta_calibration_strategy_checksum, radius_checksum)->by_default(-1)->as_number();
+    float r= THEKERNEL->config->value(leveling_strategy_checksum, delta_calibration_strategy_checksum, radius_checksum)->by_default(-1)->as_number();
     if(r == -1) {
         // deprecated config syntax]
-        r =  THEKERNEL.config->value(zprobe_checksum, probe_radius_checksum)->by_default(100.0F)->as_number();
+        r =  THEKERNEL->config->value(zprobe_checksum, probe_radius_checksum)->by_default(100.0F)->as_number();
     }
     this->probe_radius= r;
 
     // the initial height above the bed we stop the intial move down after home to find the bed
     // this should be a height that is enough that the probe will not hit the bed and is an offset from max_z (can be set to 0 if max_z takes into account the probe offset)
-    this->initial_height= THEKERNEL.config->value(leveling_strategy_checksum, delta_calibration_strategy_checksum, initial_height_checksum)->by_default(10)->as_number();
+    this->initial_height= THEKERNEL->config->value(leveling_strategy_checksum, delta_calibration_strategy_checksum, initial_height_checksum)->by_default(10)->as_number();
     return true;
 }
 
@@ -285,7 +285,7 @@ bool DeltaCalibrationStrategy::calibrate_delta_endstops(Gcode *gcode)
         trimz += (mmx.first - t3z) * trimscale;
 
         // flush the output
-        THEKERNEL.call_event(ON_IDLE);
+        THEKERNEL->call_event(ON_IDLE);
     }
 
     if((mmx.second - mmx.first) > target) {
@@ -381,7 +381,7 @@ bool DeltaCalibrationStrategy::calibrate_delta_radius(Gcode *gcode)
         zprobe->coordinated_move(NAN, NAN, -bedht, zprobe->getFastFeedrate(), true); // needs to be a relative coordinated move
 
         // flush the output
-        THEKERNEL.call_event(ON_IDLE);
+        THEKERNEL->call_event(ON_IDLE);
     }
 
     if(!good) {

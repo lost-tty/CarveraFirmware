@@ -167,8 +167,8 @@ void SimpleShell::on_console_line_received( void *argument )
                 break;
 
             case 'X':
-                if(THEKERNEL.is_halted()) {
-                    THEKERNEL.call_event(ON_HALT, (void *)1); // clears on_halt
+                if(THEKERNEL->is_halted()) {
+                    THEKERNEL->call_event(ON_HALT, (void *)1); // clears on_halt
                     new_message.stream->printf("[Caution: Unlocked]\nok\n");
                 }
                 break;
@@ -180,10 +180,10 @@ void SimpleShell::on_console_line_received( void *argument )
 
             case 'H':
                 {
-                    if(THEKERNEL.is_halted()) THEKERNEL.call_event(ON_HALT, (void *)1); // clears on_halt
+                    if(THEKERNEL->is_halted()) THEKERNEL->call_event(ON_HALT, (void *)1); // clears on_halt
                     // issue G28.2 which is force homing cycle
                     Gcode gcode("G28.2", new_message.stream);
-                    THEKERNEL.call_event(ON_GCODE_RECEIVED, &gcode);
+                    THEKERNEL->call_event(ON_GCODE_RECEIVED, &gcode);
 
                     new_message.stream->printf("ok\n");
                 }
@@ -476,7 +476,7 @@ void SimpleShell::cd_command( string parameters, StreamOutput *stream )
     if (d == NULL) {
         stream->printf("Could not open directory %s \r\n", folder.c_str() );
     } else {
-        THEKERNEL.current_path = folder;
+        THEKERNEL->current_path = folder;
         closedir(d);
     }
 }
@@ -484,7 +484,7 @@ void SimpleShell::cd_command( string parameters, StreamOutput *stream )
 // Responds with the present working directory
 void SimpleShell::pwd_command( string parameters, StreamOutput *stream )
 {
-    stream->printf("%s\r\n", THEKERNEL.current_path.c_str());
+    stream->printf("%s\r\n", THEKERNEL->current_path.c_str());
 }
 
 // Output the contents of a file, first parameter is the filename, second is the limit ( in number of lines to output )
@@ -550,7 +550,7 @@ void SimpleShell::cat_command( string parameters, StreamOutput *stream )
             memset(buffer, 0, sizeof(buffer));
             charcnt = 0;
             // we need to kick things or they die
-            THEKERNEL.call_event(ON_IDLE);
+            THEKERNEL->call_event(ON_IDLE);
         }
         if ( newlines == limit ) {
             break;
@@ -1001,8 +1001,8 @@ void SimpleShell::sleep_command(string parameters, StreamOutput *stream)
 	// turn off 12V/24V power supply
 	PublicData::set_value( main_button_checksum, switch_power_12_checksum, &power_off );
 	PublicData::set_value( main_button_checksum, switch_power_24_checksum, &power_off );
-	THEKERNEL.set_sleeping(true);
-	THEKERNEL.call_event(ON_HALT, nullptr);
+	THEKERNEL->set_sleeping(true);
+	THEKERNEL->call_event(ON_HALT, nullptr);
 }
 
 // sleep command
@@ -1224,7 +1224,7 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
             message.message = cmd;
             message.stream = &(StreamOutput::NullStream);
             message.line = 0;
-            THEKERNEL.call_event(ON_CONSOLE_LINE_RECEIVED, &message );
+            THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
             THECONVEYOR.wait_for_idle();
         }
 
@@ -1261,7 +1261,7 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
 
     } else if (what == "status") {
         // also ? on serial and usb
-        stream->printf("%s\n", THEKERNEL.get_query_string().c_str());
+        stream->printf("%s\n", THEKERNEL->get_query_string().c_str());
 
     } else if (what == "compensation") {
     	float mpos[3];
@@ -1327,7 +1327,7 @@ void SimpleShell::calc_thermistor_command( string parameters, StreamOutput *stre
             if(n > sizeof(buf)) n= sizeof(buf);
             string g(buf, n);
             Gcode gcode(g, &(StreamOutput::NullStream));
-            THEKERNEL.call_event(ON_GCODE_RECEIVED, &gcode );
+            THEKERNEL->call_event(ON_GCODE_RECEIVED, &gcode );
             stream->printf("  Setting Thermistor %d to those settings, save with M500\n", saveto);
         }
 
@@ -1406,7 +1406,7 @@ void SimpleShell::md5sum_command( string parameters, StreamOutput *stream )
 	do {
 		size_t n= fread(buf, 1, sizeof buf, lp);
 		if(n > 0) md5.update(buf, n);
-		THEKERNEL.call_event(ON_IDLE);
+		THEKERNEL->call_event(ON_IDLE);
 	} while(!feof(lp));
 
 	stream->printf("%s %s\n", md5.finalize().hexdigest().c_str(), filename.c_str());
@@ -1440,8 +1440,8 @@ void SimpleShell::test_command( string parameters, StreamOutput *stream)
             snprintf(cmd, sizeof(cmd), "G91 G0 %c%f F%f G90", toupper(axis[0]), toggle ? -d : d, f);
             stream->printf("%s\n", cmd);
             struct SerialMessage message{&StreamOutput::NullStream, cmd, 0};
-            THEKERNEL.call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-            if(THEKERNEL.is_halted()) break;
+            THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
+            if(THEKERNEL->is_halted()) break;
             toggle= !toggle;
         }
         stream->printf("done\n");
@@ -1465,23 +1465,23 @@ void SimpleShell::test_command( string parameters, StreamOutput *stream)
         snprintf(cmd, sizeof(cmd), "G91 G0 X%f F%f G90", -r, f);
         stream->printf("%s\n", cmd);
         struct SerialMessage message{&StreamOutput::NullStream, cmd, 0};
-        THEKERNEL.call_event(ON_CONSOLE_LINE_RECEIVED, &message );
+        THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
 
         for (uint32_t i = 0; i < n; ++i) {
-            if(THEKERNEL.is_halted()) break;
+            if(THEKERNEL->is_halted()) break;
             snprintf(cmd, sizeof(cmd), "G2 I%f J0 F%f", r, f);
             stream->printf("%s\n", cmd);
             message.message= cmd;
             message.line = 0;
-            THEKERNEL.call_event(ON_CONSOLE_LINE_RECEIVED, &message );
+            THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
         }
 
         // leave it where it started
-        if(!THEKERNEL.is_halted()) {
+        if(!THEKERNEL->is_halted()) {
             snprintf(cmd, sizeof(cmd), "G91 G0 X%f F%f G90", r, f);
             stream->printf("%s\n", cmd);
             struct SerialMessage message{&StreamOutput::NullStream, cmd, 0};
-            THEKERNEL.call_event(ON_CONSOLE_LINE_RECEIVED, &message );
+            THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
         }
 
         THEROBOT.pop_state();
@@ -1506,27 +1506,27 @@ void SimpleShell::test_command( string parameters, StreamOutput *stream)
                 snprintf(cmd, sizeof(cmd), "G91 G0 X%f F%f", d, f);
                 stream->printf("%s\n", cmd);
                 struct SerialMessage message{&StreamOutput::NullStream, cmd, 0};
-                THEKERNEL.call_event(ON_CONSOLE_LINE_RECEIVED, &message );
+                THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
             }
             {
                 snprintf(cmd, sizeof(cmd), "G0 Y%f", d);
                 stream->printf("%s\n", cmd);
                 struct SerialMessage message{&StreamOutput::NullStream, cmd, 0};
-                THEKERNEL.call_event(ON_CONSOLE_LINE_RECEIVED, &message );
+                THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
             }
             {
                 snprintf(cmd, sizeof(cmd), "G0 X%f", -d);
                 stream->printf("%s\n", cmd);
                 struct SerialMessage message{&StreamOutput::NullStream, cmd, 0};
-                THEKERNEL.call_event(ON_CONSOLE_LINE_RECEIVED, &message );
+                THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
             }
             {
                 snprintf(cmd, sizeof(cmd), "G0 Y%f G90", -d);
                 stream->printf("%s\n", cmd);
                 struct SerialMessage message{&StreamOutput::NullStream, cmd, 0};
-                THEKERNEL.call_event(ON_CONSOLE_LINE_RECEIVED, &message );
+                THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
             }
-            if(THEKERNEL.is_halted()) break;
+            if(THEKERNEL->is_halted()) break;
          }
         stream->printf("done\n");
 
@@ -1563,7 +1563,7 @@ void SimpleShell::test_command( string parameters, StreamOutput *stream)
         
         vTaskSuspendAll();
         for(int s= 0;s<steps;s++) {
-            if(THEKERNEL.is_halted()) break;
+            if(THEKERNEL->is_halted()) break;
             THEROBOT.actuators[a]->manual_step(dir);
 
             wait_us(delayus);
@@ -1722,7 +1722,7 @@ void SimpleShell::config_get_all_command( string parameters, StreamOutput *strea
 
 			buffer.clear();
 			// we need to kick things or they die
-			THEKERNEL.call_event(ON_IDLE);
+			THEKERNEL->call_event(ON_IDLE);
 		}
 	}
 

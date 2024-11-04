@@ -47,7 +47,7 @@ void TemperatureSwitch::on_module_loaded()
     vector<uint16_t> modulist;
 
     // allow for multiple temperature switches
-    THEKERNEL.config->get_module_list(&modulist, temperatureswitch_checksum);
+    THEKERNEL->config->get_module_list(&modulist, temperatureswitch_checksum);
 
     for (auto m : modulist) {
         load_config(m);
@@ -57,12 +57,12 @@ void TemperatureSwitch::on_module_loaded()
 TemperatureSwitch* TemperatureSwitch::load_config(uint16_t modcs)
 {
     // see if enabled
-    if (!THEKERNEL.config->value(temperatureswitch_checksum, modcs, enable_checksum)->by_default(false)->as_bool()) {
+    if (!THEKERNEL->config->value(temperatureswitch_checksum, modcs, enable_checksum)->by_default(false)->as_bool()) {
         return nullptr;
     }
 
     // load settings from config file
-    string switchname = THEKERNEL.config->value(temperatureswitch_checksum, modcs, temperatureswitch_switch_checksum)->by_default("")->as_string();
+    string switchname = THEKERNEL->config->value(temperatureswitch_checksum, modcs, temperatureswitch_switch_checksum)->by_default("")->as_string();
     if(switchname.empty()) {
 		// no switch specified so invalid entry
 		printk("WARNING TEMPERATURESWITCH: no switch specified\n");
@@ -74,11 +74,11 @@ TemperatureSwitch* TemperatureSwitch::load_config(uint16_t modcs)
 
     ts->temperatureswitch_switch_cs = get_checksum(switchname); // checksum of the switch to use
 
-    ts->temperatureswitch_threshold_temp = THEKERNEL.config->value(temperatureswitch_checksum, modcs, temperatureswitch_threshold_temp_checksum)->by_default(35.0f)->as_number();
-    ts->temperatureswitch_cooldown_power_init = THEKERNEL.config->value(temperatureswitch_checksum, modcs, temperatureswitch_cooldown_power_init_checksum)->by_default(50.0f)->as_number();
-    ts->temperatureswitch_cooldown_power_step = THEKERNEL.config->value(temperatureswitch_checksum, modcs, temperatureswitch_cooldown_power_step_checksum)->by_default(10.0f)->as_number();
-    ts->temperatureswitch_cooldown_power_laser = THEKERNEL.config->value(temperatureswitch_checksum, modcs, temperatureswitch_cooldown_power_laser_checksum)->by_default(80.0f)->as_number();
-    ts->temperatureswitch_cooldown_delay = THEKERNEL.config->value(temperatureswitch_checksum, modcs, temperatureswitch_cooldown_delay_checksum)->by_default(180)->as_number();
+    ts->temperatureswitch_threshold_temp = THEKERNEL->config->value(temperatureswitch_checksum, modcs, temperatureswitch_threshold_temp_checksum)->by_default(35.0f)->as_number();
+    ts->temperatureswitch_cooldown_power_init = THEKERNEL->config->value(temperatureswitch_checksum, modcs, temperatureswitch_cooldown_power_init_checksum)->by_default(50.0f)->as_number();
+    ts->temperatureswitch_cooldown_power_step = THEKERNEL->config->value(temperatureswitch_checksum, modcs, temperatureswitch_cooldown_power_step_checksum)->by_default(10.0f)->as_number();
+    ts->temperatureswitch_cooldown_power_laser = THEKERNEL->config->value(temperatureswitch_checksum, modcs, temperatureswitch_cooldown_power_laser_checksum)->by_default(80.0f)->as_number();
+    ts->temperatureswitch_cooldown_delay = THEKERNEL->config->value(temperatureswitch_checksum, modcs, temperatureswitch_cooldown_delay_checksum)->by_default(180)->as_number();
 
     // set initial state
     ts->cooldown_delay_counter = -1;
@@ -92,7 +92,7 @@ TemperatureSwitch* TemperatureSwitch::load_config(uint16_t modcs)
 void TemperatureSwitch::on_second_tick(void *argument)
 {
 	bool ok;
-	if (THEKERNEL.get_laser_mode()) {
+	if (THEKERNEL->get_laser_mode()) {
     	if (cooldown_delay_counter != -88)
     		printk("Laser on, Turn on spindle fan...\r\n");
     	struct pad_switch pad;
@@ -106,7 +106,7 @@ void TemperatureSwitch::on_second_tick(void *argument)
 	} else {
 	    float current_temp = this->get_highest_temperature();
 	    if (current_temp >= this->temperatureswitch_threshold_temp) {
-//	    	if (cooldown_delay_counter != -99 && !THEKERNEL.is_uploading())
+//	    	if (cooldown_delay_counter != -99 && !THEKERNEL->is_uploading())
 //	    		printk("Spindle temp: [%.2f], Turn on spindle fan...\r\n", current_temp);
 	    	struct pad_switch pad;
 	    	pad.state = true;
@@ -122,7 +122,7 @@ void TemperatureSwitch::on_second_tick(void *argument)
 	    	} else if (cooldown_delay_counter >= 0) {
 	    		cooldown_delay_counter ++;
 	    		if (cooldown_delay_counter > temperatureswitch_cooldown_delay) {
-//	    			if (!THEKERNEL.is_uploading())
+//	    			if (!THEKERNEL->is_uploading())
 //	    				printk("Spindle temp: [%.2f], Turn off spindle fan...\r\n", current_temp);
 	    			bool switch_state = false;
 	    		    ok = PublicData::set_value(switch_checksum, this->temperatureswitch_switch_cs, state_checksum, &switch_state);

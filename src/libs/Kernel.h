@@ -209,7 +209,7 @@ class Kernel {
 
 };
 
-extern Kernel THEKERNEL;
+extern Kernel* THEKERNEL;
 extern Conveyor THECONVEYOR;
 extern Robot THEROBOT;
 extern SimpleShell simpleshell;
