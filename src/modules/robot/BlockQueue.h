@@ -4,7 +4,7 @@
 #include "Block.h"
 
 template<unsigned int length>
-class __attribute__((packed)) BlockQueue {
+class BlockQueue {
 
     // friend classes
     friend class Planner;

@@ -11,8 +11,8 @@
 #include <cstdint>
 #include "ActuatorCoordinates.h"
 
-#pragma pack(push, 1)
-class __attribute__((packed)) Block {
+#pragma pack(push, 4) // word aligned: LDRD/STRD work, no int64 padding
+class Block {
     public:
         Block();
 
@@ -75,7 +75,7 @@ class __attribute__((packed)) Block {
         // 2024
         // uint16_t s_values[8];
 
-        struct __attribute__((packed)) {
+        struct {
             bool recalculate_flag:1;             // Planner flag to recalculate trapezoids on entry junction
             bool nominal_length_flag:1;          // Planner flag for nominal speed always reached
             bool is_ready:1;
