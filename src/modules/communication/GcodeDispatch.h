@@ -26,4 +26,5 @@ public:
     uint8_t get_modal_command() const { return modal_group_1<4 ? modal_group_1 : 0; }
 private:
     uint8_t modal_group_1;
+    bool homed_check;
 };

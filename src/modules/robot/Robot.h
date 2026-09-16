@@ -56,6 +56,7 @@ class Robot : public Module {
         void get_axis_position(float position[], size_t n= 3) const { memcpy(position, this->machine_position, n*sizeof(float)); }
         wcs_t get_axis_position() const { return wcs_t(machine_position[X_AXIS], machine_position[Y_AXIS], machine_position[Z_AXIS]); }
         void get_current_machine_position(float *pos) const;
+        bool is_homed_all_axes() const { return is_homed(X_AXIS) && is_homed(Y_AXIS) && is_homed(Z_AXIS); }
         void print_position(uint8_t subcode, std::string& buf, bool ignore_extruders=false) const;
         uint8_t get_current_wcs() const { return current_wcs; }
         std::vector<wcs_t> get_wcs_state() const;

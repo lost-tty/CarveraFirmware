@@ -81,6 +81,7 @@ private:
     void fill_drop_scripts(int old_tool);
     void fill_pick_scripts(int new_tool, bool clear_z);
     void fill_cali_scripts(bool is_probe, bool clear_z);
+    void fill_commit_tool_scripts(int new_tool);
 
     //
     void fill_margin_scripts(float x_pos, float y_pos, float x_pos_max, float y_pos_max);

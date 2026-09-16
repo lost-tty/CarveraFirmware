@@ -118,10 +118,6 @@
 // The Robot converts GCodes into actual movements, and then adds them to the Planner, which passes them to the Conveyor so they can be added to the queue
 // It takes care of cutting arcs into segments, same thing for line that are too long
 
-float ROUND_NEAR_HALF(float x) {
-	return roundf(x * 200.0) / 200.0;
-}
-
 void Robot::init()
 {
     this->inch_mode = false;
@@ -601,8 +597,8 @@ void Robot::on_gcode_received(void *argument)
                 }
                 break;
 
-            case 90: this->absolute_mode = true; break;
-            case 91: this->absolute_mode = false; break;
+            case 90: if (gcode->subcode == 0) this->absolute_mode = true; break;  // G90.1 is arc center mode, not handled
+            case 91: if (gcode->subcode == 0) this->absolute_mode = false; break;
 
             case 92: {
                 if(gcode->subcode == 1 || gcode->subcode == 2 || gcode->get_num_args() == 0) {
@@ -762,7 +758,10 @@ void Robot::on_gcode_received(void *argument)
                     if(actuators[i]->is_extruder()) continue; //extruders handle this themselves
                     char axis= (i <= Z_AXIS ? 'X'+i : 'A'+(i-A_AXIS));
                     if(gcode->has_letter(axis)) {
-                        actuators[i]->change_steps_per_mm(this->to_millimeters(gcode->get_value(axis)));
+                        // steps per inch -> steps per mm on linear axes; rotary axes are degrees either way
+                        float steps = gcode->get_value(axis);
+                        if (i <= Z_AXIS) steps = this->from_millimeters(steps);
+                        actuators[i]->change_steps_per_mm(steps);
                     }
                     gcode->stream->printf("%c:%f ", axis, actuators[i]->get_steps_per_mm());
                 }
@@ -1129,28 +1128,28 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
         if (this->absolute_mode) {
             // apply wcs offsets and g92 offset and tool offset
             if(!isnan(param[X_AXIS])) {
-                target[X_AXIS]= ROUND_NEAR_HALF(param[X_AXIS] + std::get<X_AXIS>(wcs_offsets[current_wcs]) - std::get<X_AXIS>(g92_offset) + std::get<X_AXIS>(tool_offset));
+                target[X_AXIS]= param[X_AXIS] + std::get<X_AXIS>(wcs_offsets[current_wcs]) - std::get<X_AXIS>(g92_offset) + std::get<X_AXIS>(tool_offset);
             }
 
             if(!isnan(param[Y_AXIS])) {
-                target[Y_AXIS]= ROUND_NEAR_HALF(param[Y_AXIS] + std::get<Y_AXIS>(wcs_offsets[current_wcs]) - std::get<Y_AXIS>(g92_offset) + std::get<Y_AXIS>(tool_offset));
+                target[Y_AXIS]= param[Y_AXIS] + std::get<Y_AXIS>(wcs_offsets[current_wcs]) - std::get<Y_AXIS>(g92_offset) + std::get<Y_AXIS>(tool_offset);
             }
 
             if(!isnan(param[Z_AXIS])) {
-                target[Z_AXIS]= ROUND_NEAR_HALF(param[Z_AXIS] + std::get<Z_AXIS>(wcs_offsets[current_wcs]) - std::get<Z_AXIS>(g92_offset) + std::get<Z_AXIS>(tool_offset));
+                target[Z_AXIS]= param[Z_AXIS] + std::get<Z_AXIS>(wcs_offsets[current_wcs]) - std::get<Z_AXIS>(g92_offset) + std::get<Z_AXIS>(tool_offset);
             }
 
         } else {
             // they are deltas from the machine_position if specified
             for(int i= X_AXIS; i <= Z_AXIS; ++i) {
-                if(!isnan(param[i])) target[i] = ROUND_NEAR_HALF(param[i] + machine_position[i]);
+                if(!isnan(param[i])) target[i] = param[i] + machine_position[i];
             }
         }
 
     }else{
         // already in machine coordinates, we do not add wcs or tool offset for that
         for(int i= X_AXIS; i <= Z_AXIS; ++i) {
-            if(!isnan(param[i])) target[i] = ROUND_NEAR_HALF(param[i]);
+            if(!isnan(param[i])) target[i] = param[i];
         }
     }
 

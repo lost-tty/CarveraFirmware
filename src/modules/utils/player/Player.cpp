@@ -52,7 +52,6 @@ extern SDFAT mounter;
 void Player::on_module_loaded()
 {
     this->playing_file = false;
-    this->current_file_handler = nullptr;
     this->booted = false;
     this->start_time = xTaskGetTickCount();
     this->reply_stream = nullptr;
@@ -219,19 +218,14 @@ void Player::play_command( string parameters, StreamOutput *stream )
         return;
     }
 
-    if (this->current_file_handler != NULL) { // must have been a paused print
-        fclose(this->current_file_handler);
+    if (!THEROBOT.is_homed_all_axes()) {
+        stream->printf("error:Machine has not been homed, home first\r\n");
+        THEKERNEL->set_halt_reason(NON_HOME);
+        THEKERNEL->call_event(ON_HALT, nullptr);
+        return;
     }
 
-//    this->temp_file_handler = fopen ("/sd/gcodes/temp.nc", "w");
-//    if (this->temp_file_handler == NULL) {
-//        stream->printf("File open error: /sd/gcodes/temp.nc\n");
-//        return;
-//    }
-
-
-    this->current_file_handler = fopen( this->filename.c_str(), "r");
-    if(this->current_file_handler == NULL) {
+    if (!file.open(this->filename.c_str())) { // also closes a paused print
         stream->printf("File not found: %s\r\n", this->filename.c_str());
         return;
     }
@@ -248,18 +242,11 @@ void Player::play_command( string parameters, StreamOutput *stream )
         this->current_stream = &THEKERNEL->streams;
     }
 
-    // get size of file
-    int result = fseek(this->current_file_handler, 0, SEEK_END);
-    if (0 != result) {
+    if (file.size() == 0) {
         stream->printf("WARNING - Could not get file size\r\n");
-        file_size = 0;
     } else {
-        file_size = ftell(this->current_file_handler);
-        fseek(this->current_file_handler, 0, SEEK_SET);
-        stream->printf("  File size %ld\r\n", file_size);
+        stream->printf("  File size %ld\r\n", file.size());
     }
-    this->played_cnt = 0;
-    this->played_lines = 0;
     this->start_time = xTaskGetTickCount();
     this->playing_lines = 0;
     this->goto_line = 0;
@@ -279,7 +266,7 @@ void Player::goto_command( string parameters, StreamOutput *stream )
         return;
     }
 
-    if (this->current_file_handler == NULL) {
+    if (!file.is_open()) {
     	stream->printf("Missing file handle!\r\n");
     	return;
     }
@@ -290,27 +277,7 @@ void Player::goto_command( string parameters, StreamOutput *stream )
         this->goto_line = strtol(line_str.c_str(), &ptr, 10);
         this->goto_line = this->goto_line < 1 ? 1 : this->goto_line;
         stream->printf("Goto line %lu...\r\n", this->goto_line);
-        // goto line
-        char buf[130]; // lines upto 128 characters are allowed, anything longer is discarded
-
-        // goto file begin
-        fseek(this->current_file_handler, 0, SEEK_SET);
-        played_lines = 0;
-        played_cnt   = 0;
-
-        while (fgets(buf, sizeof(buf), this->current_file_handler) != NULL) {
-        	if (played_lines % 100 == 0) {
-                THEKERNEL->call_event(ON_IDLE);
-        	}
-        	int len = strlen(buf);
-            if (len == 0) continue; // empty line? should not be possible
-
-            played_lines += 1;
-            played_cnt += len;
-            if (played_lines >= this->goto_line) {
-            	break;
-            }
-        }
+        file.seek_line(this->goto_line);
     }
 }
 
@@ -321,11 +288,11 @@ void Player::progress_command( string parameters, StreamOutput *stream )
     string options = shift_parameter( parameters );
     bool sdprinting= options.find_first_of("Bb") != string::npos;
 
-    if(!playing_file && current_file_handler != NULL) {
+    if(!playing_file && file.is_open()) {
         if(sdprinting)
-            stream->printf("SD printing byte %lu/%lu\r\n", played_cnt, file_size);
+            stream->printf("SD printing byte %lu/%lu\r\n", file.bytes(), file.size());
         else
-            stream->printf("SD print is paused at %lu/%lu\r\n", played_cnt, file_size);
+            stream->printf("SD print is paused at %lu/%lu\r\n", file.bytes(), file.size());
         return;
 
     } else if(!playing_file) {
@@ -333,16 +300,16 @@ void Player::progress_command( string parameters, StreamOutput *stream )
         return;
     }
 
-    if(file_size > 0) {
+    if(file.size() > 0) {
         unsigned long est = 0;
         unsigned long elapsed_secs = calculate_elapsed_secs();
         if(elapsed_secs > 10) {
-            unsigned long bytespersec = played_cnt / elapsed_secs;
+            unsigned long bytespersec = file.bytes() / elapsed_secs;
             if(bytespersec > 0)
-                est = (file_size - played_cnt) / bytespersec;
+                est = (file.size() - file.bytes()) / bytespersec;
         }
 
-        float pcnt = (((float)file_size - (file_size - played_cnt)) * 100.0F) / file_size;
+        float pcnt = file.bytes() * 100.0F / file.size();
         // If -b or -B is passed, report in the format used by Marlin and the others.
         if (!sdprinting) {
             stream->printf("file: %s, %u %% complete, elapsed time: %02lu:%02lu:%02lu", this->filename.c_str(), (unsigned int)roundf(pcnt), elapsed_secs / 3600, (elapsed_secs % 3600) / 60, elapsed_secs % 60);
@@ -351,7 +318,7 @@ void Player::progress_command( string parameters, StreamOutput *stream )
             }
             stream->printf("\r\n");
         } else {
-            stream->printf("SD printing byte %lu/%lu\r\n", played_cnt, file_size);
+            stream->printf("SD printing byte %lu/%lu\r\n", file.bytes(), file.size());
         }
 
     } else {
@@ -361,23 +328,18 @@ void Player::progress_command( string parameters, StreamOutput *stream )
 
 void Player::abort_command( string parameters, StreamOutput *stream )
 {
-    if(!playing_file && current_file_handler == NULL) {
+    if(!playing_file && !file.is_open()) {
         stream->printf("Not currently playing\r\n");
         return;
     }
 
     this->playing_file = false;
-    this->played_cnt = 0;
-    this->played_lines = 0;
     this->playing_lines = 0;
     this->goto_line = 0;
-    this->file_size = 0;
     this->clear_buffered_queue();
     this->filename = "";
     this->current_stream = NULL;
-
-    fclose(current_file_handler);
-    current_file_handler = NULL;
+    file.close();
 
     THEKERNEL->set_suspending(false);
     THEKERNEL->set_waiting(true);
@@ -456,140 +418,29 @@ void Player::on_main_loop(void *argument)
             return;
         }
 
-        char buf[130]; // lines up to 128 characters are allowed, anything longer is discarded
-        bool discard = false;
-
-        // 2024
-        /*
-        bool is_cluster = false;
-        int cluster_index = 0;
-        float x_value = 0.0, y_value = 0.0, sum_x_value = 0.0, sum_y_value = 0.0,
-        		s_value = 0.0, distance = 0.0, min_distance = 10000.0, min_value = 0.0,
-				sum_distance = 0.0, sum_value = 0.0;
-        string clustered_gcode = "";
-        float clustered_s_value[8];
-        float clustered_distance[8];
-        */
-
-        while (fgets(buf, sizeof(buf), this->current_file_handler) != NULL) {
-
-            int len = strlen(buf);
-            if (len == 0) continue; // empty line? should not be possible
-            if (buf[len - 1] == '\n' || feof(this->current_file_handler)) {
-                if(discard) { // we are discarding a long line
-                    discard = false;
-                    continue;
-                }
-
-                if (len == 1) continue; // empty line
-
-                /*
-            	// Add laser cluster support when in laser mode
-            	if (this->laser_clustering && THEKERNEL->get_laser_mode() && !THEROBOT.absolute_mode && played_lines > 100) {
-            		// G1 X0.5 Y 0.8 S1:0:0.5:0.75:0:0.2
-            		is_cluster = this->check_cluster(buf, &x_value, &y_value, &distance, &slope, &s_value);
-                    min_value = fmin(min_distance, distance);
-                    sum_value = sum_distance + distance;
-            		if (is_cluster && (min_value > 0 && sum_value * 1.0 / min_value < 8.1)) {
-                        min_distance = min_value;
-                        sum_distance = sum_value;
-                        sum_x_value += x_value;
-                        sum_y_value += y_value;
-                        cluster_index ++;
-                        clustered_s_value[cluster_index - 1] = s_value;
-                        clustered_distance[cluster_index - 1] = distance;
-                        played_lines += 1;
-                        played_cnt += len;
-						if (cluster_index >= 8 || (min_distance > 0 && sum_distance * 1.0 / min_distance > 7.9)) {
-	                        sprintf(md5_str, "G1 X%.3f Y%.3f S", sum_x_value, sum_y_value);
-	                        clustered_gcode = md5_str;
-	                        for (int i = 0; i < cluster_index; i ++) {
-	                            for (float j = min_distance; j < clustered_distance[i] + 0.01; j+= min_distance) {
-	                            	sprintf(md5_str, "%s%.2f", (i == 0 ? "" : ":"), clustered_s_value[i]);
-	                                clustered_gcode.append(md5_str);
-	                            }
-	                        }
-
-							struct SerialMessage message;
-							message.message = clustered_gcode;
-							message.stream = this->current_stream == nullptr ? &(StreamOutput::NullStream) : this->current_stream;
-							message.line = played_lines + 1;
-
-							// waits for the queue to have enough room
-							THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
-							// fputs(clustered_gcode.c_str(), this->temp_file_handler);
-							// fputs("\n", this->temp_file_handler);
-							// printk("1-[Line: %d] %s\n", message.line, clustered_gcode.c_str());
-							return;
-						}
-						continue;
-            		} else {
-                		if (cluster_index > 0) {
-	                        sprintf(md5_str, "G1 X%.3f Y%.3f S", sum_x_value, sum_y_value);
-	                        clustered_gcode = md5_str;
-	                        for (int i = 0; i < cluster_index; i ++) {
-	                            for (float j = min_distance; j < clustered_distance[i] + 0.01; j+= min_distance) {
-	                            	sprintf(md5_str, "%s%.2f", (i == 0 ? "" : ":"), clustered_s_value[i]);
-	                                clustered_gcode.append(md5_str);
-	                            }
-	                        }
-	                        clustered_gcode.append("\n");
-
-    						struct SerialMessage message;
-    						message.message = clustered_gcode;
-    						message.stream = this->current_stream == nullptr ? &(StreamOutput::NullStream) : this->current_stream;
-    						message.line = played_lines + 1;
-
-    						// waits for the queue to have enough room
-    						THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
-    						// fputs(clustered_gcode.c_str(), this->temp_file_handler);
-    						// fputs("\n", this->temp_file_handler);
-    						// printk("2-[Line: %d] %s\n", message.line, clustered_gcode.c_str());
-                		}
-                        sum_x_value = 0.0;
-                        sum_y_value = 0.0;
-                        sum_distance = 0.0;
-                        cluster_index = 0;
-                        min_distance = 10000.0;
-            		}
-            	}
-*/
-
-                if (this->current_stream != nullptr) {
-                    this->current_stream->printf("%s", buf);
-                }
-
-                struct SerialMessage message;
-                message.message = buf;
-                message.stream = this->current_stream == nullptr ? &(StreamOutput::NullStream) : this->current_stream;
-                message.line = played_lines + 1;
-
-                // waits for the queue to have enough room
-                // this->current_stream->printf("Run: %s", buf);
-                THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
-                // fputs(buf, this->temp_file_handler);
-                // printk("0-[Line: %d] %s\n", message.line, buf);
-                played_lines += 1;
-                played_cnt += len;
-                return; // we feed one line per main loop
-
-            } else {
-                // discard long line
-                if (this->current_stream != nullptr) { this->current_stream->printf("Warning: Discarded long line\n"); }
-                discard = true;
+        char buf[130];
+        unsigned long discarded = file.discarded();
+        if (file.next_line(buf, sizeof(buf))) {
+            if (this->current_stream != nullptr) {
+                if (file.discarded() != discarded) this->current_stream->printf("Warning: Discarded long line\n");
+                this->current_stream->printf("%s", buf);
             }
+
+            struct SerialMessage message;
+            message.message = buf;
+            message.stream = this->current_stream == nullptr ? &(StreamOutput::NullStream) : this->current_stream;
+            message.line = file.lines();
+
+            // waits for the queue to have enough room
+            THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
+            return; // we feed one line per main loop
         }
 
         this->playing_file = false;
         this->filename = "";
-        played_cnt = 0;
-        played_lines = 0;
         playing_lines = 0;
         goto_line = 0;
-        file_size = 0;
-
-        fclose(this->current_file_handler);
-        current_file_handler = NULL;
+        file.close();
 
         this->current_stream = NULL;
 
@@ -644,7 +495,7 @@ void Player::on_get_public_data(void *argument)
 
     } else if(pdr->second_element_is(get_progress_checksum)) {
         static struct pad_progress p;
-        if(file_size > 0 && playing_file) {
+        if(file.size() > 0 && playing_file) {
         	if (!this->inner_playing) {
                 const Block *block = THEKERNEL->step_ticker.get_current_block();
                 // Note to avoid a race condition where the block is being cleared we check the is_ready flag which gets cleared first,
@@ -653,13 +504,13 @@ void Player::on_get_public_data(void *argument)
                 	this->playing_lines = block->line;
                 	p.played_lines = this->playing_lines;
                 } else {
-                	p.played_lines = this->played_lines;
+                    p.played_lines = file.lines();
                 }
         	} else {
-        		p.played_lines = this->played_lines;
+                p.played_lines = file.lines();
         	}
             p.elapsed_secs = this->calculate_elapsed_secs();
-            float pcnt = (((float)file_size - (file_size - played_cnt)) * 100.0F) / file_size;
+            float pcnt = file.bytes() * 100.0F / file.size();
             p.percent_complete = roundf(pcnt);
             p.filename = this->filename;
             pdr->set_data_ptr(&p);

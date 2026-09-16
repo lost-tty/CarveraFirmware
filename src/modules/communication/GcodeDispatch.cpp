@@ -35,9 +35,19 @@ static bool is_allowed_mcode(int m) {
     return false;
 }
 
+// commands that must not run on an unhomed machine: probing, tool change, ATC calibration/probe/goto
+static bool requires_homed(const Gcode *g) {
+    static const int gcodes[]= {30, 38};
+    static const int mcodes[]= {6, 491, 495, 496};
+    if(g->has_g) for (int c : gcodes) if(g->g == (unsigned)c) return true;
+    if(g->has_m) for (int c : mcodes) if(g->m == (unsigned)c) return true;
+    return false;
+}
+
 void GcodeDispatch::init()
 {
     modal_group_1= 0;
+    homed_check= true;
 }
 
 // Called when the module has just been loaded
@@ -89,28 +99,24 @@ try_again:
 			}
         }
 
-        if ( first_char == 'G'){
-			//check if has G90/G91
-			std::string g90_g91_command;
-			std::string modified_command = possible_command;
-			size_t g90_pos = modified_command.find("G90");
-			size_t g91_pos = modified_command.find("G91");
-			// if we have G90 or G91，then we move G90/G91 to the beginning
-			if (g90_pos != std::string::npos) {
-				g90_g91_command = "G90";
-				modified_command.erase(g90_pos, 3); // delete "G90"
-				possible_command = g90_g91_command + modified_command;
-			} else if (g91_pos != std::string::npos) {
-				g90_g91_command = "G91";
-				modified_command.erase(g91_pos, 3); // delete "G91"
-				possible_command = g90_g91_command + modified_command;
-			}
-		}
-
         //Remove comments
         size_t comment = possible_command.find_first_of(";(");
         if( comment != string::npos ) {
             possible_command = possible_command.substr(0, comment);
+        }
+
+        // G90/G91 apply to the whole line, so move the word to the front. Whole word only:
+        // G90.1/G91.1 and digits in other words are not distance mode.
+        if ( first_char == 'G'){
+            for (size_t p = possible_command.find('G', 1); p != string::npos; p = possible_command.find('G', p + 1)) {
+                if (possible_command.compare(p, 3, "G90") != 0 && possible_command.compare(p, 3, "G91") != 0) continue;
+                char next = p + 3 < possible_command.size() ? possible_command[p + 3] : ' ';
+                if (isdigit(next) || next == '.') continue;
+                string word = possible_command.substr(p, 3);
+                possible_command.erase(p, 3);
+                possible_command = word + " " + possible_command;
+                break;
+            }
         }
 
 		string single_command;
@@ -180,6 +186,21 @@ try_again:
 					delete gcode;
 					return;
 				}
+			}
+
+			if(gcode->has_m && (gcode->m == 887 || gcode->m == 888)) {
+				homed_check= (gcode->m == 887);
+				new_message.stream->printf("Homed check %s\nok\n", homed_check ? "enabled" : "disabled");
+				delete gcode;
+				return;
+			}
+
+			if(homed_check && requires_homed(gcode) && !THEROBOT.is_homed_all_axes()) {
+				new_message.stream->printf("error:Machine has not been homed, home first (M888 disables this check)\n");
+				THEKERNEL->set_halt_reason(NON_HOME);
+				THEKERNEL->call_event(ON_HALT, nullptr);
+				delete gcode;
+				return;
 			}
 
 			if(gcode->has_g) {

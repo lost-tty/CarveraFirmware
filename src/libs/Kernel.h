@@ -60,6 +60,7 @@ enum HALT_REASON {
 	COVER_OPEN				= 11,
 	PROBE_INVALID			= 12,
 	E_STOP					= 13,
+	NON_HOME				= 15,
 	// Need to reset when triggered
 	HARD_LIMIT				= 21,
 	MOTOR_ERROR_X			= 22,

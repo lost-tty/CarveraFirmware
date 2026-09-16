@@ -155,10 +155,13 @@ void ATCHandler::fill_pick_scripts(int new_tool, bool clear_z) {
 	this->script_queue.push(buff);
 	// move around to see if tool rack is empty, halt if not
 	this->script_queue.push("M492.2");
-	// set new tool
+}
+
+// the tool number is only valid once the tool is picked and its length offset measured
+void ATCHandler::fill_commit_tool_scripts(int new_tool) {
+	char buff[32];
 	snprintf(buff, sizeof(buff), "M493.2 T%d", new_tool);
 	this->script_queue.push(buff);
-
 }
 
 void ATCHandler::fill_cali_scripts(bool is_probe, bool clear_z) {
@@ -780,6 +783,7 @@ void ATCHandler::on_gcode_received(void *argument)
                 		atc_status = PICK;
                 		this->fill_pick_scripts(new_tool, true);
                 		this->fill_cali_scripts(new_tool == 0, false);
+                               this->fill_commit_tool_scripts(new_tool);
                 	} else if (new_tool < 0) {
                 		gcode->stream->printf("Start dropping current tool: T%d\r\n", this->active_tool);
                 		// just drop tool
@@ -795,6 +799,7 @@ void ATCHandler::on_gcode_received(void *argument)
                 	    this->fill_drop_scripts(active_tool);
                 	    this->fill_pick_scripts(new_tool, false);
                 	    this->fill_cali_scripts(new_tool == 0, false);
+                           this->fill_commit_tool_scripts(new_tool);
                 	}
             	} else if (new_tool == -1  && THEKERNEL->get_laser_mode()) {
             		// calibrate
@@ -1032,6 +1037,7 @@ void ATCHandler::on_gcode_received(void *argument)
 			        		}
 		            		this->fill_pick_scripts(0, active_tool <= 0);
 		            		this->fill_cali_scripts(true, false);
+                                       this->fill_commit_tool_scripts(0);
 			            }
 			            if (margin) {
 			            	gcode->stream->printf("Auto scan margin\r\n");

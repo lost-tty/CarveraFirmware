@@ -9,6 +9,7 @@
 #pragma once
 
 #include "Module.h"
+#include "GcodeFile.h"
 
 #include <stdio.h>
 #include <string>
@@ -60,12 +61,8 @@ class Player : public Module {
         std::queue<string> buffered_queue;
         void clear_buffered_queue();
 
-        FILE* current_file_handler;
-        // FILE* temp_file_handler;
-        long file_size;
-        unsigned long played_cnt;
+        GcodeFile file;
         TickType_t start_time;
-        unsigned long played_lines;
         unsigned long goto_line;
         unsigned int playing_lines;
         uint8_t current_motion_mode;
