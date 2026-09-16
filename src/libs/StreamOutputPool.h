@@ -24,11 +24,19 @@ public:
         int r = 0;
         for(set<StreamOutput*>::iterator i = this->streams.begin(); i != this->streams.end(); i++)
         {
-            int k = (*i)->puts(s);
+            int k = (*i)->puts(s, size);
             if (k > r)
                 r = k;
         }
         return r;
+    }
+
+    void send(uint8_t type, const void *payload, size_t len)
+    {
+        for(set<StreamOutput*>::iterator i = this->streams.begin(); i != this->streams.end(); i++)
+        {
+            (*i)->send(type, payload, len);
+        }
     }
 
     void append_stream(StreamOutput* stream)

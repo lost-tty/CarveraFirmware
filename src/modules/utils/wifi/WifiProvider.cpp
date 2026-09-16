@@ -128,35 +128,9 @@ void WifiProvider::receive_wifi_data()
 			if (link_no == tcp_link_no) {
 				// Data received from the primary TCP connection
 				for (int i = 0; i < received; i++) {
-					// Handle special control characters
-					if (rxData[i] == '?') {
-                        puts(THEKERNEL->get_query_string().c_str());
-						continue;
+					if (decoder.feed(rxData[i])) {
+						on_frame();
 					}
-					if (rxData[i] == '*') {
-                        puts(THEKERNEL->get_diagnose_string().c_str(), 0);
-						continue;
-					}
-					if (rxData[i] == 'X' - 'A' + 1) { // Ctrl+X
-						halt();
-						continue;
-					}
-					if (THEKERNEL->is_feed_hold_enabled()) {
-						if (rxData[i] == '!') { // Safe pause
-							THEKERNEL->set_feed_hold(true);
-							continue;
-						}
-						if (rxData[i] == '~') { // Safe resume
-							THEKERNEL->set_feed_hold(false);
-							continue;
-						}
-					}
-					// Convert carriage return to newline
-					if (rxData[i] == '\r') {
-						rxData[i] = '\n';
-					}
-					// Add data to buffer
-					this->buffer.push_back(char(rxData[i]));
 				}
 			}
 		}
@@ -164,6 +138,50 @@ void WifiProvider::receive_wifi_data()
 		if (received < WIFI_DATA_MAX_SIZE) {
 			return;
 		}
+    }
+}
+
+void WifiProvider::on_frame()
+{
+    const uint8_t *p = decoder.payload();
+    uint16_t len = decoder.length();
+
+    switch (decoder.type()) {
+        case Frame::CTRL_SINGLE: {
+            if (len < 1) return;
+            std::string s;
+            switch (p[0]) {
+                case '?':
+                    s = THEKERNEL->get_query_string();
+                    send(Frame::STATUS, s.data(), s.size());
+                    break;
+                case '*':
+                    s = THEKERNEL->get_diagnose_string();
+                    send(Frame::DIAG, s.data(), s.size());
+                    break;
+                case 'X' - 'A' + 1: halt(); break; // ^X
+                case '!': if (THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(true); break;
+                case '~': if (THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(false); break;
+            }
+            break;
+        }
+
+        case Frame::CTRL_MULTI:
+        case Frame::FILE_START: {
+            if (len + 1 > buffer.capacity() - buffer.size()) return;
+            char last = '\n';
+            for (uint16_t i = 0; i < len; i++) {
+                char c = p[i] == '\r' ? '\n' : p[i];
+                if (c == '\n' && last == '\n') continue;
+                buffer.push_back(c);
+                last = c;
+            }
+            if (last != '\n') buffer.push_back('\n');
+            break;
+        }
+
+        default:
+            break;
     }
 }
 
@@ -248,7 +266,11 @@ void WifiProvider::on_second_tick(void*)
 
 void WifiProvider::on_idle(void* argument)
 {
-    if (THEKERNEL->is_uploading()) return;
+    if (THEKERNEL->is_uploading()) {
+        // a file transfer reads the TCP data itself; whatever we had half decoded is stale
+        decoder.reset();
+        return;
+    }
 
     // Check for incoming data
     if (has_data_flag || M8266WIFI_SPI_Has_DataReceived()) {
@@ -260,7 +282,7 @@ void WifiProvider::on_idle(void* argument)
 void WifiProvider::halt(void) {
     THEKERNEL->call_event(ON_HALT, nullptr);
     THEKERNEL->set_halt_reason(MANUAL);
-    puts("ALARM: Abort during cycle\r\n");
+    printf("ALARM: Abort during cycle\r\n");
 }
 
 void WifiProvider::on_main_loop(void* argument)

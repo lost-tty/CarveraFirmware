@@ -10,6 +10,7 @@ class AppendFileStream : public StreamOutput {
         AppendFileStream(const char *filename) { fn= strdup(filename); }
         virtual ~AppendFileStream(){ free(fn); }
         int puts(const char*, int size = 0);
+        void send(uint8_t type, const void *payload, size_t len) { puts((const char *)payload, len); } // files get plain text, not frames
 
     private:
         char *fn;

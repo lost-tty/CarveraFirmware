@@ -20,6 +20,7 @@ using namespace std;
 
 #include "M8266WIFIDrv.h"
 #include "libs/RingBuffer.h"
+#include "libs/Frame.h"
 
 #define WIFI_DATA_MAX_SIZE 1460
 #define WIFI_DATA_TIMEOUT_MS 10
@@ -64,6 +65,7 @@ private:
 
     void on_pin_rise();
     void receive_wifi_data();
+    void on_frame();
 
     void halt();
 
@@ -74,11 +76,15 @@ private:
     mbed::InterruptIn *wifi_interrupt_pin; // Interrupt pin for measuring speed
     float probe_slow_rate;
 
-    RingBuffer<char, 256> buffer; // Receive buffer
+    RingBuffer<char, 256> buffer; // Received command lines, '\n' terminated
     string test_buffer;
 
     u8 txData[WIFI_DATA_MAX_SIZE];
     u8 rxData[WIFI_DATA_MAX_SIZE];
+
+    static const size_t RX_FRAME_MAX = 256;  // largest accepted command frame payload; longer frames are dropped
+    uint8_t rx_frame[RX_FRAME_MAX];
+    Frame::Decoder decoder{rx_frame, sizeof(rx_frame)};
 
     std::map<u8, std::function<void(u8*, u16, u8*, u16)>> data_callbacks;
 

@@ -8,7 +8,7 @@
 #pragma once
 
 #include "Module.h"
-#include "XModem.h"
+#include "FileTransfer.h"
 #include "Configurator.h"
 #include "SoftTimer.h"
 
@@ -35,6 +35,7 @@ public:
     bool parse_command(const char *cmd, string args, StreamOutput *stream);
     void print_mem(StreamOutput *stream) { mem_command("", stream); }
     void version_command(string parameters, StreamOutput *stream );
+        void model_command(std::string parameters, StreamOutput *stream );
     void ftype_command( string parameters, StreamOutput *stream );
 
 private:
@@ -98,7 +99,7 @@ private:
 
     static const ptentry_t commands_table[];
 
-    XModem xmodem;
+    FileTransfer transfer;
     Configurator      configurator;
 
     SoftTimer resetTimer;

@@ -10,11 +10,13 @@
 
 #include <cstdarg>
 #include <cstring>
+#include <cstdint>
 #include <stdio.h>
 
 // This is a base class for all StreamOutput objects.
 // StreamOutputs are basically "things you can sent strings to". They are passed along with gcodes for example so modules can answer to those gcodes.
 // They are usually associated with a command source, but can also be a NullStreamOutput if we just want to ignore whatever is sent
+// send() emits one Makera frame (Frame.h), printf() emits INFO frames; puts()/putc() are the raw transport.
 
 class NullStreamOutput;
 
@@ -25,6 +27,7 @@ class StreamOutput {
 
         virtual int printf(const char *format, ...) __attribute__ ((format(printf, 2, 3)));
         virtual int vprintf(const char*, va_list);
+        virtual void send(uint8_t type, const void *payload, size_t len);
         virtual int putc(int c) { return 1; }
         virtual int getc(void) { return 0; }
         virtual int gets(char** buf, int size = 0) { return 0; }
@@ -38,6 +41,7 @@ class StreamOutput {
 class NullStreamOutput : public StreamOutput {
     public:
         int printf(const char *format, ...) { return 0; }
+        void send(uint8_t type, const void *payload, size_t len) {}
         int puts(const char* str, int size = 0) { return strlen(str); }
 };
 

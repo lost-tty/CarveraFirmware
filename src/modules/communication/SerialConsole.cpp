@@ -21,9 +21,9 @@ using std::string;
 #include "PublicData.h"
 
 // Serial reading module
-// Treats every received line as a command and passes it ( via event call ) to the command dispatcher.
-// The command dispatcher will then ask other modules if they can do something with it
-SerialConsole::SerialConsole( PinName rx_pin, PinName tx_pin, int baud_rate ){
+SerialConsole::SerialConsole( PinName rx_pin, PinName tx_pin, int baud_rate )
+    : decoder(rx_frame, sizeof(rx_frame))
+{
     this->serial = new mbed::Serial( rx_pin, tx_pin );
     this->serial->baud(baud_rate);
 }
@@ -34,6 +34,7 @@ void SerialConsole::on_module_loaded() {
     query_flag = false;
     halt_flag = false;
     diagnose_flag = false;
+    raw_mode = false;
 	this->attach_irq(true);
 
     // We only call the command dispatcher in the main loop, nowhere else
@@ -45,12 +46,15 @@ void SerialConsole::on_module_loaded() {
     THEKERNEL->streams.append_stream(this);
 }
 
+// enable_irq == false: raw mode for a file transfer. The ISR stays attached because the UART FIFO
+// is 16 bytes; it stores bytes in the ring buffer for gets().
 void SerialConsole::attach_irq(bool enable_irq) {
-	if (enable_irq) {
-	    this->serial->attach(this, &SerialConsole::on_serial_char_received, mbed::Serial::RxIrq);
-	} else {
-	    this->serial->attach(nullptr, mbed::Serial::RxIrq);
-	}
+	__disable_irq();
+	buffer.tail = buffer.head;   // drop whatever the other mode left behind
+	raw_mode = !enable_irq;
+	decoder.reset();
+	__enable_irq();
+	this->serial->attach(this, &SerialConsole::on_serial_char_received, mbed::Serial::RxIrq);
 }
 
 void SerialConsole::on_set_public_data(void *argument) {
@@ -69,32 +73,50 @@ void SerialConsole::on_set_public_data(void *argument) {
 // Called on Serial::RxIrq interrupt, meaning we have received a char
 void SerialConsole::on_serial_char_received() {
 	while (this->serial->readable()) {
-		char received = this->serial->getc();
-		if (received == '?') {
-			query_flag = true;
-			continue;
+		char c = this->serial->getc();
+		if (raw_mode) {
+			if (buffer.capacity() - (buffer.head - buffer.tail + ((buffer.tail > buffer.head) ? RX_LINE_BUF : 0)) > 0) {
+				buffer.push_back(c);
+			}
+		} else if (decoder.feed(c)) {
+			on_frame();
 		}
-		if (received == '*') {
-			diagnose_flag = true;
-			continue;
-		}
-		if (received == 'X'-'A'+1) { // ^X
-			halt_flag = true;
-			continue;
-		}
-        if(THEKERNEL->is_feed_hold_enabled()) {
-            if(received == '!') { // safe pause
-                THEKERNEL->set_feed_hold(true);
-                continue;
+    }
+}
+
+void SerialConsole::on_frame() {
+    const uint8_t *p = decoder.payload();
+    uint16_t len = decoder.length();
+
+    switch (decoder.type()) {
+        case Frame::CTRL_SINGLE:
+            if (len < 1) return;
+            switch (p[0]) {
+                case '?': query_flag = true; break;
+                case '*': diagnose_flag = true; break;
+                case 'X' - 'A' + 1: halt_flag = true; break; // ^X
+                case '!': if (THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(true); break;
+                case '~': if (THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(false); break;
             }
-            if(received == '~') { // safe resume
-                THEKERNEL->set_feed_hold(false);
-                continue;
+            break;
+
+        case Frame::CTRL_MULTI:
+        case Frame::FILE_START: {
+            int room = buffer.capacity() - (buffer.head - buffer.tail + ((buffer.tail > buffer.head) ? RX_LINE_BUF : 0));
+            if (len + 1 > room) return;
+            char last = '\n';
+            for (uint16_t i = 0; i < len; i++) {
+                char c = p[i] == '\r' ? '\n' : p[i];
+                if (c == '\n' && last == '\n') continue;
+                buffer.push_back(c);
+                last = c;
             }
+            if (last != '\n') buffer.push_back('\n');
+            break;
         }
-		// convert CR to NL (for host OSs that don't send NL)
-		if ( received == '\r' ) { received = '\n'; }
-		this->buffer.push_back(received);
+
+        default:
+            break;
     }
 }
 
@@ -104,24 +126,27 @@ void SerialConsole::on_idle(void * argument)
 
     if (query_flag ) {
         query_flag = false;
-        puts(THEKERNEL->get_query_string().c_str(), 0);
+        std::string s = THEKERNEL->get_query_string();
+        send(Frame::STATUS, s.data(), s.size());
     }
 
     if (diagnose_flag) {
     	diagnose_flag = false;
-    	puts(THEKERNEL->get_diagnose_string().c_str(), 0);
+        std::string s = THEKERNEL->get_diagnose_string();
+    	send(Frame::DIAG, s.data(), s.size());
     }
 
     if (halt_flag) {
         halt_flag= false;
         THEKERNEL->call_event(ON_HALT, nullptr);
         THEKERNEL->set_halt_reason(MANUAL);
-        puts("ALARM: Abort during cycle\r\n", 0);
+        printf("ALARM: Abort during cycle\r\n");
     }
 }
 
 // Actual event calling must happen in the main loop because if it happens in the interrupt we will loose data
 void SerialConsole::on_main_loop(void * argument){
+    if (raw_mode) return; // the ring holds transfer data, not command lines
     if ( this->has_char('\n') ){
         string received;
         received.reserve(20);
@@ -134,7 +159,6 @@ void SerialConsole::on_main_loop(void * argument){
                 message.stream = this;
                 message.line = 0;
                 THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-                // this->puts(received.c_str());
                 return;
             }else{
                 received += c;
@@ -154,6 +178,14 @@ int SerialConsole::puts(const char* s, int size)
 
 int SerialConsole::gets(char** buf, int size)
 {
+	if (raw_mode) {
+		int n = 0;
+		while (n < (int)sizeof(raw_chunk) && buffer.size() > 0) {
+			buffer.pop_front(raw_chunk[n++]);
+		}
+		*buf = raw_chunk;
+		return n;
+	}
 	getc_result = this->getc();
 	*buf = &getc_result;
 	return 1;
@@ -166,11 +198,18 @@ int SerialConsole::putc(int c)
 
 int SerialConsole::getc()
 {
+    if (raw_mode) {
+        char c = 0;
+        if (buffer.size() == 0) return -1;
+        buffer.pop_front(c);
+        return (uint8_t)c;
+    }
     return this->serial->getc();
 }
 
 bool SerialConsole::ready()
 {
+    if (raw_mode) return buffer.size() > 0;
     return this->serial->readable();
 }
 

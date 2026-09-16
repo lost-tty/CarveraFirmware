@@ -131,6 +131,10 @@ void Player::on_gcode_received(void *argument)
             if (THEKERNEL->get_optional_stop_mode()){
                 this->suspend_command((gcode->subcode == 1)?"h":"", gcode->stream);
             }
+        } else if (gcode->m == 600) { // suspend, M600.1 leaves the spindle on
+            this->suspend_command((gcode->subcode == 1)?"h":"", gcode->stream);
+        } else if (gcode->m == 601) { // resume
+            this->resume_command("", gcode->stream);
         }
     } else if(gcode->has_g) {
         if (gcode->g == 28) { // homing cancels suspend

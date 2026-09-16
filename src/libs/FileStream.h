@@ -9,7 +9,8 @@ class FileStream : public StreamOutput {
     public:
         FileStream(const char *filename) { fd= fopen(filename, "w"); }
         virtual ~FileStream(){ close(); }
-        int puts(const char *str, int size = 0) { return (fd == NULL) ? 0 : fwrite(str, 1, strlen(str), fd); }
+        int puts(const char *str, int size = 0) { return (fd == NULL) ? 0 : fwrite(str, 1, size == 0 ? strlen(str) : size, fd); }
+        void send(uint8_t type, const void *payload, size_t len) { puts((const char *)payload, len); } // files get plain text, not frames
         void close() { if(fd != NULL) fclose(fd); fd= NULL; }
         bool is_open() { return fd != NULL; }
 

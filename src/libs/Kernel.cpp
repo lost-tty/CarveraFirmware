@@ -231,60 +231,38 @@ std::string Kernel::get_query_string()
 
     size_t n;
     char buf[128];
+    float mpos[3];
     if(running) {
-        float mpos[3];
         THEROBOT.get_current_machine_position(mpos);
         // current_position/mpos includes the compensation transform so we need to get the inverse to get actual position
         if(THEROBOT.compensationTransform) THEROBOT.compensationTransform(mpos, true, false); // get inverse compensation transform
-
-        // machine position
-        n = snprintf(buf, sizeof(buf), "%1.4f,%1.4f,%1.4f", THEROBOT.from_millimeters(mpos[0]), THEROBOT.from_millimeters(mpos[1]), THEROBOT.from_millimeters(mpos[2]));
-        if(n > sizeof(buf)) n= sizeof(buf);
-
-        str.append("|MPos:").append(buf, n);
-
-#if MAX_ROBOT_ACTUATORS > 3
-        // deal with the ABC axis (E will be A)
-        for (int i = A_AXIS; i < THEROBOT.get_number_registered_motors(); ++i) {
-            // current actuator position
-            n = snprintf(buf, sizeof(buf), ",%1.4f", THEROBOT.actuators[i]->get_current_position());
-            if(n > sizeof(buf)) n= sizeof(buf);
-            str.append(buf, n);
-        }
-#endif
-
-        // work space position
-        Robot::wcs_t pos = THEROBOT.mcs2wcs(mpos);
-        n = snprintf(buf, sizeof(buf), "%1.4f,%1.4f,%1.4f", THEROBOT.from_millimeters(std::get<X_AXIS>(pos)), THEROBOT.from_millimeters(std::get<Y_AXIS>(pos)), THEROBOT.from_millimeters(std::get<Z_AXIS>(pos)));
-        if(n > sizeof(buf)) n= sizeof(buf);
-
-        str.append("|WPos:").append(buf, n);
-
     } else {
         // return the last milestone if idle
-        // machine position
-        Robot::wcs_t mpos = THEROBOT.get_axis_position();
-        size_t n = snprintf(buf, sizeof(buf), "%1.4f,%1.4f,%1.4f", THEROBOT.from_millimeters(std::get<X_AXIS>(mpos)), THEROBOT.from_millimeters(std::get<Y_AXIS>(mpos)), THEROBOT.from_millimeters(std::get<Z_AXIS>(mpos)));
-        if(n > sizeof(buf)) n= sizeof(buf);
+        Robot::wcs_t m = THEROBOT.get_axis_position();
+        mpos[0] = std::get<X_AXIS>(m); mpos[1] = std::get<Y_AXIS>(m); mpos[2] = std::get<Z_AXIS>(m);
+    }
 
-        str.append("|MPos:").append(buf, n);
+    // machine position
+    n = snprintf(buf, sizeof(buf), "%1.4f,%1.4f,%1.4f", THEROBOT.from_millimeters(mpos[0]), THEROBOT.from_millimeters(mpos[1]), THEROBOT.from_millimeters(mpos[2]));
+    if(n > sizeof(buf)) n= sizeof(buf);
+    str.append("|MPos:").append(buf, n);
+
+    // work space position
+    Robot::wcs_t pos = THEROBOT.mcs2wcs(mpos);
+    size_t wn = snprintf(buf, sizeof(buf), "%1.4f,%1.4f,%1.4f", THEROBOT.from_millimeters(std::get<X_AXIS>(pos)), THEROBOT.from_millimeters(std::get<Y_AXIS>(pos)), THEROBOT.from_millimeters(std::get<Z_AXIS>(pos)));
+    if(wn > sizeof(buf)) wn= sizeof(buf);
+    std::string wpos(buf, wn);
 
 #if MAX_ROBOT_ACTUATORS > 3
-        // deal with the ABC axis (E will be A)
-        for (int i = A_AXIS; i < THEROBOT.get_number_registered_motors(); ++i) {
-            // current actuator position
-            n = snprintf(buf, sizeof(buf), ",%1.4f", THEROBOT.actuators[i]->get_current_position());
-            if(n > sizeof(buf)) n= sizeof(buf);
-            str.append(buf, n);
-        }
-#endif
-
-        // work space position
-        Robot::wcs_t pos = THEROBOT.mcs2wcs(mpos);
-        n = snprintf(buf, sizeof(buf), "%1.4f,%1.4f,%1.4f", THEROBOT.from_millimeters(std::get<X_AXIS>(pos)), THEROBOT.from_millimeters(std::get<Y_AXIS>(pos)), THEROBOT.from_millimeters(std::get<Z_AXIS>(pos)));
+    // rotary axes have no WCS offset, so they are appended identically to MPos and WPos
+    for (int i = A_AXIS; i < THEROBOT.get_number_registered_motors(); ++i) {
+        n = snprintf(buf, sizeof(buf), ",%1.4f", THEROBOT.actuators[i]->get_current_position());
         if(n > sizeof(buf)) n= sizeof(buf);
-        str.append("|WPos:").append(buf, n);
+        str.append(buf, n);
+        wpos.append(buf, n);
     }
+#endif
+    str.append("|WPos:").append(wpos);
 
     // current feedrate and requested fr and override
     float fr= running ? THEROBOT.from_millimeters(THECONVEYOR.get_current_feedrate()*60.0F) : 0;
@@ -422,6 +400,12 @@ std::string Kernel::get_diagnose_string()
         if(n > sizeof(buf)) n = sizeof(buf);
         str.append(buf, n);
     }
+    // beep, extend in, extend out state, extend out value (Controller >= 0.9.13 layout)
+    ok = PublicData::get_value(switch_checksum, get_checksum("extend"), 0, &pad);
+    if (!ok) { pad.state = false; pad.value = 0; }
+    n = snprintf(buf, sizeof(buf), ",0,0,%d,%d", (int)pad.state, (int)pad.value);
+    if(n > sizeof(buf)) n = sizeof(buf);
+    str.append(buf, n);
     ok = PublicData::get_value(switch_checksum, get_checksum("toolsensor"), 0, &pad);
     if (ok) {
         n = snprintf(buf, sizeof(buf), "|T:%d", (int)pad.state);

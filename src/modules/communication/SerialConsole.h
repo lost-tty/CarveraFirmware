@@ -16,6 +16,7 @@
 using std::string;
 #include "libs/RingBuffer.h"
 #include "libs/StreamOutput.h"
+#include "libs/Frame.h"
 
 
 #define baud_rate_setting_checksum CHECKSUM("baud_rate")
@@ -39,15 +40,23 @@ class SerialConsole : public Module, public StreamOutput {
         bool ready();
         char getc_result;
 
-        //string receive_buffer;                 // Received chars are stored here until a newline character is received
-        //vector<std::string> received_lines;    // Received lines are stored here until they are requested
-        RingBuffer<char,256> buffer;             // Receive buffer
+        static const int RX_LINE_BUF = 256;       // power of two, RingBuffer requires it
+        RingBuffer<char,RX_LINE_BUF> buffer;     // Received command lines, '\n' terminated
         mbed::Serial* serial;
         struct {
           bool query_flag:1;
           bool halt_flag:1;
           bool diagnose_flag:1;
+          volatile bool raw_mode:1;             // file transfer in progress: ISR stores raw bytes in buffer
         };
+
+    private:
+        void on_frame();
+
+        static const size_t RX_FRAME_MAX = 256;  // largest accepted command frame payload; longer frames are dropped
+        uint8_t rx_frame[RX_FRAME_MAX];
+        Frame::Decoder decoder;
+        char raw_chunk[32];                      // gets() hands out raw bytes from here
 };
 
 #endif
