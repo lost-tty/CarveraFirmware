@@ -281,6 +281,8 @@ leveling-strategy.rectangular-grid.only_by_two_corners		true
 uart.baud_rate								115200			# Baud rate for the default hardware ( UART ) serial port
 
 second_usb_serial_enable					false			# This enables a second USB serial port
+usb_host.enable								true			# USB host port: keyboard/numpad pendant, key table in Pendant.cpp
+usb_host.enable_pin							1.19!			# USB port power enable
 #leds_disable								true			# Disable using leds after config loaded
 #play_led_disable							true			# Disable the play led
 

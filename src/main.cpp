@@ -27,6 +27,7 @@
 #include "modules/utils/mainbutton/MainButton.h"
 #include "modules/communication/GcodeDispatch.h"
 #include "modules/communication/WirelessProbe.h"
+#include "modules/communication/usb/UsbHost.h"
 #include "Config.h"
 #include "checksumm.h"
 #include "ConfigValue.h"
@@ -135,6 +136,7 @@ ZProbe zprobe;
 RotaryDeltaCalibration rotary_delta_calibration;
 TemperatureSwitch temperature_switch;
 Drillingcycles drilling_cycles;
+UsbHost usb_host;
 
 Kernel* THEKERNEL = &kernel;
 
@@ -174,6 +176,7 @@ void init() {
     THEKERNEL->add_module(&player);
     THEKERNEL->add_module(&atc_handler);
     THEKERNEL->add_module(&wireless_probe);
+    THEKERNEL->add_module(&usb_host);
     THEKERNEL->add_module(&mainbutton);
     THEKERNEL->add_module(&wifi_provider);
     THEKERNEL->add_module(&web_server);

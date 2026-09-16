@@ -136,6 +136,7 @@ OBJECTS += $(OUTDIR)/mbed_custom.o
 OBJECTS += $(OUTDIR)/configdefault.o
 
 OBJECTS += $(patsubst %.c,$(OUTDIR)/freertos/%.o,$(FREERTOS_SRC))
+OBJECTS += $(patsubst $(TINYUSB_DIR)/%.c,$(OUTDIR)/tinyusb/%.o,$(TINYUSB_SRC))
 
 # List of the header dependency files, one per object file.
 DEPFILES = $(patsubst %.o,%.d,$(OBJECTS))
@@ -149,6 +150,12 @@ MRI_DIR  = $(BUILD_DIR)/../mri
 FREERTOS_DIR = $(BUILD_DIR)/../freertos
 
 FREERTOS_PORT = $(FREERTOS_DIR)/portable/GCC/ARM_CM3
+TINYUSB_DIR = $(BUILD_DIR)/../tinyusb
+TINYUSB_SRC = $(TINYUSB_DIR)/src/tusb.c \
+              $(TINYUSB_DIR)/src/common/tusb_fifo.c \
+              $(TINYUSB_DIR)/src/host/usbh.c \
+              $(TINYUSB_DIR)/src/class/hid/hid_host.c \
+              $(TINYUSB_DIR)/src/portable/ohci/ohci.c
 FREERTOS_SRC = $(FREERTOS_DIR)/tasks.c \
                $(FREERTOS_DIR)/queue.c \
                $(FREERTOS_DIR)/list.c \
@@ -159,7 +166,7 @@ FREERTOS_SRC = $(FREERTOS_DIR)/tasks.c \
 
 SUBDIRS = $(wildcard $(SRC)/* $(SRC)/*/* $(SRC)/*/*/* $(SRC)/*/*/*/* $(SRC)/*/*/*/*/* $(SRC)/*/*/*/*/*/*)
 PROJINCS = $(sort $(dir $(SUBDIRS)))
-INCDIRS += $(SRC) $(PROJINCS) $(MRI_DIR)/core $(MBED_DIR) $(MBED_DIR)/$(DEVICE) $(FREERTOS_DIR)/include $(FREERTOS_PORT)
+INCDIRS += $(SRC) $(PROJINCS) $(MRI_DIR)/core $(MBED_DIR) $(MBED_DIR)/$(DEVICE) $(FREERTOS_DIR)/include $(FREERTOS_PORT) $(TINYUSB_DIR)/src
 
 # DEFINEs to be used when building C/C++ code
 DEFINES += -DTARGET_$(DEVICE)
@@ -167,6 +174,7 @@ DEFINES += -DMRI_ENABLE=$(MRI_ENABLE) -DMRI_INIT_PARAMETERS='"$(MRI_INIT_PARAMET
 DEFINES += -DMRI_BREAK_ON_INIT=$(MRI_BREAK_ON_INIT) -DMRI_SEMIHOST_STDIO=$(MRI_SEMIHOST_STDIO)
 DEFINES += -DWRITE_BUFFER_DISABLE=$(WRITE_BUFFER_DISABLE) -D__STACK_SIZE=$(STACK_SIZE)
 DEFINES += -D_REENT_SMALL
+DEFINES += -DCFG_TUSB_MCU=OPT_MCU_LPC175X_6X
 
 ifeq "$(OPTIMIZATION)" "0"
 DEFINES += -DDEBUG
@@ -306,6 +314,11 @@ clean:
 
 # Compile FreeRTOS source files into the correct OUTDIR
 $(OUTDIR)/freertos/%.o : $(FREERTOS_DIR)/%.c
+	@echo Compiling $<
+	$(Q) $(MKDIR) $(call convert-slash,$(dir $@)) $(QUIET)
+	$(Q) $(GCC) $(GCFLAGS) -c $< -o $@
+
+$(OUTDIR)/tinyusb/%.o : $(TINYUSB_DIR)/%.c
 	@echo Compiling $<
 	$(Q) $(MKDIR) $(call convert-slash,$(dir $@)) $(QUIET)
 	$(Q) $(GCC) $(GCFLAGS) -c $< -o $@

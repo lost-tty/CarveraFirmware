@@ -162,6 +162,7 @@ SECTIONS
     {
         Image$$RW_IRAM1$$Base = . ;
         PROVIDE(__AHB_block_start = .);
+        KEEP(*(.ohci_data))
 
         . = ALIGN(4);
         *(AHBSRAM)
