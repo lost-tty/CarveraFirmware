@@ -8,10 +8,12 @@
 #pragma once
 
 #include "libs/Module.h"
+#include "utils/GcodeLine.h"
+#include "utils/Parameters.h"
 
-#include <stdio.h>
-#include <string>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 class StreamOutput;
 
@@ -23,8 +25,14 @@ public:
     virtual void on_module_loaded();
     virtual void on_console_line_received(void *line);
 
-    uint8_t get_modal_command() const { return modal_group_1<4 ? modal_group_1 : 0; }
+    uint8_t get_modal_command() const { return modal_group_1; }
 private:
+    void execute(const std::vector<gcode::Word> &words, const std::string &text, StreamOutput *stream, unsigned int line);
+    void parameter_statement(const char *p, StreamOutput *stream);
+    void fail(StreamOutput *stream, const char *msg);
+    void halt();
+
+    Parameters params;
     uint8_t modal_group_1;
     bool homed_check;
 };

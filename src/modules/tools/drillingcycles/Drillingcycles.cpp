@@ -173,12 +173,11 @@ void Drillingcycles::make_hole(Gcode *gcode)
 
     // if dwell, wait for x seconds
     if (this->sticky_p > 0) {
+        // G4 P is seconds
         if (this->dwell_units == DWELL_UNITS_S){
-            // dwell exprimed in seconds
-            this->send_gcode("G4 S%f", this->sticky_p);
+            this->send_gcode("G4 P%f", this->sticky_p);
         }else{
-            // dwell exprimed in milliseconds
-            this->send_gcode("G4 P%f", this->sticky_p * 1000.0);
+            this->send_gcode("G4 P%f", this->sticky_p / 1000.0);
         }
     }
 

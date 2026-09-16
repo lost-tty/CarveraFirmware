@@ -9,39 +9,82 @@
 
 #include "libs/Kernel.h"
 #include "Robot.h"
+#include "Conveyor.h"
 #include "utils/Gcode.h"
-#include "libs/nuts_bolts.h"
-#include "modules/robot/Conveyor.h"
 #include "libs/SerialMessage.h"
 #include "libs/StreamOutput.h"
-#include "libs/Logging.h"
-#include "libs/FileStream.h"
-#include "libs/AppendFileStream.h"
-#include "Config.h"
 #include "checksumm.h"
-#include "ConfigValue.h"
-#include "PublicDataRequest.h"
 #include "PublicData.h"
-#include "utils.h"
-#include "LPC17xx.h"
-#include "version.h"
+#include "PlayerPublicAccess.h"
 
-// goes in Flash, list of Mxxx codes that are allowed when in Halted state
-static const int allowed_mcodes[]= {2,5,9,30,105,114,119,80,81,911,503,106,107}; // get temp, get pos, get endstops etc
+#include <cctype>
+#include <cstdlib>
+#include <cstring>
+
+// Mxxx codes that still run while halted: status queries and things that turn stuff off
+static const int allowed_mcodes[]= {2,5,9,30,105,114,119,80,81,911,503,106,107};
 static bool is_allowed_mcode(int m) {
-    for (size_t i = 0; i < sizeof(allowed_mcodes)/sizeof(int); ++i) {
-        if(allowed_mcodes[i] == m) return true;
-    }
+    for (int c : allowed_mcodes) if(c == m) return true;
     return false;
 }
 
 // commands that must not run on an unhomed machine: probing, tool change, ATC calibration/probe/goto
-static bool requires_homed(const Gcode *g) {
+static bool requires_homed(const gcode::Word &w) {
     static const int gcodes[]= {30, 38};
     static const int mcodes[]= {6, 491, 495, 496};
-    if(g->has_g) for (int c : gcodes) if(g->g == (unsigned)c) return true;
-    if(g->has_m) for (int c : mcodes) if(g->m == (unsigned)c) return true;
+    int n= w.value;
+    if(w.letter == 'G') for (int c : gcodes) if(n == c) return true;
+    if(w.letter == 'M') for (int c : mcodes) if(n == c) return true;
     return false;
+}
+
+static bool is_command(const gcode::Word &w) { return w.letter == 'G' || w.letter == 'M'; }
+
+// group 0 codes that take the axis words themselves, so they cannot share a block with a motion word
+static bool takes_axis_words(const gcode::Word &w) {
+    unsigned n= w.value;
+    return w.letter == 'G' && (n == 10 || n == 28 || n == 30 || n == 31 || n == 32 || (n == 92 && w.subcode == 0));
+}
+
+
+// RS274 execution order of the commands in one block
+// Smoothie-specific M codes (OTHER_M) keep their traditional place after the motion
+enum Rank : uint8_t { FEED_MODE, TOOL_CHANGE, SPINDLE, COOLANT, DWELL, PLANE, UNITS, CUTTER_COMP,
+                      TOOL_OFFSET, WCS, PATH, DISTANCE, RETRACT, NON_MODAL, MOTION, OTHER_M, STOP };
+
+struct Class { uint8_t group; Rank rank; };  // group 0: may be combined freely
+
+static Class classify(const gcode::Word &w) {
+    unsigned n= w.value;
+    if(w.letter == 'G') {
+        if(n <= 3 || n == 38 || n == 73 || (n >= 80 && n <= 89)) return {1, MOTION};
+        switch(n) {
+            case 4: return {0, DWELL};
+            case 17: case 18: case 19: return {2, PLANE};
+            case 20: case 21: return {6, UNITS};
+            case 40: case 41: case 42: return {7, CUTTER_COMP};
+            case 43: case 49: return {8, TOOL_OFFSET};
+            case 54: case 55: case 56: case 57: case 58: case 59: return {12, WCS};
+            case 61: case 64: return {13, PATH};
+            case 90: case 91: return {uint8_t(w.subcode == 0 ? 3 : 4), DISTANCE};
+            case 93: case 94: case 95: return {5, FEED_MODE};
+            case 98: case 99: return {10, RETRACT};
+        }
+        return {0, NON_MODAL};
+    }
+    switch(n) {
+        case 0: case 1: case 2: case 30: case 60: return {14, STOP};
+        case 6: return {15, TOOL_CHANGE};
+        case 3: case 4: case 5: return {16, SPINDLE};
+        case 7: case 8: case 9: return {0, COOLANT};
+        case 48: case 49: return {17, OTHER_M};
+    }
+    return {0, OTHER_M};
+}
+
+// a mode setting: axis words next to it are a move in the modal motion (G90 X10), unlike settings M codes (M92 X80)
+static bool is_modal_setting(Class c) {
+    return c.rank != DWELL && c.rank != NON_MODAL && c.rank != OTHER_M && c.rank != STOP && c.rank != TOOL_CHANGE && c.rank != MOTION;
 }
 
 void GcodeDispatch::init()
@@ -50,260 +93,246 @@ void GcodeDispatch::init()
     homed_check= true;
 }
 
-// Called when the module has just been loaded
 void GcodeDispatch::on_module_loaded()
 {
     this->register_for_event(ON_CONSOLE_LINE_RECEIVED);
 }
 
-// When a command is received, if it is a Gcode, dispatch it as an object via an event
-void GcodeDispatch::on_console_line_received(void *line)
+void GcodeDispatch::halt()
 {
-    SerialMessage new_message = *static_cast<SerialMessage *>(line);
-    string possible_command = new_message.message;
-
-    // just reply ok to empty lines
-    if(possible_command.empty()) {
-        new_message.stream->printf("ok\r\n");
-        return;
-    }
-
-    // get rid of spaces
-    ltrim(possible_command);
-
-try_again:
-
-    char first_char = possible_command[0];
-    unsigned int n;
-
-    if (first_char == '$') {
-        // ignore as simpleshell will handle it
-        return;
-
-    } else if(islower(first_char)) {
-        // ignore all lowercase as they are simpleshell commands
-        return;
-    }
-
-    if ( first_char == 'G' || first_char == 'M' || first_char == 'T' || first_char == 'S' || first_char == 'N' || first_char == '#') {
-
-        //Get linenumber
-        if ( first_char == 'N' ) {
-            //Strip line number value from possible_command
-			size_t lnsize = possible_command.find_first_not_of("N0123456789.,- ");
-			if(lnsize != string::npos) {
-				possible_command = possible_command.substr(lnsize);
-			}else{
-				// it is a blank line
-				possible_command.clear();
-			}
-        }
-
-        //Remove comments
-        size_t comment = possible_command.find_first_of(";(");
-        if( comment != string::npos ) {
-            possible_command = possible_command.substr(0, comment);
-        }
-
-        // G90/G91 apply to the whole line, so move the word to the front. Whole word only:
-        // G90.1/G91.1 and digits in other words are not distance mode.
-        if ( first_char == 'G'){
-            for (size_t p = possible_command.find('G', 1); p != string::npos; p = possible_command.find('G', p + 1)) {
-                if (possible_command.compare(p, 3, "G90") != 0 && possible_command.compare(p, 3, "G91") != 0) continue;
-                char next = p + 3 < possible_command.size() ? possible_command[p + 3] : ' ';
-                if (isdigit(next) || next == '.') continue;
-                string word = possible_command.substr(p, 3);
-                possible_command.erase(p, 3);
-                possible_command = word + " " + possible_command;
-                break;
-            }
-        }
-
-		string single_command;
-		size_t cmd_pos = string::npos;
-		while (possible_command.size() > 0) {
-			// assumes G or M are always the first on the line
-			// -> G or M are in the line but not always the first char
-			// -> S or T could be in front of or after M
-			first_char = possible_command[0];
-			if (first_char == 'G') {
-				// find next G/M/S/T
-				if (possible_command.find_first_of("S", 2) != string::npos
-						&& possible_command.find_first_of("M", 2) != string::npos) {
-					cmd_pos = possible_command.find_first_of("GMST", 2);
-				} else {
-					cmd_pos = possible_command.find_first_of("GMT", 2);
-				}
-			} else if (first_char == 'M') {
-				// find next G/M
-				cmd_pos = possible_command.find_first_of("GM", 2);
-			} else if (first_char == 'T' || first_char == 'S') {
-				// find first M
-				cmd_pos = possible_command.find_first_of("M", 2);
-				if (cmd_pos == string::npos) {
-					// find first G/S/T
-					cmd_pos = possible_command.find_first_of("GST", 2);
-				} else {
-					// M found, find second G/M/S/T
-					cmd_pos = possible_command.find_first_of("GMST", cmd_pos + 2);
-				}
-			}
-
-			if (cmd_pos == string::npos) {
-				single_command = possible_command;
-				possible_command = "";
-			} else {
-				single_command = possible_command.substr(0, cmd_pos);
-				possible_command = possible_command.substr(cmd_pos);
-			}
-
-				// Prepare gcode for dispatch
-			// new_message.stream->printf("GCode1: %s!\n", single_command.c_str());
-			Gcode *gcode = new Gcode(single_command, new_message.stream, false, new_message.line);
-
-			if ( first_char == '#'){
-				gcode->set_variable_value();
-			}
-
-			if ( first_char == '#'){
-				gcode->set_variable_value();
-			}
-
-			if(THEKERNEL->is_halted()) {
-				// we ignore all commands until M999, unless it is in the exceptions list (like M105 get temp)
-				if(gcode->has_m && gcode->m == 999) {
-					if(THEKERNEL->is_halted()) {
-						THEKERNEL->call_event(ON_HALT, (void *)1); // clears on_halt
-						new_message.stream->printf("WARNING: After HALT you should HOME as position is currently unknown\n");
-					}
-					new_message.stream->printf("ok\n");
-					delete gcode;
-					return;
-
-				}else if(!is_allowed_mcode(gcode->m)) {
-					// ignore everything, return error string to host
-					new_message.stream->printf("error:Alarm lock\n");
-					delete gcode;
-					return;
-				}
-			}
-
-			if(gcode->has_m && (gcode->m == 887 || gcode->m == 888)) {
-				homed_check= (gcode->m == 887);
-				new_message.stream->printf("Homed check %s\nok\n", homed_check ? "enabled" : "disabled");
-				delete gcode;
-				return;
-			}
-
-			if(homed_check && requires_homed(gcode) && !THEROBOT.is_homed_all_axes()) {
-				new_message.stream->printf("error:Machine has not been homed, home first (M888 disables this check)\n");
-				THEKERNEL->set_halt_reason(NON_HOME);
-				THEKERNEL->call_event(ON_HALT, nullptr);
-				delete gcode;
-				return;
-			}
-
-			if(gcode->has_g) {
-				if(gcode->g == 53) { // G53 makes next movement command use machine coordinates
-					// this is ugly to implement as there may or may not be a G0/G1 on the same line
-					// valid version seem to include G53 G0 X1 Y2 Z3 G53 X1 Y2
-					if(possible_command.empty()) {
-						// use last gcode G1 or G0 if none on the line, and pass through as if it was a G0/G1
-						// TODO it is really an error if the last is not G0 thru G3
-						if(modal_group_1 > 3) {
-							delete gcode;
-							new_message.stream->printf("ok - Invalid G53\r\n");
-							return;
-						}
-						// use last G0 or G1
-						gcode->g= modal_group_1;
-
-					}else{
-						delete gcode;
-						// extract next G0/G1 from the rest of the line, ignore if it is not one of these
-						gcode = new Gcode(possible_command, new_message.stream);
-						possible_command= "";
-						if(!gcode->has_g || gcode->g > 1) {
-							// not G0 or G1 so ignore it as it is invalid
-							delete gcode;
-							new_message.stream->printf("ok - Invalid G53\r\n");
-							return;
-						}
-					}
-					// makes it handle the parameters as a machine position
-					THEROBOT.next_command_is_MCS= true;
-				}
-
-				// remember last modal group 1 code
-				if(gcode->g < 4) {
-					modal_group_1= gcode->g;
-				}
-			}
-
-			// new_message.stream->printf("dispatch gcode command: '%s' G%d M%d...", gcode->get_command(), gcode->g, gcode->m);
-			//Dispatch message!
-			THEKERNEL->call_event(ON_GCODE_RECEIVED, gcode );
-
-			if (gcode->is_error) {
-				// report error
-				new_message.stream->printf("error:");
-
-				if(!gcode->txt_after_ok.empty()) {
-					new_message.stream->printf("%s\r\n", gcode->txt_after_ok.c_str());
-					gcode->txt_after_ok.clear();
-
-				}else{
-					new_message.stream->printf("unknown\r\n");
-				}
-
-				// we cannot continue safely after an error so we enter HALT state
-				new_message.stream->printf("Entering Alarm/Halt state\n");
-				THEKERNEL->call_event(ON_HALT, nullptr);
-
-			} else {
-
-				if(gcode->add_nl)
-					new_message.stream->printf("\r\n");
-
-				if(!gcode->txt_after_ok.empty()) {
-					new_message.stream->printf("ok %s\r\n", gcode->txt_after_ok.c_str());
-					gcode->txt_after_ok.clear();
-
-				} else {
-					if(THEKERNEL->is_ok_per_line()) {
-						// only send ok once per line if this is a multi g code line send ok on the last one
-						if(possible_command.empty())
-							new_message.stream->printf("ok\r\n");
-					} else {
-						// maybe should do the above for all hosts?
-						new_message.stream->printf("ok\r\n");
-					}
-				}
-			}		
-
-			delete gcode;
-		}
-    } else if ( first_char == ';' || first_char == '(' || first_char == '\n' || first_char == '\r' ) {
-        // Ignore comments and blank lines
-        new_message.stream->printf("ok\n");
-
-    } else if( (n=possible_command.find_first_of("XYZAF")) == 0 || (first_char == ' ' && n != string::npos) ) {
-        // handle pycam syntax, use last modal group 1 command and resubmit if an X Y Z or F is found on its own line
-        char buf[6];
-        if(possible_command[n] == 'F') {
-            // F on its own always applies to G1
-            strcpy(buf,"G1 ");
-        }else{
-            // use last modal command (G1 or G0 etc)
-            snprintf(buf, sizeof(buf), "G%d ", modal_group_1);
-        }
-        possible_command.insert(0, buf);
-        goto try_again;
-
-
-    } else {
-        // an uppercase non command word on its own (except XYZAF) just returns ok, we could add an error but no hosts expect that.
-        new_message.stream->printf("ok - ignore: [%s]\n", possible_command.c_str());
-    }
+    THEKERNEL->set_halt_reason(MANUAL);
+    THEKERNEL->call_event(ON_HALT, nullptr);
 }
 
+// nothing of the line has run yet: the reply is enough unless a job is in progress
+void GcodeDispatch::fail(StreamOutput *stream, const char *msg)
+{
+    stream->printf("error:%s\r\n", msg);
+    void *playing= nullptr;
+    bool ok= PublicData::get_value(player_checksum, is_playing_checksum, &playing);
+    if((ok && *static_cast<bool *>(playing)) || !THECONVEYOR.is_idle()) halt();
+}
+
+void GcodeDispatch::on_console_line_received(void *line)
+{
+    SerialMessage *msg= static_cast<SerialMessage *>(line);
+    const string &s= msg->message;
+
+    size_t i= s.find_first_not_of(" \t");
+    if(i == string::npos) {
+        msg->stream->printf("ok\r\n");
+        return;
+    }
+
+    char c= s[i];
+    if(c == '$' || islower((unsigned char)c)) return; // simpleshell command
+
+    size_t j= i;
+    if(c == 'N') {
+        j++;
+        while(j < s.size() && isdigit(s[j])) j++;
+        while(j < s.size() && s[j] == ' ') j++;
+    }
+    if(j < s.size() && s[j] == '#') {
+        parameter_statement(s.c_str() + j + 1, msg->stream);
+        return;
+    }
+
+    gcode::Line parsed; // local: modules may dispatch console lines while a line executes
+    if(!parsed.parse(s.c_str() + i, &params)) {
+        fail(msg->stream, parsed.error_text().c_str());
+        return;
+    }
+    execute(parsed.words(), s.substr(i), msg->stream, msg->line);
+}
+
+// "#n = expr" assigns, "#n" prints
+void GcodeDispatch::parameter_statement(const char *p, StreamOutput *stream)
+{
+    char *end;
+    int n= strtol(p, &end, 10);
+    if(end == p) {
+        fail(stream, "bad parameter number");
+        return;
+    }
+    p= end;
+    while(*p == ' ') p++;
+
+    float v;
+    std::string err;
+    if(*p == '=') {
+        p++;
+        if(!gcode::eval(p, v, &params, err)) {
+            fail(stream, err.c_str());
+            return;
+        }
+        while(*p == ' ') p++;
+        if(*p != 0 && *p != ';' && *p != '(' && *p != '\r' && *p != '\n') {
+            fail(stream, "trailing characters");
+            return;
+        }
+        if(!params.set(n, v)) {
+            fail(stream, "parameter is read-only");
+            return;
+        }
+    } else if(params.get(n, v)) {
+        stream->printf("#%d = %.4f\r\n", n, v);
+    } else {
+        stream->printf("#%d not set\r\n", n);
+    }
+    stream->printf("ok\r\n");
+}
+
+void GcodeDispatch::execute(const std::vector<gcode::Word> &words, const string &text, StreamOutput *stream, unsigned int line)
+{
+    if(words.empty()) {
+        stream->printf("ok\r\n");
+        return;
+    }
+
+    if(THEKERNEL->is_halted()) {
+        for (const gcode::Word &w : words) {
+            if(w.letter == 'M' && w.value == 999) {
+                THEKERNEL->call_event(ON_HALT, (void *)1); // clears on_halt
+                stream->printf("WARNING: After HALT you should HOME as position is currently unknown\nok\n");
+                return;
+            }
+        }
+        bool allowed= false;
+        for (const gcode::Word &w : words) {
+            if(!is_command(w)) continue;
+            allowed= w.letter == 'M' && is_allowed_mcode(w.value);
+            if(!allowed) break;
+        }
+        if(!allowed) {
+            stream->printf("error:Alarm lock\n");
+            return;
+        }
+    }
+
+    for (const gcode::Word &w : words) {
+        if(w.letter == 'M' && (w.value == 887 || w.value == 888)) {
+            homed_check= (w.value == 887);
+            stream->printf("Homed check %s\nok\n", homed_check ? "enabled" : "disabled");
+            return;
+        }
+        if(homed_check && requires_homed(w) && !THEROBOT.is_homed_all_axes()) {
+            stream->printf("error:Machine has not been homed, home first (M888 disables this check)\n");
+            THEKERNEL->set_halt_reason(NON_HOME);
+            THEKERNEL->call_event(ON_HALT, nullptr);
+            return;
+        }
+    }
+
+    // A line holds one or more blocks: a repeated modal group, or a G53 after a motion word, starts
+    // the next one (Smoothie lines like "G0 A90 G53 G0 Z-2"). Words belong to the block they appear in.
+    struct Cmd { size_t index; uint8_t block; Rank rank; };
+    struct Blk { bool mcs; bool motion; bool axis_code; bool axis; bool feed; bool settings_only; };
+    std::vector<Cmd> order;
+    std::vector<Blk> blocks(1, Blk{false, false, false, false, false, true});
+    std::vector<gcode::Word> all= words; // synthesized motion words are appended
+    std::vector<uint8_t> block_of(words.size(), 0);
+    uint32_t groups= 0;
+    for (size_t i= 0; i < words.size(); i++) {
+        const gcode::Word &w= words[i];
+        Blk *b= &blocks.back();
+        if(!is_command(w)) {
+            if(strchr("XYZABC", w.letter)) b->axis= true;
+            if(w.letter == 'F') b->feed= true;
+            block_of[i]= blocks.size() - 1;
+            continue;
+        }
+        Class c= classify(w);
+        bool g53= w.letter == 'G' && w.value == 53;
+        if((g53 && b->motion) || (c.group != 0 && (groups & (1u << c.group)))) {
+            blocks.push_back(Blk{false, false, false, false, false, true});
+            b= &blocks.back();
+            groups= 0;
+        }
+        block_of[i]= blocks.size() - 1;
+        if(g53) {
+            b->mcs= true;
+            continue;
+        }
+        groups|= 1u << c.group;
+        if(c.rank == MOTION) b->motion= true;
+        if(takes_axis_words(w)) b->axis_code= true;
+        if(!is_modal_setting(c)) b->settings_only= false;
+        size_t pos= order.size();
+        while(pos > 0 && (order[pos - 1].block > block_of[i] || (order[pos - 1].block == block_of[i] && order[pos - 1].rank > c.rank))) pos--;
+        order.insert(order.begin() + pos, Cmd{i, block_of[i], c.rank});
+    }
+
+    // a block whose commands are only mode settings moves with the modal motion when it has axis words or G53 (F alone: G1)
+    for (size_t k= 0; k < blocks.size(); k++) {
+        Blk &b= blocks[k];
+        if(b.motion || !(b.mcs || (b.settings_only && (b.axis || b.feed)))) continue;
+        all.push_back(gcode::Word{'G', 0, float(b.axis || b.mcs ? modal_group_1 : 1), true});
+        block_of.push_back(k);
+        size_t pos= order.size();
+        while(pos > 0 && (order[pos - 1].block > k || (order[pos - 1].block == k && order[pos - 1].rank > MOTION))) pos--;
+        order.insert(order.begin() + pos, Cmd{all.size() - 1, uint8_t(k), MOTION});
+        b.motion= true;
+    }
+
+    for (const Cmd &c : order) {
+        const gcode::Word &w= all[c.index];
+        Blk &b= blocks[c.block];
+        if(c.rank == MOTION && b.mcs && w.value > 1) {
+            fail(stream, "G53 needs G0 or G1");
+            return;
+        }
+        if(c.rank == MOTION && b.axis_code) {
+            fail(stream, "G10/G28/G30/G92 cannot share a line with a motion word");
+            return;
+        }
+    }
+    for (size_t i= 0; i < words.size(); i++) {
+        const gcode::Word &w= words[i];
+        if(!w.has_value && blocks[block_of[i]].motion && strchr("XYZABCIJKRF", w.letter)) {
+            char buf[24];
+            snprintf(buf, sizeof(buf), "%c needs a value", w.letter);
+            fail(stream, buf);
+            return;
+        }
+    }
+
+    if(order.empty()) order.push_back(Cmd{words.size(), 0, OTHER_M}); // T or S alone
+
+    std::vector<gcode::Word> block_words;
+    int current= -1;
+    for (size_t n= 0; n < order.size(); n++) {
+        const Cmd &c= order[n];
+        if(c.block != current) {
+            current= c.block;
+            block_words.clear();
+            for (size_t i= 0; i < all.size(); i++) if(block_of[i] == c.block) block_words.push_back(all[i]);
+        }
+        size_t index= block_words.size();
+        for (size_t i= 0, k= 0; i < all.size(); i++) {
+            if(block_of[i] != c.block) continue;
+            if(i == c.index) index= k;
+            k++;
+        }
+        Gcode gcode(block_words, index, text, stream, line);
+
+        if(c.rank == MOTION) {
+            if(blocks[c.block].mcs) THEROBOT.next_command_is_MCS= true;
+            if(c.index < words.size() && gcode.g < 4) modal_group_1= gcode.g; // a synthesized word is not a mode change
+        }
+
+        THEKERNEL->call_event(ON_GCODE_RECEIVED, &gcode);
+
+        if(gcode.is_error) {
+            stream->printf("error:%s\r\n", gcode.txt_after_ok.empty() ? "unknown" : gcode.txt_after_ok.c_str());
+            halt();
+            return;
+        }
+        if(gcode.add_nl) stream->printf("\r\n");
+        if(!gcode.txt_after_ok.empty()) {
+            stream->printf("ok %s\r\n", gcode.txt_after_ok.c_str());
+        } else if(!THEKERNEL->is_ok_per_line() || n + 1 == order.size()) {
+            stream->printf("ok\r\n");
+        }
+    }
+}

@@ -854,7 +854,7 @@ void ATCHandler::on_gcode_received(void *argument)
 				this->script_queue.push(buff);
 				snprintf(buff, sizeof(buff), "G53 G0 Z%.3f", THEROBOT.from_millimeters(this->safe_z_mm));
 				this->script_queue.push(buff);
-				snprintf(buff, sizeof(buff), "M491.2 H%.3f , P%.3f", tolerance, tlo);
+				snprintf(buff, sizeof(buff), "M491.2 H%.3f P%.3f", tolerance, tlo);
 				this->script_queue.push(buff);
 				
 				

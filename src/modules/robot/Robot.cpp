@@ -513,9 +513,6 @@ void Robot::on_gcode_received(void *argument)
                     float f= gcode->get_value('P');
                     delay_ms= f * 1000.0F;
                 }
-                if (gcode->has_letter('S')) {
-                    delay_ms += gcode->get_int('S') * 1000;
-                }
                 if (delay_ms > 0) {
                     // drain queue
                     THECONVEYOR.wait_for_idle();

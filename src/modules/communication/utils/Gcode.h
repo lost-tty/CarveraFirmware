@@ -5,66 +5,57 @@
       You should have received a copy of the GNU General Public License along with Smoothie. If not, see <http://www.gnu.org/licenses/>.
 */
 
-
 #ifndef GCODE_H
 #define GCODE_H
-#include <string>
-#include <map>
+
+#include "GcodeLine.h"
+
 #include <cstdint>
+#include <map>
+#include <string>
+#include <vector>
 
 using std::string;
 
 class StreamOutput;
 
-// Object to represent a Gcode command
+// One command word (G or M) of a line plus all of the line's parameter words
 class Gcode {
     public:
-        using wcs_t= std::tuple<float, float, float>;
+        Gcode(const string& text, StreamOutput* stream, unsigned int line = 0);
+        // command is an index into words, or words.size() for a line without G or M
+        Gcode(const std::vector<gcode::Word>& words, size_t command, const string& text, StreamOutput* stream, unsigned int line);
 
-        Gcode(const string&, StreamOutput*, bool strip = true, unsigned int line = 0);
-        Gcode(const Gcode& to_copy);
-        Gcode& operator= (const Gcode& to_copy);
-        ~Gcode();
-
-        const char* get_command() const { return command; }
-        bool has_letter ( char letter ) const;
-
-// 2024
-        float get_variable_value(const char * expr, char ** endptr) const;
-        float set_variable_value() const;
-
-        float evaluate_expression(const char * expr, char ** endptr) const;
-        // int  index_of_letter( char letter, int start = 0) const;
-        float get_value ( char letter, char **ptr= nullptr ) const;
-        // 2024
-        // float get_value_at_index(int index) const;
-        int get_int ( char letter, char **ptr= nullptr ) const;
-        uint32_t get_uint ( char letter, char **ptr= nullptr ) const;
+        const char* get_command() const { return text.c_str(); }
+        bool has_letter(char letter) const { return find(letter) != nullptr; }
+        float get_value(char letter) const;
+        int get_int(char letter) const;
+        uint32_t get_uint(char letter) const;
         int get_num_args() const;
         std::map<char,float> get_args() const;
-        std::map<char,int> get_args_int() const;
-        void strip_parameters();
 
-        // FIXME these should be private
         unsigned int m;
         unsigned int g;
-
         unsigned int line;
+        uint8_t subcode;
 
         struct {
             bool add_nl:1;
             bool has_m:1;
             bool has_g:1;
-            bool stripped:1;
             bool is_error:1;
-            uint8_t subcode:5;
         };
 
         StreamOutput* stream;
         string txt_after_ok;
 
     private:
-        void prepare_cached_values(bool strip=true);
-        char *command;
+        const gcode::Word* find(char letter) const;
+        void set_command(const gcode::Word& w);
+        static bool is_parameter(char letter) { return letter != 'G' && letter != 'M' && letter != 'T'; }
+
+        std::vector<gcode::Word> words;
+        string text;
 };
+
 #endif
