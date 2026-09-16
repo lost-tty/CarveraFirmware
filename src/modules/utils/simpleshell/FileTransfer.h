@@ -15,7 +15,6 @@ public:
 
 private:
     int  in(StreamOutput* stream, uint32_t timeout_ms);
-    void flush_input(StreamOutput* stream);
 
     // returns the frame type or -1 on timeout; crc is the running CRC over len and type
     int  read_header(StreamOutput* stream, uint32_t timeout_ms, uint16_t& plen, uint16_t& crc);

@@ -49,10 +49,14 @@ void SerialConsole::on_module_loaded() {
 // enable_irq == false: raw mode for a file transfer. The ISR stays attached because the UART FIFO
 // is 16 bytes; it stores bytes in the ring buffer for gets().
 void SerialConsole::attach_irq(bool enable_irq) {
+	char leftover[RX_LINE_BUF];
+	int n = 0;
 	__disable_irq();
-	buffer.tail = buffer.head;   // drop whatever the other mode left behind
+	while (buffer.head != buffer.tail && n < (int)sizeof(leftover)) buffer.pop_front(leftover[n++]);
 	raw_mode = !enable_irq;
 	decoder.reset();
+	// frames that arrived while the transfer was finishing must not be lost
+	if (enable_irq) for (int i = 0; i < n; i++) if (decoder.feed(leftover[i])) on_frame();
 	__enable_irq();
 	this->serial->attach(this, &SerialConsole::on_serial_char_received, mbed::Serial::RxIrq);
 }

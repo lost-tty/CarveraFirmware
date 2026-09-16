@@ -42,11 +42,6 @@ int FileTransfer::in(StreamOutput* stream, uint32_t timeout_ms)
     }
 }
 
-void FileTransfer::flush_input(StreamOutput* stream)
-{
-    while (in(stream, 0) >= 0) continue;
-}
-
 int FileTransfer::read_header(StreamOutput* stream, uint32_t timeout_ms, uint16_t& plen, uint16_t& crc)
 {
     int prev = -1;
@@ -289,7 +284,6 @@ done:
     }
     if (!ok) remove(datafile.c_str());
 
-    flush_input(stream);
     if (stream->type() == 0) set_serial_rx_irq(true);
     THEKERNEL->set_uploading(false);
 
@@ -437,7 +431,6 @@ bool FileTransfer::download(const std::string& filename, StreamOutput* stream)
 
 done:
     if (fd != NULL) fclose(fd);
-    flush_input(stream);
     if (stream->type() == 0) set_serial_rx_irq(true);
     THEKERNEL->set_uploading(false);
     return ok;
