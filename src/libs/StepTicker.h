@@ -34,6 +34,7 @@ class StepTicker{
         float get_frequency() const { return frequency; }
         void unstep_tick();
         const Block *get_current_block() const { return current_block; }
+        float get_trapezoid_rate(int m) const { return STEPTICKER_FROMFP(state[m].steps_per_tick) * frequency; } // steps/sec now
 
         void step_tick (void);
         void handle_finish (void);
@@ -56,6 +57,17 @@ class StepTicker{
 
         Block *current_block;
         uint32_t current_tick{0};
+
+        // running state of the block being ticked, 2.62 fixed point rates scaled to each motor
+        struct {
+            int64_t steps_per_tick;
+            int64_t counter;
+            int64_t acceleration_change;
+            int64_t deceleration_change;
+            int64_t plateau_rate;
+            uint32_t steps_to_move; // 0: not moving in this block, or done
+            uint32_t step_count;
+        } state[k_max_actuators];
 
         struct {
             volatile bool running:1;

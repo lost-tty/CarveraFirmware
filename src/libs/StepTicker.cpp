@@ -147,49 +147,44 @@ void StepTicker::step_tick (void)
     }
 
     bool still_moving= false;
+    bool accel_end= current_tick == current_block->accelerate_until && current_block->accelerate_until != 0;
+    bool decel_start= current_tick == current_block->decelerate_after;
     // foreach motor, if it is active see if time to issue a step to that motor
     for (uint8_t m = 0; m < num_motors; m++) {
-        if(current_block->tick_info[m].steps_to_move == 0) continue; // not active
+        if(state[m].steps_to_move == 0) continue; // not active
 
-        current_block->tick_info[m].steps_per_tick += current_block->tick_info[m].acceleration_change;
+        state[m].steps_per_tick += state[m].acceleration_change;
 
-        if(current_tick == current_block->tick_info[m].next_accel_event) {
-            if(current_tick == current_block->accelerate_until) { // We are done accelerating, deceleration becomes 0 : plateau
-                current_block->tick_info[m].acceleration_change = 0;
-                if(current_block->decelerate_after < current_block->total_move_ticks) {
-                    current_block->tick_info[m].next_accel_event = current_block->decelerate_after;
-                    if(current_tick != current_block->decelerate_after) { // We are plateauing
-                        // steps/sec / tick frequency to get steps per tick
-                        current_block->tick_info[m].steps_per_tick = current_block->tick_info[m].plateau_rate;
-                    }
-                }
+        if(accel_end) { // done accelerating: plateau, unless deceleration starts right here
+            state[m].acceleration_change = 0;
+            if(current_block->decelerate_after < current_block->total_move_ticks && !decel_start) {
+                state[m].steps_per_tick = state[m].plateau_rate;
             }
-
-            if(current_tick == current_block->decelerate_after) { // We start decelerating
-                current_block->tick_info[m].acceleration_change = current_block->tick_info[m].deceleration_change;
-            }
+        }
+        if(decel_start) {
+            state[m].acceleration_change = state[m].deceleration_change;
         }
 
         // protect against rounding errors and such
-        if(current_block->tick_info[m].steps_per_tick <= 0) {
-            current_block->tick_info[m].counter = STEPTICKER_FPSCALE; // we force completion this step by setting to 1.0
-            current_block->tick_info[m].steps_per_tick = 0;
+        if(state[m].steps_per_tick <= 0) {
+            state[m].counter = STEPTICKER_FPSCALE; // we force completion this step by setting to 1.0
+            state[m].steps_per_tick = 0;
         }
 
-        current_block->tick_info[m].counter += current_block->tick_info[m].steps_per_tick;
+        state[m].counter += state[m].steps_per_tick;
 
-        if(current_block->tick_info[m].counter >= STEPTICKER_FPSCALE) { // >= 1.0 step time
-            current_block->tick_info[m].counter -= STEPTICKER_FPSCALE; // -= 1.0F;
-            ++current_block->tick_info[m].step_count;
+        if(state[m].counter >= STEPTICKER_FPSCALE) { // >= 1.0 step time
+            state[m].counter -= STEPTICKER_FPSCALE; // -= 1.0F;
+            ++state[m].step_count;
 
             // step the motor
             bool ismoving= motor[m]->step(); // returns false if the moving flag was set to false externally (probes, endstops etc)
             // we stepped so schedule an unstep
             unstep.set(m);
 
-            if(!ismoving || current_block->tick_info[m].step_count == current_block->tick_info[m].steps_to_move) {
+            if(!ismoving || state[m].step_count == state[m].steps_to_move) {
                 // done
-                current_block->tick_info[m].steps_to_move = 0;
+                state[m].steps_to_move = 0;
                 motor[m]->stop_moving(); // let motor know it is no longer moving
             }
         }
@@ -232,6 +227,15 @@ void StepTicker::step_tick (void)
     }
 }
 
+// 2.62 value scaled by a 0.32 ratio, 0 meaning 1.0
+static inline int64_t scale(int64_t v, uint32_t ratio)
+{
+    if(ratio == 0) return v;
+    int64_t hi= (int64_t)(int32_t)(v >> 32) * ratio;
+    uint64_t lo= ((uint64_t)(uint32_t)v * ratio) >> 32;
+    return hi + (int64_t)lo;
+}
+
 // only called from the step tick ISR (single consumer)
 bool StepTicker::start_next_block()
 {
@@ -240,13 +244,21 @@ bool StepTicker::start_next_block()
     bool ok= false;
     // need to prepare each active motor
     for (uint8_t m = 0; m < num_motors; m++) {
-        if(current_block->tick_info[m].steps_to_move == 0) continue;
+        state[m].steps_to_move= current_block->steps[m];
+        if(state[m].steps_to_move == 0) continue;
+        state[m].step_count= 0;
+        state[m].counter= 0;
+        uint32_t ratio= current_block->ratio[m];
+        state[m].steps_per_tick= scale(current_block->ramp.steps_per_tick, ratio);
+        state[m].acceleration_change= scale(current_block->ramp.acceleration_change, ratio);
+        state[m].deceleration_change= scale(current_block->ramp.deceleration_change, ratio);
+        state[m].plateau_rate= scale(current_block->ramp.plateau_rate, ratio);
 
         ok= true; // mark at least one motor is moving
         // set direction bit here
         // NOTE this would be at least 10us before first step pulse.
         // TODO does this need to be done sooner, if so how without delaying next tick
-        motor[m]->set_direction(current_block->direction_bits[m]);
+        motor[m]->set_direction((current_block->direction_bits >> m) & 1);
         motor[m]->start_moving(); // also let motor know it is moving now
     }
 
@@ -260,6 +272,7 @@ bool StepTicker::start_next_block()
         // this is an edge condition that should never happen, but we need to discard this block if it ever does
         // basically it is a block that has zero steps for all motors
         THECONVEYOR.block_finished();
+        current_block= nullptr;
     }
 
     return false;

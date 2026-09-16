@@ -66,6 +66,7 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
     int32_t bigsteps = 0;
     */
 
+    block->direction_bits = 0;
     for (size_t i = 0; i < n_motors; i++) {
         int32_t steps = THEROBOT.actuators[i]->steps_to_target(actuator_pos[i]);
         // Update current position
@@ -75,7 +76,7 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
         }
 
         // find direction
-        block->direction_bits[i] = (steps < 0) ? 1 : 0;
+        if(steps < 0) block->direction_bits |= 1 << i;
         // save actual steps in block
         block->steps[i] = labs(steps);
 
@@ -137,20 +138,14 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
 
     block->acceleration = acceleration; // save in block
 
-    // Max number of steps, for all axes
-    auto mi = std::max_element(block->steps.begin(), block->steps.end());
-    block->steps_event_count = *mi;
+    // each motor's share of the longest axis, the step ticker scales the ramp with it
+    uint32_t steps_event_count = block->steps_event_count();
+    for (size_t i = 0; i < n_motors; i++) {
+        block->ratio[i] = block->steps[i] == steps_event_count ? 0 : (uint32_t)((((uint64_t)block->steps[i] << 32) + steps_event_count / 2) / steps_event_count);
+    }
 
     block->millimeters = distance;
-
-    // Calculate speed in mm/sec for each axis. No divide by zero due to previous checks.
-    if( distance > 0.0F ) {
-        block->nominal_speed = rate_mm_s;           // (mm/s) Always > 0
-        block->nominal_rate = block->steps_event_count * rate_mm_s / distance; // (step/s) Always > 0
-    } else {
-        block->nominal_speed = 0.0F;
-        block->nominal_rate  = 0;
-    }
+    block->nominal_speed = distance > 0.0F ? rate_mm_s : 0.0F; // (mm/s)
 
     // Compute the acceleration rate for the trapezoid generator. Depending on the slope of the line
     // average travel per step event changes. For a line along one axis the travel per step event
