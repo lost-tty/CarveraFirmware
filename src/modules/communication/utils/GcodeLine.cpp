@@ -5,13 +5,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <strings.h>
 
 namespace gcode {
-
-static void skip_space(const char *&p)
-{
-    while (*p == ' ' || *p == '\t') p++;
-}
 
 static bool is_digit(char c)
 {
@@ -44,10 +40,98 @@ static bool number(const char *&p, float &out, std::string &err)
     return true;
 }
 
-static const int MAX_DEPTH = 4; // brackets and signs nest on the main-loop stack, ~190 bytes each
+static const int MAX_DEPTH = 4; // bracket nesting on the main-loop stack
 
 static bool unary(const char *&p, float &out, const ParamStore *params, std::string &err, int depth);
-static bool expr(const char *&p, float &out, const ParamStore *params, std::string &err, int depth);
+static bool expr(const char *&p, float &out, const ParamStore *params, std::string &err, int depth, int min_prec);
+static bool primary(const char *&p, float &out, const ParamStore *params, std::string &err, int depth);
+
+static bool is_alpha(char c)
+{
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
+}
+
+bool named_param(const char *&p, std::string &name, std::string &err)
+{
+    if (*p++ != '<') {
+        err = "bad parameter name";
+        return false;
+    }
+    name.clear();
+    while (*p && *p != '>') {
+        if (*p != ' ') name += tolower((unsigned char)*p);
+        p++;
+    }
+    if (*p != '>' || name.empty()) {
+        err = "bad parameter name";
+        return false;
+    }
+    p++;
+    return true;
+}
+
+static float deg(float rad) { return rad * 180 / M_PI; }
+static float rad(float deg) { return deg * M_PI / 180; }
+static float sin_deg(float a) { return sinf(rad(a)); }
+static float cos_deg(float a) { return cosf(rad(a)); }
+static float tan_deg(float a) { return tanf(rad(a)); }
+static float asin_deg(float a) { return deg(asinf(a)); }
+static float acos_deg(float a) { return deg(acosf(a)); }
+
+struct Fn { const char *name; float (*fn)(float); };
+static const Fn FUNCTIONS[] = {
+    {"ABS", fabsf}, {"SQRT", sqrtf}, {"EXP", expf}, {"LN", logf}, {"FIX", floorf}, {"FUP", ceilf}, {"ROUND", roundf},
+    {"SIN", sin_deg}, {"COS", cos_deg}, {"TAN", tan_deg}, {"ASIN", asin_deg}, {"ACOS", acos_deg},
+};
+
+// FUNC[expr], ATAN[y]/[x], EXISTS[#<name>]; p is after the identifier
+static bool function(const char *name, const char *&p, float &out, const ParamStore *params, std::string &err, int depth)
+{
+    skip_space(p);
+    if (*p != '[') {
+        err = std::string("unknown word ") + name;
+        return false;
+    }
+    if (strcasecmp(name, "EXISTS") == 0) {
+        p++;
+        skip_space(p);
+        std::string pname;
+        if (*p != '#' || p[1] != '<') {
+            err = "EXISTS needs #<name>";
+            return false;
+        }
+        p++;
+        if (!named_param(p, pname, err)) return false;
+        skip_space(p);
+        if (*p++ != ']') {
+            err = "missing ]";
+            return false;
+        }
+        out = params != nullptr && params->exists_named(pname.c_str()) ? 1 : 0;
+        return true;
+    }
+    float a;
+    if (!primary(p, a, params, err, depth)) return false; // the bracketed argument
+    if (strcasecmp(name, "ATAN") == 0) {
+        skip_space(p);
+        if (*p++ != '/') {
+            err = "ATAN needs [y]/[x]";
+            return false;
+        }
+        float b;
+        if (!primary(p, b, params, err, depth)) return false;
+        out = deg(atan2f(a, b));
+        return true;
+    }
+    for (const Fn &f : FUNCTIONS) {
+        if (strcasecmp(name, f.name) == 0) {
+            out = f.fn(a);
+            return true;
+        }
+    }
+    err = std::string("unknown function ") + name;
+    return false;
+}
 
 static bool primary(const char *&p, float &out, const ParamStore *params, std::string &err, int depth)
 {
@@ -58,7 +142,7 @@ static bool primary(const char *&p, float &out, const ParamStore *params, std::s
     skip_space(p);
     if (*p == '[') {
         p++;
-        if (!expr(p, out, params, err, depth + 1)) return false;
+        if (!expr(p, out, params, err, depth + 1, 0)) return false;
         skip_space(p);
         if (*p != ']') {
             err = "missing ]";
@@ -69,6 +153,15 @@ static bool primary(const char *&p, float &out, const ParamStore *params, std::s
     }
     if (*p == '#') {
         p++;
+        if (*p == '<') {
+            std::string name;
+            if (!named_param(p, name, err)) return false;
+            if (params == nullptr || !params->get_named(name.c_str(), out)) {
+                err = "no value for parameter #<" + name + ">";
+                return false;
+            }
+            return true;
+        }
         float n;
         if (!unary(p, n, params, err, depth + 1)) return false;
         if (!(n >= 0 && n <= 99999) || n != (int)n) {
@@ -83,6 +176,16 @@ static bool primary(const char *&p, float &out, const ParamStore *params, std::s
         }
         return true;
     }
+    if (is_alpha(*p)) {
+        char name[8];
+        unsigned n = 0;
+        while (is_alpha(*p) || is_digit(*p)) {
+            if (n < sizeof(name) - 1) name[n++] = *p;
+            p++;
+        }
+        name[n] = 0;
+        return function(name, p, out, params, err, depth);
+    }
     return number(p, out, err);
 }
 
@@ -95,46 +198,97 @@ static bool unary(const char *&p, float &out, const ParamStore *params, std::str
     return true;
 }
 
-static bool term(const char *&p, float &out, const ParamStore *params, std::string &err, int depth)
+// binary operators by precedence: 1 AND OR XOR, 2 EQ NE GT GE LT LE, 3 + -, 4 * / MOD, 5 **
+static float op_mul(float a, float b) { return a * b; }
+static float op_div(float a, float b) { return a / b; }
+static float op_add(float a, float b) { return a + b; }
+static float op_sub(float a, float b) { return a - b; }
+static float op_eq(float a, float b) { return a == b; }
+static float op_ne(float a, float b) { return a != b; }
+static float op_gt(float a, float b) { return a > b; }
+static float op_ge(float a, float b) { return a >= b; }
+static float op_lt(float a, float b) { return a < b; }
+static float op_le(float a, float b) { return a <= b; }
+static float op_and(float a, float b) { return a != 0 && b != 0; }
+static float op_or(float a, float b) { return a != 0 || b != 0; }
+static float op_xor(float a, float b) { return (a != 0) != (b != 0); }
+
+struct Op { const char *text; uint8_t len; uint8_t prec; float (*fn)(float, float); };
+static const Op OPS[] = {
+    {"**", 2, 5, powf}, {"*", 1, 4, op_mul}, {"/", 1, 4, op_div}, {"MOD", 3, 4, fmodf}, {"+", 1, 3, op_add}, {"-", 1, 3, op_sub},
+    {"EQ", 2, 2, op_eq}, {"NE", 2, 2, op_ne}, {"GT", 2, 2, op_gt}, {"GE", 2, 2, op_ge}, {"LT", 2, 2, op_lt}, {"LE", 2, 2, op_le},
+    {"AND", 3, 1, op_and}, {"OR", 2, 1, op_or}, {"XOR", 3, 1, op_xor},
+};
+
+static const Op *peek_op(const char *p)
+{
+    for (const Op &op : OPS) {
+        if (strncasecmp(p, op.text, op.len) != 0) continue;
+        if (is_alpha(op.text[0]) && (is_alpha(p[op.len]) || is_digit(p[op.len]))) continue; // ANDX is not AND
+        return &op;
+    }
+    return nullptr;
+}
+
+// precedence climbing: one stack frame per bracket level and per precedence step, not per operator
+static bool expr(const char *&p, float &out, const ParamStore *params, std::string &err, int depth, int min_prec)
 {
     if (!unary(p, out, params, err, depth)) return false;
     for (;;) {
         skip_space(p);
-        char op = *p;
-        if (op != '*' && op != '/') return true;
-        p++;
+        const Op *op = peek_op(p);
+        if (op == nullptr || op->prec < min_prec) return true;
+        p += op->len;
         float rhs;
-        if (!unary(p, rhs, params, err, depth)) return false;
-        if (op == '/' && rhs == 0) {
+        if (!expr(p, rhs, params, err, depth, op->prec + 1)) return false;
+        if (rhs == 0 && (op->text[0] == '/' || op->text[0] == 'M')) {
             err = "division by zero";
             return false;
         }
-        out = op == '*' ? out * rhs : out / rhs;
-    }
-}
-
-static bool expr(const char *&p, float &out, const ParamStore *params, std::string &err, int depth)
-{
-    if (!term(p, out, params, err, depth)) return false;
-    for (;;) {
-        skip_space(p);
-        char op = *p;
-        if (op != '+' && op != '-') return true;
-        p++;
-        float rhs;
-        if (!term(p, rhs, params, err, depth)) return false;
-        out = op == '+' ? out + rhs : out - rhs;
+        out = op->fn(out, rhs);
     }
 }
 
 bool eval(const char *&p, float &out, const ParamStore *params, std::string &err)
 {
-    if (!expr(p, out, params, err, 0)) return false;
+    if (!expr(p, out, params, err, 0, 0)) return false;
     if (!std::isfinite(out)) {
         err = "value out of range";
         return false;
     }
     return true;
+}
+
+bool assign(const char *p, ParamStore &store, std::string &err)
+{
+    if (*p++ != '#') {
+        err = "expected #";
+        return false;
+    }
+    std::string name;
+    float index = 0;
+    if (*p == '<') {
+        if (!named_param(p, name, err)) return false;
+    } else if (!unary(p, index, &store, err, 1) || index < 0 || index != (int)index) {
+        if (err.empty()) err = "bad parameter number";
+        return false;
+    }
+    skip_space(p);
+    if (*p++ != '=') {
+        err = "expected =";
+        return false;
+    }
+    float v;
+    if (!eval(p, v, &store, err)) return false;
+    skip_space(p);
+    if (*p && *p != ';' && *p != '(') {
+        err = "trailing characters";
+        return false;
+    }
+    err.clear();
+    bool ok = name.empty() ? store.set((int)index, v) : store.set_named(name.c_str(), v, err);
+    if (!ok && err.empty()) err = "parameter is read-only";
+    return ok;
 }
 
 static bool code(const char *&p, Word &w, std::string &err)

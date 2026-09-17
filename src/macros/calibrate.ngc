@@ -1,0 +1,23 @@
+(M491 measures the tool; M491.1 H<tol> also checks it against the stored length)
+o<calibrate> sub
+  #<sx> = #5021
+  #<sy> = #5022
+  #<old> = #<_tlo>
+  #<tol> = 0.1
+  o1 if [EXISTS[#<h>]]
+    #<tol> = #<h>
+  o1 endif
+  o2 if [[#<subcode> EQ 1] AND [#<tol> LT 0.02]]
+    o<calibrate> abort [4]
+  o2 endif
+  o<calibrate_at> call [#<_clearance_z>] [#<_active_tool> EQ 0]
+  o3 if [[#<subcode> EQ 1] AND [#<old> NE 0]]
+    M5
+    G53 G0 Z#<_atc_safe_z>
+    o4 if [ABS[#<_tlo> - #<old>] GT #<tol>]
+      o<calibrate> abort [4]
+    o4 endif
+  o3 endif
+  G53 G0 Z#<_clearance_z>
+  G53 G0 X#<sx> Y#<sy>
+o<calibrate> endsub

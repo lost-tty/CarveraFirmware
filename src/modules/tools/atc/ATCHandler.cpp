@@ -7,6 +7,8 @@
 
 #include "ATCHandler.h"
 
+#include <cstring>
+
 #include "libs/Module.h"
 #include "libs/Kernel.h"
 #include "ATCHandler.h"
@@ -85,334 +87,21 @@
 #define clearance_y_checksum		CHECKSUM("clearance_y")
 #define clearance_z_checksum		CHECKSUM("clearance_z")
 
-void ATCHandler::clear_script_queue(){
-	while (!this->script_queue.empty()) {
-		this->script_queue.pop();
-	}
-}
-
-void ATCHandler::fill_drop_scripts(int old_tool) {
-	char buff[100];
-	struct atc_tool *current_tool = &atc_tools[old_tool];
-	// set atc status
-	this->script_queue.push("M497.1");
-    // lift z axis to atc start position
-	snprintf(buff, sizeof(buff), "G53 G0 Z%.3f", THEROBOT.from_millimeters(this->clearance_z));
-	this->script_queue.push(buff);
-    // move x and y to active tool position
-	snprintf(buff, sizeof(buff), "G53 G0 X%.3f Y%.3f", THEROBOT.from_millimeters(current_tool->mx_mm), THEROBOT.from_millimeters(current_tool->my_mm));
-	this->script_queue.push(buff);
-	// move around to see if tool rack is empty
-	this->script_queue.push("M492.2");
-    // move x and y to reseted tool position
-	snprintf(buff, sizeof(buff), "G53 G0 X%.3f Y%.3f", THEROBOT.from_millimeters(current_tool->mx_mm), THEROBOT.from_millimeters(current_tool->my_mm));
-	this->script_queue.push(buff);
-    // drop z axis to z position with fast speed
-	snprintf(buff, sizeof(buff), "G53 G1 Z%.3f F%.3f", THEROBOT.from_millimeters(current_tool->mz_mm + safe_z_offset_mm), THEROBOT.from_millimeters(fast_z_rate));
-	this->script_queue.push(buff);
-    // drop z axis with slow speed
-	snprintf(buff, sizeof(buff), "G53 G1 Z%.3f F%.3f", THEROBOT.from_millimeters(current_tool->mz_mm), THEROBOT.from_millimeters(slow_z_rate));
-	this->script_queue.push(buff);
-	// loose tool
-	this->script_queue.push("M490.2");
-	// lift z to safe position with fast speed
-	snprintf(buff, sizeof(buff), "G53 G0 Z%.3f", THEROBOT.from_millimeters(this->safe_z_empty_mm));
-	this->script_queue.push(buff);
-	// set new tool to -1
-	this->script_queue.push("M493.2 T-1");
-	// move around to see if tool is dropped, halt if not
-	this->script_queue.push("M492.1");
-}
-
-void ATCHandler::fill_pick_scripts(int new_tool, bool clear_z) {
-	char buff[100];
-	struct atc_tool *current_tool = &atc_tools[new_tool];
-	// set atc status
-	this->script_queue.push("M497.2");
-	// lift z to safe position with fast speed
-	snprintf(buff, sizeof(buff), "G53 G0 Z%.3f", THEROBOT.from_millimeters(clear_z ? this->clearance_z : this->safe_z_empty_mm));
-	this->script_queue.push(buff);
-	// move x and y to new tool position
-	snprintf(buff, sizeof(buff), "G53 G0 X%.3f Y%.3f", THEROBOT.from_millimeters(current_tool->mx_mm), THEROBOT.from_millimeters(current_tool->my_mm));
-	this->script_queue.push(buff);
-	// move around to see if tool rack is filled
-	this->script_queue.push("M492.1");
-	// loose tool
-	this->script_queue.push("M490.2");
-	// move x and y to reseted tool position
-	snprintf(buff, sizeof(buff), "G53 G0 X%.3f Y%.3f", THEROBOT.from_millimeters(current_tool->mx_mm), THEROBOT.from_millimeters(current_tool->my_mm));
-	this->script_queue.push(buff);
-    // drop z axis to z position with fast speed
-	snprintf(buff, sizeof(buff), "G53 G1 Z%.3f F%.3f", THEROBOT.from_millimeters(current_tool->mz_mm + safe_z_offset_mm), THEROBOT.from_millimeters(fast_z_rate));
-	this->script_queue.push(buff);
-    // drop z axis with slow speed
-	snprintf(buff, sizeof(buff), "G53 G1 Z%.3f F%.3f", THEROBOT.from_millimeters(current_tool->mz_mm), THEROBOT.from_millimeters(slow_z_rate));
-	this->script_queue.push(buff);
-	// clamp tool
-	this->script_queue.push("M490.1");
-	// lift z to safe position with fast speed
-	snprintf(buff, sizeof(buff), "G53 G0 Z%.3f", THEROBOT.from_millimeters(this->safe_z_mm));
-	this->script_queue.push(buff);
-	// move around to see if tool rack is empty, halt if not
-	this->script_queue.push("M492.2");
-}
-
-// the tool number is only valid once the tool is picked and its length offset measured
-void ATCHandler::fill_commit_tool_scripts(int new_tool) {
-	char buff[32];
-	snprintf(buff, sizeof(buff), "M493.2 T%d", new_tool);
-	this->script_queue.push(buff);
-}
-
-void ATCHandler::fill_cali_scripts(bool is_probe, bool clear_z) {
-	char buff[100];
-	// set atc status
-	this->script_queue.push("M497.3");
-	// clamp tool if in laser mode
-	if (THEKERNEL->get_laser_mode()) {
-		this->script_queue.push("M490.1");
-	}
-	// lift z to safe position with fast speed
-	snprintf(buff, sizeof(buff), "G53 G0 Z%.3f", THEROBOT.from_millimeters(clear_z ? this->clearance_z : this->safe_z_mm));
-	this->script_queue.push(buff);
-	// move x and y to calibrate position
-	snprintf(buff, sizeof(buff), "G53 G0 X%.3f Y%.3f", THEROBOT.from_millimeters(probe_mx_mm), THEROBOT.from_millimeters(probe_my_mm));
-	this->script_queue.push(buff);
-	// do calibrate with fast speed
-	snprintf(buff, sizeof(buff), "G38.6 Z%.3f F%.3f", probe_mz_mm, probe_fast_rate);
-	this->script_queue.push(buff);
-	// lift a bit
-	snprintf(buff, sizeof(buff), "G91 G0 Z%.3f", THEROBOT.from_millimeters(probe_retract_mm));
-	this->script_queue.push(buff);
-	// do calibrate with slow speed
-	snprintf(buff, sizeof(buff), "G38.6 Z%.3f F%.3f", -1 - probe_retract_mm, probe_slow_rate);
-	this->script_queue.push(buff);
-	// save new tool offset
-	this->script_queue.push("M493.1");
-	// lift z to safe position with fast speed
-	snprintf(buff, sizeof(buff), "G53 G0 Z%.3f", THEROBOT.from_millimeters(this->safe_z_mm));
-	this->script_queue.push(buff);
-
-	// check if wireless probe is will be triggered
-	if (is_probe) {
-		this->script_queue.push("M492.3");
-	}
-}
-
-void ATCHandler::fill_margin_scripts(float x_pos, float y_pos, float x_pos_max, float y_pos_max) {
-	char buff[100];
-
-	// set atc status
-	this->script_queue.push("M497.4");
-
-	// open probe laser
-	this->script_queue.push("M494.1");
-
-	// lift z to safe position with fast speed
-	snprintf(buff, sizeof(buff), "G53 G0 Z%.3f", THEROBOT.from_millimeters(this->clearance_z));
-	this->script_queue.push(buff);
-
-	// goto margin start position
-	snprintf(buff, sizeof(buff), "G90 G0 X%.3f Y%.3f", THEROBOT.from_millimeters(x_pos), THEROBOT.from_millimeters(y_pos));
-	this->script_queue.push(buff);
-
-	// goto margin top left corner
-	snprintf(buff, sizeof(buff), "G90 G1 X%.3f Y%.3f F%.3f", THEROBOT.from_millimeters(x_pos), THEROBOT.from_millimeters(y_pos_max), THEROBOT.from_millimeters(this->margin_rate));
-	this->script_queue.push(buff);
-
-	// goto margin top right corner
-	snprintf(buff, sizeof(buff), "G90 G1 X%.3f Y%.3f F%.3f", THEROBOT.from_millimeters(x_pos_max), THEROBOT.from_millimeters(y_pos_max), THEROBOT.from_millimeters(this->margin_rate));
-	this->script_queue.push(buff);
-
-	// goto margin bottom right corner
-	snprintf(buff, sizeof(buff), "G90 G1 X%.3f Y%.3f F%.3f", THEROBOT.from_millimeters(x_pos_max), THEROBOT.from_millimeters(y_pos), THEROBOT.from_millimeters(this->margin_rate));
-	this->script_queue.push(buff);
-
-	// goto margin start position
-	snprintf(buff, sizeof(buff), "G90 G1 X%.3f Y%.3f F%.3f", THEROBOT.from_millimeters(x_pos), THEROBOT.from_millimeters(y_pos), THEROBOT.from_millimeters(this->margin_rate));
-	this->script_queue.push(buff);
-
-	// close probe laser
-	this->script_queue.push("M494.2");
-
-}
-
-void ATCHandler::fill_goto_origin_scripts(float x_pos, float y_pos) {
-	char buff[100];
-
-	// lift z to clearance position with fast speed
-	snprintf(buff, sizeof(buff), "G53 G0 Z%.3f", THEROBOT.from_millimeters(this->clearance_z));
-	this->script_queue.push(buff);
-
-	// goto start position
-	snprintf(buff, sizeof(buff), "G90 G0 X%.3f Y%.3f", THEROBOT.from_millimeters(x_pos), THEROBOT.from_millimeters(y_pos));
-	this->script_queue.push(buff);
-
-}
-
-void ATCHandler::fill_zprobe_scripts(float x_pos, float y_pos, float x_offset, float y_offset) {
-	char buff[100];
-
-	// set atc status
-	this->script_queue.push("M497.5");
-
-	// lift z to safe position with fast speed
-	snprintf(buff, sizeof(buff), "G53 G0 Z%.3f", THEROBOT.from_millimeters(this->clearance_z));
-	this->script_queue.push(buff);
-
-	// goto z probe position
-	snprintf(buff, sizeof(buff), "G90 G0 X%.3f Y%.3f", THEROBOT.from_millimeters(x_pos + x_offset), THEROBOT.from_millimeters(y_pos + y_offset));
-	this->script_queue.push(buff);
-
-	// do probe with fast speed
-	snprintf(buff, sizeof(buff), "G38.2 Z%.3f F%.3f", probe_mz_mm, probe_fast_rate);
-	this->script_queue.push(buff);
-
-	// lift a bit
-	snprintf(buff, sizeof(buff), "G91 G0 Z%.3f", THEROBOT.from_millimeters(probe_retract_mm));
-	this->script_queue.push(buff);
-
-	// do calibrate with slow speed
-	snprintf(buff, sizeof(buff), "G38.2 Z%.3f F%.3f", -1 - probe_retract_mm, probe_slow_rate);
-	this->script_queue.push(buff);
-
-	// set z working coordinate
-	snprintf(buff, sizeof(buff), "G10 L20 P0 Z%.3f", THEROBOT.from_millimeters(probe_height_mm));
-	this->script_queue.push(buff);
-
-	// retract z a bit
-	snprintf(buff, sizeof(buff), "G91 G0 Z%.3f", THEROBOT.from_millimeters(probe_retract_mm));
-	this->script_queue.push(buff);
-}
-
-void ATCHandler::fill_zprobe_abs_scripts() {
-	char buff[100];
-
-	// set atc status
-	this->script_queue.push("M497.5");
-
-	// lift z to safe position with fast speed
-	snprintf(buff, sizeof(buff), "G53 G0 Z%.3f", THEROBOT.from_millimeters(clearance_z));
-	this->script_queue.push(buff);
-
-	// goto z probe position
-	snprintf(buff, sizeof(buff), "G53 G0 X%.3f Y%.3f", THEROBOT.from_millimeters(anchor1_x + rotation_offset_x - 3), THEROBOT.from_millimeters(anchor1_y + rotation_offset_y));
-	this->script_queue.push(buff);
-
-	// do probe with fast speed
-	snprintf(buff, sizeof(buff), "G38.2 Z%.3f F%.3f", probe_mz_mm, probe_fast_rate);
-	this->script_queue.push(buff);
-
-	// lift a bit
-	snprintf(buff, sizeof(buff), "G91 G0 Z%.3f", THEROBOT.from_millimeters(probe_retract_mm));
-	this->script_queue.push(buff);
-
-	// do calibrate with slow speed
-	snprintf(buff, sizeof(buff), "G38.2 Z%.3f F%.3f", -1 - probe_retract_mm, probe_slow_rate);
-	this->script_queue.push(buff);
-
-	// set z working coordinate
-	snprintf(buff, sizeof(buff), "G10 L20 P0 Z%.3f", THEROBOT.from_millimeters(rotation_offset_z));
-	this->script_queue.push(buff);
-
-	// retract z a bit
-	snprintf(buff, sizeof(buff), "G91 G0 Z%.3f", THEROBOT.from_millimeters(probe_retract_mm));
-	this->script_queue.push(buff);
-}
-
-void ATCHandler::fill_xyzprobe_scripts(float tool_dia, float probe_height) {
-	char buff[100];
-
-	// set atc status
-	this->script_queue.push("M497.5");
-
-	// do z probe with slow speed
-	snprintf(buff, sizeof(buff), "G38.2 Z%.3f F%.3f", probe_mz_mm, probe_slow_rate);
-	this->script_queue.push(buff);
-
-	// set Z origin
-	snprintf(buff, sizeof(buff), "G10 L20 P0 Z%.3f", THEROBOT.from_millimeters(probe_height));
-	this->script_queue.push(buff);
-
-	// lift a bit
-	snprintf(buff, sizeof(buff), "G91 G0 Z%.3f", THEROBOT.from_millimeters(probe_retract_mm));
-	this->script_queue.push(buff);
-
-	// do x probe with slow speed
-	snprintf(buff, sizeof(buff), "G38.2 X%.3f F%.3f", -35.0, probe_slow_rate);
-	this->script_queue.push(buff);
-
-	// set x origin
-	snprintf(buff, sizeof(buff), "G10 L20 P0 X%.3f", THEROBOT.from_millimeters(tool_dia / 2));
-	this->script_queue.push(buff);
-
-	// move right a little bit
-	snprintf(buff, sizeof(buff), "G91 G0 X%.3f", THEROBOT.from_millimeters(5.0));
-	this->script_queue.push(buff);
-
-	// do y probe with slow speed
-	snprintf(buff, sizeof(buff), "G38.2 Y%.3f F%.3f", -35.0, probe_slow_rate);
-	this->script_queue.push(buff);
-
-	// set y origin
-	snprintf(buff, sizeof(buff), "G10 L20 P0 Y%.3f", THEROBOT.from_millimeters(tool_dia / 2));
-	this->script_queue.push(buff);
-
-	// move forward a little bit
-	snprintf(buff, sizeof(buff), "G91 G0 Y%.3f", THEROBOT.from_millimeters(5.0));
-	this->script_queue.push(buff);
-
-	// retract z to be above probe
-	snprintf(buff, sizeof(buff), "G91 G0 Z%.3f", THEROBOT.from_millimeters(15.0));
-	this->script_queue.push(buff);
-
-	// move to XY zero
-	snprintf(buff, sizeof(buff), "G91 G0 X%.3f Y%0.3f", THEROBOT.from_millimeters(-5 - tool_dia / 2), THEROBOT.from_millimeters(-5 - tool_dia / 2));
-	this->script_queue.push(buff);
-
-}
-
-void ATCHandler::fill_autolevel_scripts(float x_pos, float y_pos,
-		float x_size, float y_size, int x_grids, int y_grids, float height)
-{
-	char buff[100];
-
-	// set atc status
-	this->script_queue.push("M497.6");
-
-	// goto x and y path origin
-	snprintf(buff, sizeof(buff), "G90 G0 X%.3f Y%.3f", THEROBOT.from_millimeters(x_pos), THEROBOT.from_millimeters(y_pos));
-	this->script_queue.push(buff);
-
-	// do auto leveling
-	snprintf(buff, sizeof(buff), "G32R1X0Y0A%.3fB%.3fI%dJ%dH%.3f", x_size, y_size, x_grids, y_grids, height);
-	this->script_queue.push(buff);
-}
-
 void ATCHandler::on_module_loaded()
 {
-	atc_status = NONE;
+	tool_detected = false;
     atc_home_info.clamp_status = UNHOMED;
     atc_home_info.triggered = false;
     detector_info.triggered = false;
     ref_tool_mz = 0.0;
     cur_tool_mz = 0.0;
     tool_offset = 0.0;
-    last_pos[0] = 0.0;
-    last_pos[1] = 0.0;
-    last_pos[2] = 0.0;
-	playing_file = false;
     tool_number = 6;
-    g28_triggered = false;
-    goto_position = -1;
-    position_x = 8888;
-    position_y = 8888;
 
 
     this->register_for_event(ON_GCODE_RECEIVED);
     this->register_for_event(ON_GET_PUBLIC_DATA);
     this->register_for_event(ON_SET_PUBLIC_DATA);
-    this->register_for_event(ON_MAIN_LOOP);
     this->register_for_event(ON_HALT);
 
     this->on_config_reload(this);
@@ -491,9 +180,6 @@ void ATCHandler::on_config_reload(void *argument)
 void ATCHandler::on_halt(void* argument)
 {
     if (argument == nullptr ) {
-        this->atc_status = NONE;
-        this->clear_script_queue();
-        this->set_inner_playing(false);
         THEKERNEL->set_atc_state(ATC_NONE);
         this->atc_home_info.clamp_status = UNHOMED;
 	}
@@ -667,7 +353,7 @@ void ATCHandler::clamp_tool()
 		return;
 	}
 	if (atc_home_info.clamp_status == UNHOMED) {
-		home_clamp();
+		home_clamp(); // homing ends at the clamped position, no stroke needed
 		return;
 	}
 
@@ -735,83 +421,7 @@ void ATCHandler::on_gcode_received(void *argument)
 
     if (gcode->has_m) {
     	// gcode->stream->printf("Has m: %d\r\n", gcode->m);
-    	if (gcode->m == 6 && gcode->has_letter('T')) {
-    		// gcode->stream->printf("Has t\r\n");
-    		if (atc_status != NONE) {
-    			gcode->stream->printf("ATC already begun\r\n");
-    			return;
-    		}
-
-    		THECONVEYOR.wait_for_idle();
-
-    	    struct spindle_status ss;
-    	    if (PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss)) {
-    	    	if (ss.state) {
-    	    		PublicData::set_value(pwm_spindle_control_checksum, turn_off_spindle_checksum, nullptr);
-    	    	}
-    	    }
-
-    	    if (PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss)) {
-    	    	if (ss.state) {
-    	    		// Stop
-    	    		printk("Error: can not do ATC while spindle is running.\n");
-			        THEKERNEL->set_halt_reason(ATC_HOME_FAIL);
-			        THEKERNEL->call_event(ON_HALT, nullptr);
-			        return;
-    	    	}
-    	    }
-
-            int new_tool = gcode->get_value('T');
-            if (new_tool > this->tool_number) {
-		        THEKERNEL->call_event(ON_HALT, nullptr);
-		        THEKERNEL->set_halt_reason(ATC_TOOL_INVALID);
-            	gcode->stream->printf("ALARM: Invalid tool: T%d\r\n", new_tool);
-            } else {
-            	if (new_tool != active_tool) {
-            		if (new_tool > -1 && THEKERNEL->get_laser_mode()) {
-            			printk("ALARM: Can not do ATC in laser mode!\n");
-            			return;
-            		}
-                    // push old state
-                    THEROBOT.push_state();
-                    THEROBOT.get_axis_position(last_pos, 3);
-                    set_inner_playing(true);
-                    this->clear_script_queue();
-                	if (this->active_tool < 0) {
-                		gcode->stream->printf("Start picking new tool: T%d\r\n", new_tool);
-                		// just pick up tool
-                		atc_status = PICK;
-                		this->fill_pick_scripts(new_tool, true);
-                		this->fill_cali_scripts(new_tool == 0, false);
-                               this->fill_commit_tool_scripts(new_tool);
-                	} else if (new_tool < 0) {
-                		gcode->stream->printf("Start dropping current tool: T%d\r\n", this->active_tool);
-                		// just drop tool
-                		atc_status = DROP;
-                		this->fill_drop_scripts(active_tool);
-                		if (THEKERNEL->get_laser_mode()) {
-                			this->fill_cali_scripts(false, false);
-                		}
-                	} else {
-                		gcode->stream->printf("Start atc, old tool: T%d, new tool: T%d\r\n", this->active_tool, new_tool);
-                		// full atc progress
-                		atc_status = FULL;
-                	    this->fill_drop_scripts(active_tool);
-                	    this->fill_pick_scripts(new_tool, false);
-                	    this->fill_cali_scripts(new_tool == 0, false);
-                           this->fill_commit_tool_scripts(new_tool);
-                	}
-            	} else if (new_tool == -1  && THEKERNEL->get_laser_mode()) {
-            		// calibrate
-                    THEROBOT.push_state();
-                    THEROBOT.get_axis_position(last_pos, 3);
-                    set_inner_playing(true);
-                    this->clear_script_queue();
-            		atc_status = CALI;
-            		this->fill_cali_scripts(false, true);
-            	}
-            }
-		} else if (gcode->m == 490)  {
+		if (gcode->m == 490)  {
 			if (gcode->subcode == 0) {
 				// home tool change
 				home_clamp();
@@ -822,101 +432,25 @@ void ATCHandler::on_gcode_received(void *argument)
 				// loose tool
 				loose_tool();
 			}
-		} else if (gcode->m == 491) {
-			if (gcode->subcode == 1) {
-				char buff[100];
-				float tolerance = 0.1;
-				if (gcode->has_letter('H')) {
-		    		tolerance = gcode->get_value('H');
-					if (tolerance < 0.02) {
-						printk("ERROR: Tool Break Check - tolerance set too small\n");
-						THEKERNEL->call_event(ON_HALT, nullptr);
-        				THEKERNEL->set_halt_reason(CALIBRATE_FAIL);
-						return;
-					}
-
-				}
-				//store current TLO
-				float tlo = THEKERNEL->eeprom_data.TLO;
-
-				// do calibrate to find new TLO
-				THEROBOT.push_state();
-				THEROBOT.get_axis_position(last_pos, 3);
-				set_inner_playing(true);
-				this->clear_script_queue();
-				
-				atc_status = CALI;
-				this->fill_cali_scripts(active_tool == 0, true);
-
-				THECONVEYOR.wait_for_idle();
-				// lift z to safe position with fast speed
-				snprintf(buff, sizeof(buff), "M5");
-				this->script_queue.push(buff);
-				snprintf(buff, sizeof(buff), "G53 G0 Z%.3f", THEROBOT.from_millimeters(this->safe_z_mm));
-				this->script_queue.push(buff);
-				snprintf(buff, sizeof(buff), "M491.2 H%.3f P%.3f", tolerance, tlo);
-				this->script_queue.push(buff);
-				
-				
-
-
-			}else if (gcode->subcode == 2){
-				float tlo = 0;
-				float tolerance = 0.1;
-				THECONVEYOR.wait_for_idle();
-				if (gcode->has_letter('H')) {
-		    		tolerance = gcode->get_value('H');
-					if (tolerance < 0.02) {
-						printk("ERROR: Tool Break Check - tolerance set too small\n");
-						THEKERNEL->call_event(ON_HALT, nullptr);
-        				THEKERNEL->set_halt_reason(CALIBRATE_FAIL);
-						return;
-					}
-
-				}
-				if (gcode->has_letter('P')) {
-		    		tlo = gcode->get_value('P');
-					if (tlo == 0) {
-						printk("No previous TLO included, aborting\n");
-						return;
-					}
-
-				}
-				float new_tlo = THEKERNEL->eeprom_data.TLO;
-				printk("Old: %.3f , new: %.3f\n",tlo,new_tlo);
-				//test for breakage
-				if (fabs(tlo - new_tlo) > tolerance) {
-					printk("ERROR: Tool Break Check - check tool for breakage\n");
-					THEKERNEL->call_event(ON_HALT, nullptr);
-					THEKERNEL->set_halt_reason(CALIBRATE_FAIL);
-					return;
-				}
-
-			} else {
-				// do calibrate
-				THEROBOT.push_state();
-				THEROBOT.get_axis_position(last_pos, 3);
-				set_inner_playing(true);
-				this->clear_script_queue();
-				atc_status = CALI;
-				this->fill_cali_scripts(active_tool == 0, true);
-
-			}
 		} else if (gcode->m == 492) {
 			if (gcode->subcode == 0 || gcode->subcode == 1) {
 				// check true
-				if (!laser_detect()) {
+				tool_detected = laser_detect();
+				if (!tool_detected) {
 			        THEKERNEL->call_event(ON_HALT, nullptr);
 			        THEKERNEL->set_halt_reason(ATC_NO_TOOL);
 			        printk("ERROR: Tool confliction occured, please check tool rack!\n");
 				}
 			} else if (gcode->subcode == 2) {
 				// check false
-				if (laser_detect()) {
+				tool_detected = laser_detect();
+				if (tool_detected) {
 			        THEKERNEL->call_event(ON_HALT, nullptr);
 			        THEKERNEL->set_halt_reason(ATC_HAS_TOOL);
 			        printk("ERROR: Tool confliction occured, please check tool rack!\n");
 				}
+			} else if (gcode->subcode == 4) {
+				tool_detected = laser_detect(); // a script decides what a wrong result means
 			} else if (gcode->subcode == 3) {
 				// check if the probe was triggered
 				if (!probe_detect()) {
@@ -956,132 +490,6 @@ void ATCHandler::on_gcode_received(void *argument)
 				// close probe laser
 				probe_laser_timer.stop();
 			}
-		} else if (gcode->m == 495) {
-			if (gcode->subcode == 3) {
-				float tool_dia = 3.175;
-				float probe_height = 9.0;
-				if (gcode->has_letter('D')) {
-					tool_dia = gcode->get_value('D');
-				}
-				if (gcode->has_letter('H')) {
-					probe_height = gcode->get_value('H');
-				}
-	            THEROBOT.push_state();
-				set_inner_playing(true);
-				atc_status = AUTOMATION;
-	            this->clear_script_queue();
-				this->fill_xyzprobe_scripts(tool_dia, probe_height);
-
-			} else {
-				// Do Margin, ZProbe, Auto Leveling based on parameters, change probe tool if needed
-				if (gcode->has_letter('X') && gcode->has_letter('Y')) {
-	        		if (THEKERNEL->get_laser_mode()) {
-	        			printk("ALARM: Can not do Automatic work in laser mode!\n");
-	        			return;
-	        		}
-
-					bool margin = false;
-					bool zprobe = false;
-					bool zprobe_abs = false;
-					bool leveling = false;
-
-					float x_path_pos = gcode->get_value('X');
-					float y_path_pos = gcode->get_value('Y');
-
-		    		float x_level_size = 0;
-		    		float y_level_size = 0;
-		    		int x_level_grids = 0;
-		    		int y_level_grids = 0;
-		    		float z_level_height = 5;
-		    		float x_margin_pos_max = 0;
-		    		float y_margin_pos_max = 0;
-		    		float x_zprobe_offset = 0;
-		    		float y_zprobe_offset = 0;
-		    		if (gcode->has_letter('C') && gcode->has_letter('D')) {
-		    			margin = true;
-		    			x_margin_pos_max =  gcode->get_value('C');
-		    			y_margin_pos_max =  gcode->get_value('D');
-		    		}
-		    		if (gcode->has_letter('O')) {
-		    			zprobe = true;
-		    			x_zprobe_offset =  gcode->get_value('O');
-		    			if (gcode->has_letter('F')) {
-			    			y_zprobe_offset =  gcode->get_value('F');
-		    			} else {
-			    			zprobe_abs = true;
-		    			}
-		    		}
-		    		if (gcode->has_letter('A') && gcode->has_letter('B') && gcode->has_letter('I') && gcode->has_letter('J') && gcode->has_letter('H')) {
-		    			leveling = true;
-		    			x_level_size =  gcode->get_value('A');
-		    			y_level_size =  gcode->get_value('B');
-			    		x_level_grids = gcode->get_value('I');
-			    		y_level_grids = gcode->get_value('J');
-			    		z_level_height = gcode->get_value('H');
-					}
-		    		if (margin || zprobe || leveling) {
-			            THEROBOT.push_state();
-						set_inner_playing(true);
-						atc_status = AUTOMATION;
-			            this->clear_script_queue();
-			            if (active_tool != 0) {
-			            	// need to change to probe tool first
-			        		gcode->stream->printf("Change to probe tool first!\r\n");
-			                // save current position
-			                THEROBOT.get_axis_position(last_pos, 3);
-			        		if (active_tool > 0) {
-			        			// drop current tool
-			            		int old_tool = active_tool;
-			            		// change to probe tool
-			            		this->fill_drop_scripts(old_tool);
-			        		}
-		            		this->fill_pick_scripts(0, active_tool <= 0);
-		            		this->fill_cali_scripts(true, false);
-                                       this->fill_commit_tool_scripts(0);
-			            }
-			            if (margin) {
-			            	gcode->stream->printf("Auto scan margin\r\n");
-			            	this->fill_margin_scripts(x_path_pos, y_path_pos, x_margin_pos_max, y_margin_pos_max);
-			            }
-			            if (zprobe) {
-			            	if (zprobe_abs) {
-				            	gcode->stream->printf("Auto z probe for 4 axis\r\n");
-				            	this->fill_zprobe_abs_scripts();
-			            	} else {
-				            	gcode->stream->printf("Auto z probe, offset: %1.3f, %1.3f\r\n", x_zprobe_offset, y_zprobe_offset);
-				            	this->fill_zprobe_scripts(x_path_pos, y_path_pos, x_zprobe_offset, y_zprobe_offset);
-			            	}
-			            }
-			            if (leveling) {
-			            	gcode->stream->printf("Auto leveling, grid: %d * %d height: %1.2f\r\n", x_level_grids, y_level_grids, z_level_height);
-		            		this->fill_autolevel_scripts(x_path_pos, y_path_pos, x_level_size, y_level_size, x_level_grids, y_level_grids, z_level_height);
-			            }
-			            if (gcode->has_letter('P')) {
-			            	gcode->stream->printf("Goto path origin first\r\n");
-			            	this->fill_goto_origin_scripts(x_path_pos, y_path_pos);
-			            }
-		    		} else {
-		    			if (gcode->has_letter('P')) {
-							set_inner_playing(true);
-							atc_status = AUTOMATION;
-				            this->clear_script_queue();
-		    				// goto path origin first
-			            	gcode->stream->printf("Goto path origin first\r\n");
-			            	this->fill_goto_origin_scripts(x_path_pos, y_path_pos);
-		    			}
-		    		}
-				} else {
-					gcode->stream->printf("ALARM: Miss Automation Parameter: X/Y\r\n");
-				}
-			}
-		} else if (gcode->m == 496) {
-			goto_position = gcode->subcode;
-			// goto designative work position
-			if (gcode->has_letter('X') && gcode->has_letter('Y')) {
-				position_x = gcode->get_value('X');
-				position_y = gcode->get_value('Y');
-			}
-
 		} else if (gcode->m == 497) {
 		    // wait for the queue to be empty
 		    THECONVEYOR.wait_for_idle();
@@ -1107,155 +515,7 @@ void ATCHandler::on_gcode_received(void *argument)
 				}
 			}
 		}
-    } else if (gcode->has_g && gcode->g == 28 && gcode->subcode == 0) {
-    	g28_triggered = true;
     }
-}
-
-void ATCHandler::on_main_loop(void *argument)
-{
-    if (this->atc_status != NONE) {
-        if (THEKERNEL->is_halted()) {
-            printk("Kernel is halted!....\r\n");
-            return;
-        }
-
-        if (THEKERNEL->is_suspending() || THEKERNEL->is_waiting()) {
-        	return;
-        }
-
-        void *return_value;
-        bool ok = PublicData::get_value( player_checksum, is_playing_checksum, &return_value );
-        if (ok) {
-            bool playing = *static_cast<bool *>(return_value);
-            if (this->playing_file && !playing) {
-            	this->clear_script_queue();
-
-				this->atc_status = NONE;
-				set_inner_playing(false);
-				THEKERNEL->set_atc_state(ATC_NONE);
-
-				// pop old state
-				THEROBOT.pop_state();
-
-				// if we were printing from an M command from pronterface we need to send this back
-				printk("Abort from ATC\n");
-
-				return;
-            }
-        }
-
-        while (!this->script_queue.empty()) {
-        	printk("%s\r\n", this->script_queue.front().c_str());
-			struct SerialMessage message;
-			message.message = this->script_queue.front();
-			message.stream = &THEKERNEL->streams;
-			message.line = 0;
-			this->script_queue.pop();
-
-			// waits for the queue to have enough room
-			THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
-            return;
-        }
-
-		if (this->atc_status != AUTOMATION) {
-	        // return to z clearance position
-	        rapid_move(true, NAN, NAN, this->clearance_z);
-
-	        // return to saved x and y position
-	        rapid_move(true, last_pos[0], last_pos[1], NAN);
-		}
-
-        this->atc_status = NONE;
-
-		set_inner_playing(false);
-
-		THEKERNEL->set_atc_state(ATC_NONE);
-
-        // pop old state
-        THEROBOT.pop_state();
-
-		// if we were printing from an M command from pronterface we need to send this back
-		printk("Done ATC\r\n");
-    } else if (g28_triggered) {
-		printk("G28 means goto clearance position on CARVERA\n");
-		THEROBOT.push_state();
-		// goto z clearance
-		rapid_move(true, NAN, NAN, this->clearance_z);
-		// goto x and y clearance
-		rapid_move(true, this->clearance_x, this->clearance_y, NAN);
-		THECONVEYOR.wait_for_idle();
-		THEROBOT.pop_state();
-		g28_triggered = false;
-    } else if (goto_position > -1) {
-        rapid_move(true, NAN, NAN, this->clearance_z);
-		if (goto_position == 0 || goto_position == 1) {
-			// goto clearance
-	        rapid_move(true, this->clearance_x, this->clearance_y, NAN);
-		} else if (goto_position == 2) {
-			// goto work origin
-			// shrink A value first before move
-			// shrink B value first before move
-			rapid_move(false, 0, 0, NAN);
-		} else if (goto_position == 3) {
-			// goto anchor 1
-			rapid_move(true, this->anchor1_x, this->anchor1_y, NAN);
-		} else if (goto_position == 4) {
-			// goto anchor 2
-			rapid_move(true, this->anchor1_x + this->anchor2_offset_x, this->anchor1_y + this->anchor2_offset_y, NAN);
-		} else if (goto_position == 5) {
-			// goto designative work position
-			if (position_x < 8888 && position_y < 8888) {
-				rapid_move(false, position_x, position_y, NAN);
-			}
-		} else if (goto_position == 6) {
-			// goto designative machine position
-			if (position_x < 8888 && position_y < 8888) {
-				rapid_move(true, position_x, position_y, NAN);
-			}
-		}
-		position_x = 8888;
-		position_y = 8888;
-		goto_position = -1;
-    }
-}
-
-// issue a coordinated move directly to robot, and return when done
-// Only move the coordinates that are passed in as not nan
-// NOTE must use G53 to force move in machine coordinates and ignore any WCS offsets
-void ATCHandler::rapid_move(bool mc, float x, float y, float z)
-{
-    #define CMDLEN 128
-    char *cmd= new char[CMDLEN]; // use heap here to reduce stack usage
-
-    if (mc)
-    	strcpy(cmd, "G53 G0 "); // G53 forces movement in machine coordinate system
-    else
-    	strcpy(cmd, "G90 G0 "); // G90 forces movement in machine coordinate system
-
-    if(!isnan(x)) {
-        size_t n= strlen(cmd);
-        snprintf(&cmd[n], CMDLEN-n, " X%1.3f", THEROBOT.from_millimeters(x));
-    }
-    if(!isnan(y)) {
-        size_t n= strlen(cmd);
-        snprintf(&cmd[n], CMDLEN-n, " Y%1.3f", THEROBOT.from_millimeters(y));
-    }
-    if(!isnan(z)) {
-        size_t n= strlen(cmd);
-        snprintf(&cmd[n], CMDLEN-n, " Z%1.3f", THEROBOT.from_millimeters(z));
-    }
-
-    // send as a command line as may have multiple G codes in it
-    struct SerialMessage message;
-    message.message = cmd;
-    delete [] cmd;
-
-    message.stream = &(StreamOutput::NullStream);
-    message.line = 0;
-    THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-    THECONVEYOR.wait_for_idle();
-
 }
 
 void ATCHandler::on_get_public_data(void* argument)
@@ -1264,7 +524,27 @@ void ATCHandler::on_get_public_data(void* argument)
 
     if(!pdr->starts_with(atc_handler_checksum)) return;
 
-    if(pdr->second_element_is(get_tool_status_checksum)) {
+    if(pdr->second_element_is(get_param_checksum)) {
+        struct atc_param *p = static_cast<struct atc_param *>(pdr->get_data_ptr());
+        struct { const char *name; float value; } table[] = {
+            {"_clamp_state", (float)atc_home_info.clamp_status}, {"_tool_detected", (float)tool_detected}, {"_active_tool", (float)active_tool},
+            {"_anchor1_x", anchor1_x}, {"_anchor1_y", anchor1_y}, {"_anchor2_offset_x", anchor2_offset_x}, {"_anchor2_offset_y", anchor2_offset_y},
+            {"_toolrack_offset_x", toolrack_offset_x}, {"_toolrack_offset_y", toolrack_offset_y}, {"_toolrack_z", toolrack_z},
+            {"_rotation_offset_x", rotation_offset_x}, {"_rotation_offset_y", rotation_offset_y}, {"_rotation_offset_z", rotation_offset_z},
+            {"_clearance_x", clearance_x}, {"_clearance_y", clearance_y}, {"_clearance_z", clearance_z},
+            {"_atc_safe_z", safe_z_mm}, {"_atc_safe_z_empty", safe_z_empty_mm}, {"_atc_safe_z_offset", safe_z_offset_mm},
+            {"_atc_fast_z_rate", fast_z_rate}, {"_atc_slow_z_rate", slow_z_rate}, {"_atc_margin_rate", margin_rate},
+            {"_atc_probe_fast_rate", probe_fast_rate}, {"_atc_probe_slow_rate", probe_slow_rate}, {"_atc_probe_retract", probe_retract_mm},
+            {"_atc_probe_height", probe_height_mm}, {"_probe_mx", probe_mx_mm}, {"_probe_my", probe_my_mm}, {"_probe_mz", probe_mz_mm},
+        };
+        for (auto &e : table) {
+            if (strcmp(e.name, p->name) == 0) {
+                p->value = e.value;
+                pdr->set_taken();
+                break;
+            }
+        }
+    } else if(pdr->second_element_is(get_tool_status_checksum)) {
     	if (this->active_tool >= 0) {
             struct tool_status *t= static_cast<tool_status*>(pdr->get_data_ptr());
             t->active_tool = this->active_tool;
@@ -1299,23 +579,3 @@ void ATCHandler::on_set_public_data(void* argument)
         pdr->set_taken();
     }
 }
-
-bool ATCHandler::get_inner_playing() const
-{
-    void *returned_data;
-
-    bool ok = PublicData::get_value( player_checksum, inner_playing_checksum, &returned_data );
-    if (ok) {
-        bool b = *static_cast<bool *>(returned_data);
-        return b;
-    }
-    return false;
-}
-
-void ATCHandler::set_inner_playing(bool inner_playing)
-{
-	this->playing_file = PublicData::set_value( player_checksum, inner_playing_checksum, &inner_playing );
-}
-
-
-

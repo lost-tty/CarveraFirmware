@@ -1,0 +1,15 @@
+(set X Y Z work origin at a corner with a probe of diameter #1, probe body height #2)
+o<xyz_probe> sub
+  M497.5
+  G38.2 Z#<_probe_mz> F#<_atc_probe_slow_rate>
+  G10 L20 P0 Z#2
+  G91 G0 Z#<_atc_probe_retract>
+  G38.2 X-35 F#<_atc_probe_slow_rate>
+  G10 L20 P0 X[#1 / 2]
+  G91 G0 X5
+  G38.2 Y-35 F#<_atc_probe_slow_rate>
+  G10 L20 P0 Y[#1 / 2]
+  G91 G0 Y5
+  G91 G0 Z15
+  G91 G0 X[-5 - #1 / 2] Y[-5 - #1 / 2]
+o<xyz_probe> endsub

@@ -10,13 +10,13 @@
 
 #include "Module.h"
 #include "GcodeFile.h"
+#include "Source.h"
 
 #include <stdio.h>
 #include <string>
 #include <cstdint>
 #include <map>
 #include <vector>
-#include <queue>
 
 #include "FreeRTOS.h"
 
@@ -24,7 +24,8 @@ using std::string;
 
 class StreamOutput;
 
-class Player : public Module {
+// Job control: plays a file as the bottom source of the stack and feeds the stack from its main loop.
+class Player : public Module, public Source {
     public:
         void on_module_loaded();
         void on_console_line_received( void* argument );
@@ -33,18 +34,22 @@ class Player : public Module {
         void on_set_public_data(void* argument);
         void on_gcode_received(void *argument);
         void on_halt(void *argument);
+        Source::Result next(SerialMessage &msg) override;
+        void abort() override;
+        void list(StreamOutput* stream, unsigned around) override;
 
     private:
         void play_command( string parameters, StreamOutput* stream );
         void progress_command( string parameters, StreamOutput* stream );
         void abort_command( string parameters, StreamOutput* stream );
         void suspend_command( string parameters, StreamOutput* stream );
+        void suspend_now( StreamOutput* stream );
         void resume_command( string parameters, StreamOutput* stream );
         void goto_command( string parameters, StreamOutput* stream );
-        void buffer_command( string parameters, StreamOutput* stream );
         void test_command(string parameters, StreamOutput* stream );
 
         unsigned long calculate_elapsed_secs();
+        unsigned long current_line();
         string extract_options(string& args);
 		
         // 2024
@@ -52,14 +57,9 @@ class Player : public Module {
 
         string filename;
         string last_filename;
-        string after_suspend_gcode;
-        string before_resume_gcode;
-        string on_boot_gcode;
         StreamOutput* current_stream;
         StreamOutput* reply_stream;
 
-        std::queue<string> buffered_queue;
-        void clear_buffered_queue();
 
         GcodeFile file;
         TickType_t start_time;
@@ -70,13 +70,12 @@ class Player : public Module {
         float slope;
         std::map<uint16_t, float> saved_temperatures;
         struct {
-            bool on_boot_gcode_enable:1;
             bool booted:1;
             bool home_on_boot:1;
             bool playing_file:1;
             bool leave_heaters_on:1;
             bool override_leave_heaters_on:1;
-            bool inner_playing:1;
+            bool suspend_pending:1;   // asked for while a script was on top, taken at the next file line
             bool laser_clustering:1;
         };
 };

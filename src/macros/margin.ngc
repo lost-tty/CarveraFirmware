@@ -1,0 +1,12 @@
+(trace the work area outline with the probe laser: #1 #2 origin, #3 #4 far corner)
+o<margin> sub
+  M497.4
+  M494.1
+  G53 G0 Z#<_clearance_z>
+  G90 G0 X#1 Y#2
+  G90 G1 X#1 Y#4 F#<_atc_margin_rate>
+  G90 G1 X#3 Y#4 F#<_atc_margin_rate>
+  G90 G1 X#3 Y#2 F#<_atc_margin_rate>
+  G90 G1 X#1 Y#2 F#<_atc_margin_rate>
+  M494.2
+o<margin> endsub

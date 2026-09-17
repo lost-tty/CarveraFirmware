@@ -100,16 +100,17 @@ FileHandle *FATFileSystem::open(const char* name, int flags) {
         }
     }
 
-    FIL_t fh;
-    FRESULT res = f_open(&fh, n, openmode);
+    FATFileHandle *handle = new FATFileHandle(); // the FIL_t holds a sector buffer, too big for the stack
+    FRESULT res = f_open(&handle->file(), n, openmode);
     if(res) {
         FFSDEBUG("f_open('w') failed (%d, %s)\n", res, FR_ERRORS[res]);
+        delete handle;
         return NULL;
     }
     if(flags & O_APPEND) {
-        f_lseek(&fh, fh.fsize);
+        f_lseek(&handle->file(), handle->file().fsize);
     }
-    return new FATFileHandle(fh);
+    return handle;
 }
 
 int FATFileSystem::remove(const char *filename) {

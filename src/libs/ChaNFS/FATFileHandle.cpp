@@ -30,10 +30,6 @@ static const char *FR_ERRORS[] = {
 };
 #endif
 
-FATFileHandle::FATFileHandle(FIL_t fh) {
-    _fh = fh;
-}
-    
 int FATFileHandle::close() {
     FFSDEBUG("close\n");
     int retval = f_close(&_fh);

@@ -1,0 +1,9 @@
+(circle of radius #1 at feed #2, #3 times, around the current position)
+o<test_circle> sub
+  G91 G0 X-#1
+  o1 repeat [#3]
+    G2 X0 Y0 I#1 J0 F#2
+  o1 endrepeat
+  G91 G0 X#1
+  G90
+o<test_circle> endsub

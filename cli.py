@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # Console to the machine over TCP using the Makera frame protocol. Needs prompt_toolkit.
 # Replies scroll above the prompt, the machine status sits below it. Pasted text is sent line by line.
-# "?" "!" "~" and ^X (typed as the two characters) go out as realtime bytes.
+# Ctrl-X aborts, Ctrl-P holds, Ctrl-O resumes: sent the moment the key is pressed, no Enter needed.
+# "?" "!" "~" and ^X typed as text also go out as realtime bytes.
 # /upload <local> [<remote>] sends a file, default /sd/gcodes/<name>; "play <remote>" then runs it.
 # Tab completes commands, local paths after /upload and paths on the machine (listed on first Tab).
 # History lives in ~/.carvera_cli_history; Up/Down, Ctrl-R and the usual line editing come from prompt_toolkit.
@@ -17,6 +18,7 @@ import time
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.patch_stdout import patch_stdout
 
 from upload import frame, FrameReader, INFO, CTRL_MULTI, FILE_START, MD5, VIEW, DATA, END, CAN, PACKET_SIZE
@@ -27,7 +29,7 @@ LOAD_INFO, LOAD_FINISH, LOAD_ERROR = 0x83, 0x84, 0x85
 NAMES = {0x82: 'diag', LOAD_INFO: 'load', LOAD_FINISH: 'load-end', LOAD_ERROR: 'load-err', INFO: ''}
 SHELL = ('ls cd pwd cat echo rm mv mkdir upload download reset dfu break help ftype version model mem task get '
          'set_temp switch net ap wlan diagnose sleep power remount calc_thermistor thermistors time test '
-         'play progress abort suspend resume goto buffer').split()
+         'play progress abort suspend resume goto list').split()
 REMOTE_PATH = 'ls cd cat rm mv mkdir upload download play'.split()  # commands taking a path on the machine
 POLL_S = 0.5  # status poll, also keeps the machine from dropping an idle connection (wifi.tcp_timeout_s)
 MODAL_S = 2.0  # $G poll for the modal state, which the status frame does not carry
@@ -224,6 +226,32 @@ class CarveraCompleter(Completer):
             yield Completion(o, start_position=-len(word), display=os.path.basename(o.rstrip('/ ')) + ('/' if o.endswith('/') else ''))
 
 
+# realtime keys: they must reach the machine on the keypress, not after Enter
+def realtime_keys(con):
+    keys = KeyBindings()
+
+    def send(byte, what):
+        try:
+            con.send(frame(CTRL_SINGLE, byte))
+            print(what)
+        except OSError as e:
+            print(f'failed: {e}')
+
+    @keys.add('c-x', eager=True)  # prompt_toolkit uses c-x as a prefix, eager stops it waiting for a second key
+    def _(event):
+        send(b'\x18', '^X abort sent')
+
+    @keys.add('c-p')
+    def _(event):
+        send(b'!', 'feed hold sent')
+
+    @keys.add('c-o')
+    def _(event):
+        send(b'~', 'resume sent')
+
+    return keys
+
+
 def local_command(con, line):
     words = line.split()
     if words[0] == '/upload' and len(words) in (2, 3):
@@ -243,7 +271,8 @@ def main():
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
     con = Console(sock)
     session = PromptSession('> ', history=FileHistory(HISTORY_FILE), completer=CarveraCompleter(con),
-                            complete_while_typing=False, bottom_toolbar=lambda: status_block(con), refresh_interval=POLL_S)
+                            complete_while_typing=False, bottom_toolbar=lambda: status_block(con), refresh_interval=POLL_S,
+                            key_bindings=realtime_keys(con))
     try:
         with patch_stdout():
             while not con.closed:

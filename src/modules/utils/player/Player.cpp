@@ -16,6 +16,7 @@
 #include "libs/Logging.h"
 #include "libs/StreamOutput.h"
 #include "Gcode.h"
+#include "GcodeDispatch.h"
 #include "checksumm.h"
 #include "Config.h"
 #include "ConfigValue.h"
@@ -27,6 +28,7 @@
 #include "PublicDataRequest.h"
 #include "PublicData.h"
 #include "PlayerPublicAccess.h"
+#include "ScriptsPublicAccess.h"
 #include "TemperatureControlPublicAccess.h"
 #include "TemperatureControlPool.h"
 #include "Block.h"
@@ -40,14 +42,17 @@
 #include "mbed.h"
 
 #define home_on_boot_checksum             CHECKSUM("home_on_boot")
-#define on_boot_gcode_checksum            CHECKSUM("on_boot_gcode")
-#define on_boot_gcode_enable_checksum     CHECKSUM("on_boot_gcode_enable")
-#define after_suspend_gcode_checksum      CHECKSUM("after_suspend_gcode")
-#define before_resume_gcode_checksum      CHECKSUM("before_resume_gcode")
 #define leave_heaters_on_suspend_checksum CHECKSUM("leave_heaters_on_suspend")
 #define laser_module_clustering_checksum 	  CHECKSUM("laser_module_clustering")
 
 extern SDFAT mounter;
+
+// runs a machine script sub if it exists; false when nothing ran
+static bool run_script(const char *sub, const float *args, unsigned nargs)
+{
+    struct script_call call{sub, args, nargs};
+    return PublicData::set_value(scripts_checksum, run_script_checksum, &call);
+}
 
 void Player::on_module_loaded()
 {
@@ -55,7 +60,7 @@ void Player::on_module_loaded()
     this->booted = false;
     this->start_time = xTaskGetTickCount();
     this->reply_stream = nullptr;
-    this->inner_playing = false;
+    this->suspend_pending = false;
     this->slope = 0.0;
 
     this->register_for_event(ON_CONSOLE_LINE_RECEIVED);
@@ -65,15 +70,8 @@ void Player::on_module_loaded()
     this->register_for_event(ON_GCODE_RECEIVED);
     this->register_for_event(ON_HALT);
 
-    this->on_boot_gcode = THEKERNEL->config->value(on_boot_gcode_checksum)->by_default("/sd/on_boot.gcode")->as_string();
-    this->on_boot_gcode_enable = THEKERNEL->config->value(on_boot_gcode_enable_checksum)->by_default(false)->as_bool();
-
     this->home_on_boot = THEKERNEL->config->value(home_on_boot_checksum)->by_default(true)->as_bool();
 
-    this->after_suspend_gcode = THEKERNEL->config->value(after_suspend_gcode_checksum)->by_default("")->as_string();
-    this->before_resume_gcode = THEKERNEL->config->value(before_resume_gcode_checksum)->by_default("")->as_string();
-    std::replace( this->after_suspend_gcode.begin(), this->after_suspend_gcode.end(), '_', ' '); // replace _ with space
-    std::replace( this->before_resume_gcode.begin(), this->before_resume_gcode.end(), '_', ' '); // replace _ with space
     this->leave_heaters_on = THEKERNEL->config->value(leave_heaters_on_suspend_checksum)->by_default(false)->as_bool();
 
     this->laser_clustering = THEKERNEL->config->value(laser_module_clustering_checksum)->by_default(false)->as_bool();
@@ -91,19 +89,12 @@ unsigned long Player::calculate_elapsed_secs()
 
 void Player::on_halt(void* argument)
 {
-    this->clear_buffered_queue();
-
-    if(argument == nullptr && this->playing_file ) {
-        abort_command("1", &(StreamOutput::NullStream));
-	}
-
-	if(argument == nullptr && (THEKERNEL->is_suspending() || THEKERNEL->is_waiting())) {
-		// clean up from suspend
-		THEKERNEL->set_waiting(false);
-		THEKERNEL->set_suspending(false);
-		THEROBOT.pop_state();
-		printk("Suspend cleared\n");
-	}
+    if(argument == nullptr && (THEKERNEL->is_suspending() || THEKERNEL->is_waiting())) {
+        THEKERNEL->set_waiting(false);
+        sources.resume();
+        THEROBOT.pop_state();
+        printk("Suspend cleared\n");
+    }
 }
 
 // extract any options found on line, terminates args at the space before the first option (-v)
@@ -138,8 +129,7 @@ void Player::on_gcode_received(void *argument)
     } else if(gcode->has_g) {
         if (gcode->g == 28) { // homing cancels suspend
             if (THEKERNEL->is_suspending()) {
-                // clean up
-            	THEKERNEL->set_suspending(false);
+                sources.resume();
                 THEROBOT.pop_state();
             }
         }
@@ -177,17 +167,8 @@ void Player::on_console_line_received( void *argument )
         this->resume_command( possible_command, new_message.stream );
     }else if (cmd == "goto") {
     	this->goto_command( possible_command, new_message.stream );
-    }else if (cmd == "buffer") {
-    	this->buffer_command( possible_command, new_message.stream );
     }
 
-}
-
-// Buffer gcode to queue
-void Player::buffer_command( string parameters, StreamOutput *stream )
-{
-	this->buffered_queue.push(parameters);
-	stream->printf("Command buffered: %s\r\n", parameters.c_str());
 }
 
 // Play a gcode file by considering each line as if it was received on the serial console
@@ -213,7 +194,7 @@ void Player::play_command( string parameters, StreamOutput *stream )
     this->filename = absolute_from_relative(shift_parameter(parameters));
     this->last_filename = this->filename;
 
-    if (this->playing_file || THEKERNEL->is_suspending() || THEKERNEL->is_waiting()) {
+    if (!sources.empty() || THEKERNEL->is_suspending() || THEKERNEL->is_waiting()) {
         stream->printf("Currently printing, abort print first\r\n");
         return;
     }
@@ -233,6 +214,7 @@ void Player::play_command( string parameters, StreamOutput *stream )
     stream->printf("Playing %s\r\n", this->filename.c_str());
 
     this->playing_file = true;
+    sources.push(this);
 
     // Output to the current stream if we were passed the -v ( verbose ) option
     if( options.find_first_of("Vv") == string::npos ) {
@@ -326,22 +308,44 @@ void Player::progress_command( string parameters, StreamOutput *stream )
     }
 }
 
+// the motion line executing, or the last line fed when none is or a script is on top
+unsigned long Player::current_line()
+{
+    if (sources.top() == this) {
+        // the is_ready flag is cleared first when the ISR drops a block, so a ready block stays valid while we read it
+        const Block *block = THEKERNEL->step_ticker.get_current_block();
+        if (block != nullptr && block->is_ready && block->is_g123) return block->line;
+    }
+    return file.lines();
+}
+
+void Player::list(StreamOutput *stream, unsigned around)
+{
+    stream->printf("%s:\r\n", this->filename.c_str());
+    file.list(stream, current_line(), around);
+}
+
+// the file ended, was aborted or the machine halted
+void Player::abort()
+{
+    this->playing_file = false;
+    this->suspend_pending = false;
+    this->playing_lines = 0;
+    this->goto_line = 0;
+    this->filename = "";
+    this->current_stream = NULL;
+    file.close();
+}
+
 void Player::abort_command( string parameters, StreamOutput *stream )
 {
-    if(!playing_file && !file.is_open()) {
+    if(sources.empty()) {
         stream->printf("Not currently playing\r\n");
         return;
     }
 
-    this->playing_file = false;
-    this->playing_lines = 0;
-    this->goto_line = 0;
-    this->clear_buffered_queue();
-    this->filename = "";
-    this->current_stream = NULL;
-    file.close();
-
-    THEKERNEL->set_suspending(false);
+    sources.clear(); // the file and any script on top of it, or a script alone
+    sources.resume();
     THEKERNEL->set_waiting(true);
 
     // wait for queue to empty
@@ -375,12 +379,6 @@ void Player::abort_command( string parameters, StreamOutput *stream )
     }
 }
 
-void Player::clear_buffered_queue(){
-	while (!this->buffered_queue.empty()) {
-		this->buffered_queue.pop();
-	}
-}
-
 void Player::on_main_loop(void *argument)
 {
     if( !this->booted ) {
@@ -393,63 +391,38 @@ void Player::on_main_loop(void *argument)
     		THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
         }
 
-        if (this->on_boot_gcode_enable) {
-            this->play_command(this->on_boot_gcode, THEKERNEL->serial);
-        }
+        run_script("boot", nullptr, 0);
+    }
+}
 
+Source::Result Player::next(SerialMessage &msg)
+{
+    if (this->suspend_pending) {
+        this->suspend_pending = false;
+        suspend_now(&THEKERNEL->streams);
+        return WAIT;
     }
 
-    if ( this->playing_file ) {
-        if(THEKERNEL->is_halted() || THEKERNEL->is_suspending() || THEKERNEL->is_waiting() || this->inner_playing) {
-            return;
+    char buf[130];
+    unsigned long discarded = file.discarded();
+    if (file.next_line(buf, sizeof(buf))) {
+        if (this->current_stream != nullptr) {
+            if (file.discarded() != discarded) this->current_stream->printf("Warning: Discarded long line\n");
+            this->current_stream->printf("%s", buf);
         }
-
-        // check if there are bufferd command
-        while (!this->buffered_queue.empty()) {
-        	printk("%s\r\n", this->buffered_queue.front().c_str());
-			struct SerialMessage message;
-			message.message = this->buffered_queue.front();
-			message.stream = &THEKERNEL->streams;
-			message.line = 0;
-			this->buffered_queue.pop();
-
-			// waits for the queue to have enough room
-			THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
-            return;
-        }
-
-        char buf[130];
-        unsigned long discarded = file.discarded();
-        if (file.next_line(buf, sizeof(buf))) {
-            if (this->current_stream != nullptr) {
-                if (file.discarded() != discarded) this->current_stream->printf("Warning: Discarded long line\n");
-                this->current_stream->printf("%s", buf);
-            }
-
-            struct SerialMessage message;
-            message.message = buf;
-            message.stream = this->current_stream == nullptr ? &(StreamOutput::NullStream) : this->current_stream;
-            message.line = file.lines();
-
-            // waits for the queue to have enough room
-            THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
-            return; // we feed one line per main loop
-        }
-
-        this->playing_file = false;
-        this->filename = "";
-        playing_lines = 0;
-        goto_line = 0;
-        file.close();
-
-        this->current_stream = NULL;
-
-        if(this->reply_stream != NULL) {
-            // if we were printing from an M command from pronterface we need to send this back
-            this->reply_stream->printf("Done printing file\r\n");
-            this->reply_stream = NULL;
-        }
+        msg.message = buf;
+        msg.stream = this->current_stream == nullptr ? &(StreamOutput::NullStream) : this->current_stream;
+        msg.line = file.lines();
+        return LINE;
     }
+
+    abort();
+    if(this->reply_stream != NULL) {
+        // if we were printing from an M command from pronterface we need to send this back
+        this->reply_stream->printf("Done printing file\r\n");
+        this->reply_stream = NULL;
+    }
+    return DONE;
 }
 
 /*
@@ -496,19 +469,7 @@ void Player::on_get_public_data(void *argument)
     } else if(pdr->second_element_is(get_progress_checksum)) {
         static struct pad_progress p;
         if(file.size() > 0 && playing_file) {
-        	if (!this->inner_playing) {
-                const Block *block = THEKERNEL->step_ticker.get_current_block();
-                // Note to avoid a race condition where the block is being cleared we check the is_ready flag which gets cleared first,
-                // as this is an interrupt if that flag is not clear then it cannot be cleared while this is running and the block will still be valid (albeit it may have finished)
-                if (block != nullptr && block->is_ready && block->is_g123) {
-                	this->playing_lines = block->line;
-                	p.played_lines = this->playing_lines;
-                } else {
-                    p.played_lines = file.lines();
-                }
-        	} else {
-                p.played_lines = file.lines();
-        	}
+            p.played_lines = this->playing_lines = current_line();
             p.elapsed_secs = this->calculate_elapsed_secs();
             float pcnt = file.bytes() * 100.0F / file.size();
             p.percent_complete = roundf(pcnt);
@@ -516,10 +477,6 @@ void Player::on_get_public_data(void *argument)
             pdr->set_data_ptr(&p);
             pdr->set_taken();
         }
-    } else if (pdr->second_element_is(inner_playing_checksum)) {
-    	bool b = this->inner_playing;
-        pdr->set_data_ptr(&b);
-        pdr->set_taken();
     }
 }
 
@@ -532,10 +489,6 @@ void Player::on_set_public_data(void *argument)
     if(pdr->second_element_is(abort_play_checksum)) {
         abort_command("", &(StreamOutput::NullStream));
         pdr->set_taken();
-    } else if (pdr->second_element_is(inner_playing_checksum)) {
-    	bool b = *static_cast<bool *>(pdr->get_data_ptr());
-    	this->inner_playing = b;
-    	if (this->playing_file) pdr->set_taken();
     } else if (pdr->second_element_is(restart_job_checksum)) {
     	if (!this->last_filename.empty()) {
     		printk("Job restarted: %s.\r\n", this->last_filename.c_str());
@@ -547,7 +500,6 @@ void Player::on_set_public_data(void *argument)
 /**
 Suspend a print in progress
 1. send pause to upstream host, or pause if printing from sd
-1a. loop on_main_loop several times to clear any buffered commmands
 2. wait for empty queue
 3. save the current position, extruder position, temperatures - any state that would need to be restored
 4. retract by specifed amount either on command line or in config
@@ -569,6 +521,16 @@ void Player::suspend_command(string parameters, StreamOutput *stream )
         return;
     }
 
+    if (sources.top() != this) { // a tool change or other script is half way; pause at the next file line instead
+        this->suspend_pending = true;
+        stream->printf("Suspending after the running script...\n");
+        return;
+    }
+    suspend_now(stream);
+}
+
+void Player::suspend_now(StreamOutput *stream)
+{
     stream->printf("Suspending , waiting for queue to empty...\n");
 
     THEKERNEL->set_waiting(true);
@@ -583,7 +545,7 @@ void Player::suspend_command(string parameters, StreamOutput *stream )
     }
 
     THEKERNEL->set_waiting(false);
-    THEKERNEL->set_suspending(true);
+    sources.suspend();
 
     // save current XYZ position in WCS
     Robot::wcs_t mpos= THEROBOT.get_axis_position();
@@ -596,14 +558,7 @@ void Player::suspend_command(string parameters, StreamOutput *stream )
     THEROBOT.push_state();
     current_motion_mode = THEROBOT.get_current_motion_mode();
 
-    // execute optional gcode if defined
-    if(!after_suspend_gcode.empty()) {
-        struct SerialMessage message;
-        message.message = after_suspend_gcode;
-        message.stream = &(StreamOutput::NullStream);
-        message.line = 0;
-        THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-    }
+    run_script("after_suspend", nullptr, 0);
 
     printk("Suspended, resume to continue playing\n");
 }
@@ -617,6 +572,11 @@ resume the suspended print
 */
 void Player::resume_command(string parameters, StreamOutput *stream )
 {
+    if (this->suspend_pending) {
+        this->suspend_pending = false;
+        stream->printf("Suspend cancelled\n");
+        return;
+    }
     if(!THEKERNEL->is_suspending()) {
         stream->printf("Not suspended\n");
         return;
@@ -627,51 +587,28 @@ void Player::resume_command(string parameters, StreamOutput *stream )
     if(THEKERNEL->is_halted()) {
         printk("Resume aborted by kill\n");
         THEROBOT.pop_state();
-        THEKERNEL->set_suspending(false);
+        sources.resume();
         return;
     }
 
-    // execute optional gcode if defined
-    if(!before_resume_gcode.empty()) {
-        stream->printf("Executing before resume gcode...\n");
-        struct SerialMessage message;
-        message.message = before_resume_gcode;
-        message.stream = &(StreamOutput::NullStream);
-        message.line = 0;
-        THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-    }
-
-    if (this->goto_line == 0) {
-        // Restore position
-        stream->printf("Restoring saved XYZ positions and state...\n");
-
-        THEROBOT.absolute_mode = true;
-
-        char buf[128];
-        snprintf(buf, sizeof(buf), "G1 X%.3f Y%.3f Z%.3f F%.3f", saved_position[0], saved_position[1], saved_position[2], THEROBOT.from_millimeters(1000));
-        struct SerialMessage message;
-        message.message = buf;
-        message.stream = &(StreamOutput::NullStream);
-        message.line = 0;
-        THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-
-    	if (current_motion_mode > 1) {
-            snprintf(buf, sizeof(buf), "G%d", current_motion_mode - 1);
-            message.message = buf;
-            message.line = 0;
-            THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
-    	}
+    if (this->goto_line == 0 && current_motion_mode > 1) { // back to the arc mode the job was in
+        char buf[8];
+        snprintf(buf, sizeof(buf), "G%d", current_motion_mode - 1);
+        gcode_dispatch.run_line(buf, &StreamOutput::NullStream, false);
     }
 
     THEROBOT.pop_state();
 
     if(THEKERNEL->is_halted()) {
         printk("Resume aborted by kill\n");
-        THEKERNEL->set_suspending(false);
+        sources.resume();
         return;
     }
 
-	THEKERNEL->set_suspending(false);
+	sources.resume();
+
+    // the before_resume script moves back to the saved position; without it the position is not restored
+    if (this->goto_line == 0 && !run_script("before_resume", saved_position, 3)) stream->printf("Warning: no before_resume script\n");
 
 	stream->printf("Playing file resumed\n");
 }

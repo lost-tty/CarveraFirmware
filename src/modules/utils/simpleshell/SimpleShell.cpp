@@ -228,9 +228,13 @@ void SimpleShell::on_console_line_received( void *argument )
             config_default_command(  possible_command, new_message.stream );
 
         } else if (cmd == "play" || cmd == "progress" || cmd == "abort" || cmd == "suspend"
-        		|| cmd == "resume" || cmd == "buffer" || cmd == "goto") {
+        		|| cmd == "resume" || cmd == "goto") {
             // these are handled by Player module
 
+        } else if (cmd == "macro") {
+            // handled by Scripts
+        } else if (cmd == "list") {
+            // handled by the source stack
         } else if (cmd == "laser") {
             // these are handled by Laser module
 
@@ -547,6 +551,7 @@ void SimpleShell::mem_command(string parameters, StreamOutput *stream)
     }
 
     stream->printf("Block size: %u bytes\n", sizeof(Block));
+    stream->printf("Main loop stack unused at worst: %lu bytes\r\n", uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t));
 }
 
 const char* getTaskStateString(eTaskState state)
@@ -1209,117 +1214,7 @@ void SimpleShell::test_command( string parameters, StreamOutput *stream)
     AutoPushPop app; // this will save the state and restore it on exit
     string what = shift_parameter( parameters );
 
-    if (what == "jog") {
-        // jogs back and forth usage: axis distance iterations [feedrate]
-        string axis = shift_parameter( parameters );
-        string dist = shift_parameter( parameters );
-        string iters = shift_parameter( parameters );
-        string speed = shift_parameter( parameters );
-        if(axis.empty() || dist.empty() || iters.empty()) {
-            stream->printf("error: Need axis distance iterations\n");
-            return;
-        }
-        float d= strtof(dist.c_str(), NULL);
-        float f= speed.empty() ? THEROBOT.get_feed_rate() : strtof(speed.c_str(), NULL);
-        uint32_t n= strtol(iters.c_str(), NULL, 10);
-
-        bool toggle= false;
-        for (uint32_t i = 0; i < n; ++i) {
-            char cmd[64];
-            snprintf(cmd, sizeof(cmd), "G91 G0 %c%f F%f G90", toupper(axis[0]), toggle ? -d : d, f);
-            stream->printf("%s\n", cmd);
-            struct SerialMessage message{&StreamOutput::NullStream, cmd, 0};
-            THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-            if(THEKERNEL->is_halted()) break;
-            toggle= !toggle;
-        }
-        stream->printf("done\n");
-
-    }else if (what == "circle") {
-        // draws a circle around origin. usage: radius iterations [feedrate]
-        string radius = shift_parameter( parameters );
-        string iters = shift_parameter( parameters );
-        string speed = shift_parameter( parameters );
-         if(radius.empty() || iters.empty()) {
-            stream->printf("error: Need radius iterations\n");
-            return;
-        }
-
-        float r= strtof(radius.c_str(), NULL);
-        uint32_t n= strtol(iters.c_str(), NULL, 10);
-        float f= speed.empty() ? THEROBOT.get_feed_rate() : strtof(speed.c_str(), NULL);
-
-        THEROBOT.push_state();
-        char cmd[64];
-        snprintf(cmd, sizeof(cmd), "G91 G0 X%f F%f G90", -r, f);
-        stream->printf("%s\n", cmd);
-        struct SerialMessage message{&StreamOutput::NullStream, cmd, 0};
-        THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-
-        for (uint32_t i = 0; i < n; ++i) {
-            if(THEKERNEL->is_halted()) break;
-            snprintf(cmd, sizeof(cmd), "G2 I%f J0 F%f", r, f);
-            stream->printf("%s\n", cmd);
-            message.message= cmd;
-            message.line = 0;
-            THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-        }
-
-        // leave it where it started
-        if(!THEKERNEL->is_halted()) {
-            snprintf(cmd, sizeof(cmd), "G91 G0 X%f F%f G90", r, f);
-            stream->printf("%s\n", cmd);
-            struct SerialMessage message{&StreamOutput::NullStream, cmd, 0};
-            THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-        }
-
-        THEROBOT.pop_state();
-        stream->printf("done\n");
-
-    }else if (what == "square") {
-        // draws a square usage: size iterations [feedrate]
-        string size = shift_parameter( parameters );
-        string iters = shift_parameter( parameters );
-        string speed = shift_parameter( parameters );
-        if(size.empty() || iters.empty()) {
-            stream->printf("error: Need size iterations\n");
-            return;
-        }
-        float d= strtof(size.c_str(), NULL);
-        float f= speed.empty() ? THEROBOT.get_feed_rate() : strtof(speed.c_str(), NULL);
-        uint32_t n= strtol(iters.c_str(), NULL, 10);
-
-        for (uint32_t i = 0; i < n; ++i) {
-            char cmd[64];
-            {
-                snprintf(cmd, sizeof(cmd), "G91 G0 X%f F%f", d, f);
-                stream->printf("%s\n", cmd);
-                struct SerialMessage message{&StreamOutput::NullStream, cmd, 0};
-                THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-            }
-            {
-                snprintf(cmd, sizeof(cmd), "G0 Y%f", d);
-                stream->printf("%s\n", cmd);
-                struct SerialMessage message{&StreamOutput::NullStream, cmd, 0};
-                THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-            }
-            {
-                snprintf(cmd, sizeof(cmd), "G0 X%f", -d);
-                stream->printf("%s\n", cmd);
-                struct SerialMessage message{&StreamOutput::NullStream, cmd, 0};
-                THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-            }
-            {
-                snprintf(cmd, sizeof(cmd), "G0 Y%f G90", -d);
-                stream->printf("%s\n", cmd);
-                struct SerialMessage message{&StreamOutput::NullStream, cmd, 0};
-                THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-            }
-            if(THEKERNEL->is_halted()) break;
-         }
-        stream->printf("done\n");
-
-    }else if (what == "raw") {
+    if (what == "raw") {
         // issues raw steps to the specified axis usage: axis steps steps/sec
         string axis = shift_parameter( parameters );
         string stepstr = shift_parameter( parameters );
@@ -1365,10 +1260,8 @@ void SimpleShell::test_command( string parameters, StreamOutput *stream)
         //stream->printf("done\n");
 
     }else {
-        stream->printf("usage:\n test jog axis distance iterations [feedrate]\n");
-        stream->printf(" test square size iterations [feedrate]\n");
-        stream->printf(" test circle radius iterations [feedrate]\n");
-        stream->printf(" test raw axis steps steps/sec\n");
+        stream->printf("usage: test raw axis steps steps/sec\n");
+        stream->printf(" jog, square and circle are macros: macro run test_square <size> <feed> <times>\n");
     }
 }
 

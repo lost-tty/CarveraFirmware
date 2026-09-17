@@ -22,6 +22,8 @@
 #include "ConfigValue.h"
 #include "libs/StreamOutput.h"
 #include "PublicDataRequest.h"
+#include "PublicData.h"
+#include "ScriptsPublicAccess.h"
 #include "EndstopsPublicAccess.h"
 #include "Logging.h"
 #include "BaseSolution.h"
@@ -61,8 +63,6 @@ enum DEFNS { MIN_PIN, MAX_PIN, MAX_TRAVEL, FAST_RATE, SLOW_RATE, RETRACT, DIRECT
 
 #define home_z_first_checksum            CHECKSUM("home_z_first")
 #define homing_order_checksum            CHECKSUM("homing_order")
-#define move_to_origin_checksum          CHECKSUM("move_to_origin_after_home")
-#define park_after_home_checksum         CHECKSUM("park_after_home")
 
 #define alpha_trim_checksum              CHECKSUM("alpha_trim_mm")
 #define beta_trim_checksum               CHECKSUM("beta_trim_mm")
@@ -101,7 +101,6 @@ enum STATES {
     MOVING_BACK,            // homing move
     NOT_HOMING,
     BACK_OFF_HOME,
-    MOVE_TO_ORIGIN,
     LIMIT_TRIGGERED
 };
 
@@ -429,12 +428,6 @@ void Endstops::get_global_configs()
     }
 
     // set to true by default for deltas due to trim, false on cartesians
-    this->move_to_origin_after_home = THEKERNEL->config->value(move_to_origin_checksum)->by_default(is_delta)->as_bool();
-    if(!this->move_to_origin_after_home) {
-        this->park_after_home = THEKERNEL->config->value(park_after_home_checksum)->by_default(false)->as_bool();
-    }else{
-        this->park_after_home= false;
-    }
 }
 
 bool Endstops::debounced_get(Pin *pin)
@@ -560,40 +553,12 @@ void Endstops::back_off_home(axis_bitmap_t axis)
     this->status = NOT_HOMING;
 }
 
-// If enabled will move the head to 0,0 after homing, but only if X and Y were set to home
-void Endstops::move_to_origin(axis_bitmap_t axis)
+// after homing X and Y the machine script may take over (after_home.ngc)
+void Endstops::after_home(axis_bitmap_t axis)
 {
-    if(!is_delta && (!axis[X_AXIS] || !axis[Y_AXIS])) return; // ignore if X and Y not homing, unless delta
-
-    if(park_after_home) {
-        // do park instead of goto origin
-        this->status = MOVE_TO_ORIGIN;
-        handle_park_g28();
-        this->status = NOT_HOMING;
-        return;
-    }
-
-    // ignore if disabled
-    if(!this->move_to_origin_after_home) return;
-
-    this->status = MOVE_TO_ORIGIN;
-    // Do we need to check if we are already at 0,0? probably not as the G0 will not do anything if we are
-    // float pos[3]; THEROBOT.get_axis_position(pos); if(pos[0] == 0 && pos[1] == 0) return;
-
-    // Move to center using a regular move, use slower of X and Y fast rate in mm/sec
-    float rate = std::min(homing_axis[X_AXIS].fast_rate, homing_axis[Y_AXIS].fast_rate) * 60.0F;
-    char buf[32];
-    THEROBOT.push_state();
-    THEROBOT.absolute_mode = true;
-    snprintf(buf, sizeof(buf), "G53 G0 X0 Y0 F%1.4f", THEROBOT.from_millimeters(rate)); // must use machine coordinates in case G92 or WCS is in effect
-    struct SerialMessage message;
-    message.message = buf;
-    message.stream = &(StreamOutput::NullStream);
-    THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message ); // as it is a multi G code command
-    // Wait for above to finish
-    THECONVEYOR.wait_for_idle();
-    THEROBOT.pop_state();
-    this->status = NOT_HOMING;
+    if(!axis[X_AXIS] || !axis[Y_AXIS]) return;
+    struct script_call call{"after_home", nullptr, 0};
+    PublicData::set_value(scripts_checksum, run_script_checksum, &call);
 }
 
 // Called every millisecond in an ISR
@@ -968,18 +933,9 @@ void Endstops::process_home_command(Gcode* gcode)
 
     // on some systems where 0,0 is bed center it is nice to have home goto 0,0 after homing
     // default is off for cartesian and on for deltas
-    if(!is_delta) {
-        // NOTE a rotary delta usually has optical or hall-effect endstops so it is safe to go past them a little bit
-        move_to_origin(haxis);
-        // if limit switches are enabled we must back off endstop after setting home
-        back_off_home(haxis);
-
-    } else if(haxis[Z_AXIS] && (this->move_to_origin_after_home || homing_axis[X_AXIS].pin_info->limit_enable)) {
-        // deltas are not left at 0,0 because of the trim settings, so move to 0,0 if requested, but we need to back off endstops first
-        // also need to back off endstops if limits are enabled
-        back_off_home(haxis);
-        move_to_origin(haxis);
-    }
+    // if limit switches are enabled we must back off endstop after setting home
+    if(!is_delta || (haxis[Z_AXIS] && homing_axis[X_AXIS].pin_info->limit_enable)) back_off_home(haxis);
+    after_home(haxis);
 }
 
 void Endstops::set_homing_offset(Gcode *gcode)
@@ -1018,21 +974,6 @@ void Endstops::set_homing_offset(Gcode *gcode)
     gcode->stream->printf("Homing Offset: X %5.3f Y %5.3f Z %5.3f will take effect next home\n", homing_axis[X_AXIS].home_offset, homing_axis[Y_AXIS].home_offset, homing_axis[Z_AXIS].home_offset);
 }
 
-void Endstops::handle_park_g28()
-{
-    // TODO: spec says if XYZ specified move to them first then move to MCS of specifed axis
-    // THEROBOT.push_state();
-    // THEROBOT.absolute_mode = true;
-	// snprintf(buf, sizeof(buf), "G53 G0 X%f Y%f", THEROBOT.from_millimeters(g28_position[X_AXIS]), THEROBOT.from_millimeters(g28_position[Y_AXIS])); // must use machine coordinates in case G92 or WCS is in effect
-    // snprintf(buf, sizeof(buf), "M496"); // Got clearance position instead
-//    struct SerialMessage message;
-//    message.message = "M496";
-//    message.stream = &(StreamOutput::NullStream);
-//    THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-    // Wait for above to finish
-    // THECONVEYOR.wait_for_idle();
-    // THEROBOT.pop_state();
-}
 
 // parse gcodes
 void Endstops::on_gcode_received(void *argument)
@@ -1041,7 +982,7 @@ void Endstops::on_gcode_received(void *argument)
     if ( gcode->has_g && gcode->g == 28) {
         switch(gcode->subcode) {
             case 0: // G28 in grbl mode will do a rapid to the predefined position otherwise it is home command
-                handle_park_g28();
+                // G28 goes to clearance via the g28 script
                 break;
 
             case 1: // G28.1 set pre defined park position

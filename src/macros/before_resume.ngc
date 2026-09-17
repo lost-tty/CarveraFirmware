@@ -1,0 +1,5 @@
+(back to where the job was suspended, XY first, then Z; #1 #2 #3 = saved work position)
+o<before_resume> sub
+  G90 G0 X#1 Y#2
+  G90 G1 Z#3 F1000
+o<before_resume> endsub

@@ -36,7 +36,7 @@ class Endstops : public Module{
         void home(axis_bitmap_t a);
         void home_xy();
         void back_off_home(axis_bitmap_t axis);
-        void move_to_origin(axis_bitmap_t axis);
+        void after_home(axis_bitmap_t axis);
         void on_get_public_data(void* argument);
         void on_set_public_data(void* argument);
         void on_idle(void *argument);
@@ -44,7 +44,6 @@ class Endstops : public Module{
         void process_home_command(Gcode* gcode);
         void set_homing_offset(Gcode* gcode);
         void read_endstops();
-        void handle_park_g28();
 
         SoftTimer read_endstops_timer;
 
@@ -116,7 +115,5 @@ class Endstops : public Module{
             bool is_rdelta:1;
             bool is_scara:1;
             bool home_z_first:1;
-            bool move_to_origin_after_home:1;
-            bool park_after_home:1;
         };
 };

@@ -1,0 +1,9 @@
+(rack slot of tool #1 -> #<_slot_x> #<_slot_y>)
+o<slot_xy> sub
+  #<_slot_x> = [#<_anchor1_x> + #<_toolrack_offset_x>]
+  o1 if [#1 EQ 0]
+    #<_slot_y> = [#<_anchor1_y> + #<_toolrack_offset_y> + 210]
+  o1 else
+    #<_slot_y> = [#<_anchor1_y> + #<_toolrack_offset_y> + [6 - #1] * 30]
+  o1 endif
+o<slot_xy> endsub

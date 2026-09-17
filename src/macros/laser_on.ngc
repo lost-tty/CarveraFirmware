@@ -1,0 +1,9 @@
+(M321: laser mode on, spindle emptied, Z origin moved to the laser)
+o<laser_on> sub
+  o1 if [#<_laser_mode> NE 0]
+    o<laser_on> return
+  o1 endif
+  M321.2
+  o<atc_change> call [-1]
+  G92.5 Z0
+o<laser_on> endsub

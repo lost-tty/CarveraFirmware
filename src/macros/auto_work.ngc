@@ -1,0 +1,51 @@
+(M495 X Y [C D margin] [O [F] z probe] [A B I J H leveling] [P go to origin]; M495.3 [D] [H] corner probe)
+o<auto_work> sub
+  o1 if [#<subcode> EQ 3]
+    #<dia> = 3.175
+    #<hgt> = 9
+    o2 if [EXISTS[#<d>]]
+      #<dia> = #<d>
+    o2 endif
+    o3 if [EXISTS[#<h>]]
+      #<hgt> = #<h>
+    o3 endif
+    o<xyz_probe> call [#<dia>] [#<hgt>]
+    o<auto_work> return
+  o1 endif
+  o4 if [[EXISTS[#<x>] AND EXISTS[#<y>]] EQ 0]
+    o<auto_work> return
+  o4 endif
+  o5 if [#<_laser_mode> NE 0]
+    o<auto_work> return
+  o5 endif
+  #<margin> = [EXISTS[#<c>] AND EXISTS[#<d>]]
+  #<zprobe> = EXISTS[#<o>]
+  #<leveling> = [EXISTS[#<a>] AND EXISTS[#<b>] AND EXISTS[#<i>] AND EXISTS[#<j>] AND EXISTS[#<h>]]
+  o6 if [#<margin> OR #<zprobe> OR #<leveling>]
+    o7 if [#<_active_tool> NE 0]
+      o8 if [#<_active_tool> GT 0]
+        o<atc_drop> call [#<_active_tool>]
+      o8 endif
+      o<atc_pick> call [0] [#<_active_tool> LE 0]
+      o<calibrate_at> call [#<_atc_safe_z>] [1]
+      M493.2 T0
+    o7 endif
+    o9 if [#<margin>]
+      o<margin> call [#<x>] [#<y>] [#<c>] [#<d>]
+    o9 endif
+    o10 if [#<zprobe>]
+      o11 if [EXISTS[#<f>]]
+        o<z_probe> call [#<x> + #<o>] [#<y> + #<f>]
+      o11 else
+        o<z_probe_abs> call
+      o11 endif
+    o10 endif
+    o12 if [#<leveling>]
+      o<auto_level> call [#<x>] [#<y>] [#<a>] [#<b>] [#<i>] [#<j>] [#<h>]
+    o12 endif
+  o6 endif
+  o13 if [EXISTS[#<p>]]
+    G53 G0 Z#<_clearance_z>
+    G90 G0 X#<x> Y#<y>
+  o13 endif
+o<auto_work> endsub

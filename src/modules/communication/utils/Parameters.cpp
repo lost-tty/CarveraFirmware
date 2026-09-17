@@ -2,9 +2,15 @@
 
 #include "libs/Kernel.h"
 #include "Robot.h"
+#include "Conveyor.h"
 #include "StepperMotor.h"
+#include "checksumm.h"
 #include "PublicData.h"
 #include "SpindlePublicAccess.h"
+#include "ATCHandlerPublicAccess.h"
+#include "PlayerPublicAccess.h"
+
+#include <cstring>
 
 #include <cmath>
 
@@ -26,6 +32,7 @@ bool Parameters::get(int n, float &v) const
         return !std::isnan(v); // blank EEPROM reads as NaN
     }
 
+    if (n >= 5021 && n <= 5044) THECONVEYOR.wait_for_idle(); // positions are where the machine is, not where it is going
     float mpos[3];
     switch (n) {
         case 2000: v = THEKERNEL->eeprom_data.TLO; return true;
@@ -52,6 +59,41 @@ bool Parameters::get(int n, float &v) const
 #endif
     }
     return false;
+}
+
+static bool spindle_on()
+{
+    struct spindle_status ss;
+    return PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss) && ss.state;
+}
+
+static bool player_playing()
+{
+    void *p= nullptr;
+    return PublicData::get_value(player_checksum, is_playing_checksum, &p) && *static_cast<bool *>(p);
+}
+
+bool Parameters::get_named(const char *name, float &v) const
+{
+    if (strcmp(name, "_laser_mode") == 0) v = THEKERNEL->get_laser_mode();
+    else if (strcmp(name, "_homed") == 0) v = THEROBOT.is_homed_all_axes();
+    else if (strcmp(name, "_spindle_on") == 0) v = spindle_on();
+    else if (strcmp(name, "_playing") == 0) v = player_playing();
+    else if (strcmp(name, "_tool") == 0) v = THEKERNEL->eeprom_data.TOOL;
+    else if (strcmp(name, "_tlo") == 0) v = THEKERNEL->eeprom_data.TLO;
+    else if (strcmp(name, "_probe_x") == 0 || strcmp(name, "_probe_y") == 0 ||
+             strcmp(name, "_probe_z") == 0 || strcmp(name, "_probe_ok") == 0) {
+        std::tuple<float, float, float, uint8_t> p = THEROBOT.get_last_probe_position();
+        if (name[7] == 'x') v = std::get<0>(p);
+        else if (name[7] == 'y') v = std::get<1>(p);
+        else if (name[7] == 'z') v = std::get<2>(p);
+        else v = std::get<3>(p);
+    } else { // the rest, including the ATC's own _probe_mx/my/mz
+        struct atc_param p{name, 0};
+        if (!PublicData::get_value(atc_handler_checksum, get_param_checksum, &p)) return false;
+        v = p.value;
+    }
+    return true;
 }
 
 bool Parameters::set(int n, float v)

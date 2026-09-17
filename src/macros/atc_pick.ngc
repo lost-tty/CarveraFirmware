@@ -1,0 +1,19 @@
+(take tool #1 from its slot; #2 = 1 when the spindle comes from the clearance height, not from a drop)
+o<atc_pick> sub
+  M497.2
+  o<slot_xy> call [#1]
+  o1 if [#2 NE 0]
+    G53 G0 Z#<_clearance_z>
+  o1 else
+    G53 G0 Z#<_atc_safe_z_empty>
+  o1 endif
+  G53 G0 X#<_slot_x> Y#<_slot_y>
+  M492.1
+  M490.2
+  G53 G0 X#<_slot_x> Y#<_slot_y>
+  G53 G1 Z[#<_toolrack_z> + #<_atc_safe_z_offset>] F#<_atc_fast_z_rate>
+  G53 G1 Z#<_toolrack_z> F#<_atc_slow_z_rate>
+  M490.1
+  G53 G0 Z#<_atc_safe_z>
+  M492.2
+o<atc_pick> endsub

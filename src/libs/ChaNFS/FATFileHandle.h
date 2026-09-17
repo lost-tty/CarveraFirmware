@@ -13,7 +13,8 @@ namespace mbed {
 class FATFileHandle : public FileHandle {
 public:
 
-    FATFileHandle(FIL_t fh);
+    FATFileHandle() {}
+    FIL_t &file() { return _fh; } // opened by the file system after construction
     virtual int close();
     virtual ssize_t write(const void* buffer, size_t length);
     virtual ssize_t read(void* buffer, size_t length);

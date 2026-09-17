@@ -4,7 +4,6 @@
 using namespace std;
 #include "Module.h"
 #include <vector>
-#include <queue>
 #include "Pin.h"
 
 #include "SoftTimer.h"
@@ -22,29 +21,11 @@ public:
     void on_gcode_received(void *argument);
     void on_get_public_data(void *argument);
     void on_set_public_data(void *argument);
-    void on_main_loop( void* argument );
     void on_halt(void *argument);
     int get_active_tool() const { return active_tool; }
     void on_config_reload(void *argument);
 
 private:
-    typedef enum {
-        NONE,
-        FULL, 				// M6T?
-        DROP, 				// M6T-1
-        PICK, 				// M6T?
-		CALI, 				// M491
-		AUTOMATION			// M495
-//		PROBE,				// M494
-//		PROBE_PICK,			// M494
-//		PROBE_FULL,			// M494
-//		AUTOLEVEL,			// M495
-//		AUTOLEVEL_PICK, 	// M495
-//		AUTOLEVEL_FULL,		// M495
-//		PROBELEVEL,			// M496
-//		PROBELEVEL_PICK,	// M496
-//		PROBELEVEL_FULL		// M496
-    } ATC_STATUS;
 
     typedef enum {
     	UNHOMED,	// need to home first
@@ -52,7 +33,6 @@ private:
 		LOOSED,		// status after loose
     } CLAMP_STATUS;
 
-    ATC_STATUS atc_status;
 
     void read_endstop(void);
     void read_detector(void);
@@ -71,41 +51,25 @@ private:
     // probe check
     bool probe_detect();
 
-    void set_inner_playing(bool inner_playing);
-    bool get_inner_playing() const;
 
     // set tool offset afteer calibrating
     void set_tool_offset();
 
     //
-    void fill_drop_scripts(int old_tool);
-    void fill_pick_scripts(int new_tool, bool clear_z);
-    void fill_cali_scripts(bool is_probe, bool clear_z);
-    void fill_commit_tool_scripts(int new_tool);
 
     //
-    void fill_margin_scripts(float x_pos, float y_pos, float x_pos_max, float y_pos_max);
-    void fill_zprobe_scripts(float x_pos, float y_pos, float x_offset, float y_offset);
-    void fill_zprobe_abs_scripts();
-    void fill_xyzprobe_scripts(float tool_dia, float probe_height);
 
 
-    void fill_autolevel_scripts(float x_pos, float y_pos, float x_size, float y_size, int x_grids, int y_grids, float height);
-    void fill_goto_origin_scripts(float x_pos, float y_pos);
 
 
-    void clear_script_queue();
 
-    void rapid_move(bool mc, float x, float y, float z);
 
-    std::queue<string> script_queue;
 
     uint16_t debounce;
     bool atc_homing;
     bool detecting;
+    bool tool_detected; // result of the last M492 laser check
 
-    bool playing_file;
-    bool g28_triggered;
 
     uint16_t probe_laser_countdown;
     SoftTimer probe_laser_timer;
@@ -150,7 +114,6 @@ private:
     float probe_retract_mm;
     float probe_height_mm;
 
-    float last_pos[3];
 
     float anchor1_x;
     float anchor1_y;
@@ -180,9 +143,6 @@ private:
 
     int active_tool;
     int tool_number;
-    int goto_position;
-    float position_x;
-    float position_y;
 
     float ref_tool_mz;
     float cur_tool_mz;

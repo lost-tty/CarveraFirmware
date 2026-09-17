@@ -134,6 +134,7 @@ OBJECTS = $(patsubst %.c,$(OUTDIR)/%.o,$(CSRCS)) $(patsubst %.s,$(OUTDIR)/%.o,$(
 OBJECTS += $(OUTDIR)/mbed_custom.o
 
 OBJECTS += $(OUTDIR)/configdefault.o
+OBJECTS += $(OUTDIR)/macrosdefault.o
 
 OBJECTS += $(patsubst %.c,$(OUTDIR)/freertos/%.o,$(FREERTOS_SRC))
 OBJECTS += $(patsubst $(TINYUSB_DIR)/%.c,$(OUTDIR)/tinyusb/%.o,$(TINYUSB_SRC))
@@ -355,5 +356,14 @@ $(OUTDIR)/%.o : %.s makefile
 
 $(OUTDIR)/configdefault.o : config.default
 	$(Q) $(OBJCOPY) -I binary -O elf32-littlearm -B arm --readonly-text --rename-section .data=.rodata.configdefault $< $@
+
+# all machine scripts in one blob, each preceded by a "(file: name.ngc)" line the loader uses for SD overrides
+MACROS = $(sort $(wildcard macros/*.ngc))
+$(OUTDIR)/macros.ngc : $(MACROS) makefile
+	$(Q) $(MKDIR) $(call convert-slash,$(dir $@)) $(QUIET)
+	$(Q) $(SHELL) ../build/macros.sh $(MACROS) > $@
+
+$(OUTDIR)/macrosdefault.o : $(OUTDIR)/macros.ngc
+	$(Q) cd $(OUTDIR) && $(OBJCOPY) -I binary -O elf32-littlearm -B arm --readonly-text --rename-section .data=.rodata.macrosdefault macros.ngc macrosdefault.o
 
 #########################################################################

@@ -1,0 +1,9 @@
+(X back and forth by #1 mm at feed #2, #3 times)
+o<test_jog> sub
+  G91
+  o1 repeat [#3]
+    G1 X#1 F#2
+    G1 X-#1
+  o1 endrepeat
+  G90
+o<test_jog> endsub

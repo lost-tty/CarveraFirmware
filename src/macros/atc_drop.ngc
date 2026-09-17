@@ -1,0 +1,15 @@
+(put tool #1 back into its slot)
+o<atc_drop> sub
+  M497.1
+  o<slot_xy> call [#1]
+  G53 G0 Z#<_clearance_z>
+  G53 G0 X#<_slot_x> Y#<_slot_y>
+  M492.2
+  G53 G0 X#<_slot_x> Y#<_slot_y>
+  G53 G1 Z[#<_toolrack_z> + #<_atc_safe_z_offset>] F#<_atc_fast_z_rate>
+  G53 G1 Z#<_toolrack_z> F#<_atc_slow_z_rate>
+  M490.2
+  G53 G0 Z#<_atc_safe_z_empty>
+  M493.2 T-1
+  M492.1
+o<atc_drop> endsub

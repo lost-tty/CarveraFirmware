@@ -15,7 +15,7 @@
 #include "libs/StreamOutput.h"
 #include "checksumm.h"
 #include "PublicData.h"
-#include "PlayerPublicAccess.h"
+#include "Source.h"
 
 #include <cctype>
 #include <cstdlib>
@@ -104,28 +104,48 @@ void GcodeDispatch::halt()
     THEKERNEL->call_event(ON_HALT, nullptr);
 }
 
-// nothing of the line has run yet: the reply is enough unless a job is in progress
+// nothing of the line has run yet: the reply is enough unless a job or script would go on past it
 void GcodeDispatch::fail(StreamOutput *stream, const char *msg)
 {
     stream->printf("error:%s\r\n", msg);
-    void *playing= nullptr;
-    bool ok= PublicData::get_value(player_checksum, is_playing_checksum, &playing);
-    if((ok && *static_cast<bool *>(playing)) || !THECONVEYOR.is_idle()) halt();
+    if(!sources.empty() || !THECONVEYOR.is_idle()) halt();
 }
+
 
 void GcodeDispatch::on_console_line_received(void *line)
 {
-    SerialMessage *msg= static_cast<SerialMessage *>(line);
-    const string &s= msg->message;
+    dispatch(*static_cast<SerialMessage *>(line), true);
+}
+
+void GcodeDispatch::run_line(const SerialMessage &msg, bool is_internal)
+{
+    bool saved= internal; // run_line can be called from inside a dispatch
+    internal= is_internal;
+    dispatch(msg, false);
+    internal= saved;
+}
+
+void GcodeDispatch::run_line(const std::string &line, StreamOutput *stream, bool is_internal)
+{
+    run_line(SerialMessage{stream, line, 0}, is_internal);
+}
+
+void GcodeDispatch::dispatch(const SerialMessage &msg, bool mdi)
+{
+    const string &s= msg.message;
 
     size_t i= s.find_first_not_of(" \t");
     if(i == string::npos) {
-        msg->stream->printf("ok\r\n");
+        msg.stream->printf("ok\r\n");
         return;
     }
 
     char c= s[i];
     if(c == '$' || islower((unsigned char)c)) return; // simpleshell command
+    if(mdi && sources.active()) { // an interleaved line would move the machine out of sequence; a suspended job is safe to jog
+        msg.stream->printf("error:busy, a job or script is running\r\n");
+        return;
+    }
 
     size_t j= i;
     if(c == 'N') {
@@ -134,51 +154,37 @@ void GcodeDispatch::on_console_line_received(void *line)
         while(j < s.size() && s[j] == ' ') j++;
     }
     if(j < s.size() && s[j] == '#') {
-        parameter_statement(s.c_str() + j + 1, msg->stream);
+        parameter_statement(s.c_str() + j, msg.stream);
         return;
     }
 
     gcode::Line parsed; // local: modules may dispatch console lines while a line executes
     if(!parsed.parse(s.c_str() + i, &params)) {
-        fail(msg->stream, parsed.error_text().c_str());
+        fail(msg.stream, parsed.error_text().c_str());
         return;
     }
-    execute(parsed.words(), s.substr(i), msg->stream, msg->line);
+    execute(parsed.words(), s.substr(i), msg.stream, msg.line);
 }
 
 // "#n = expr" assigns, "#n" prints
 void GcodeDispatch::parameter_statement(const char *p, StreamOutput *stream)
 {
-    char *end;
-    int n= strtol(p, &end, 10);
-    if(end == p) {
-        fail(stream, "bad parameter number");
-        return;
-    }
-    p= end;
-    while(*p == ' ') p++;
-
-    float v;
     std::string err;
-    if(*p == '=') {
-        p++;
-        if(!gcode::eval(p, v, &params, err)) {
+    if(strchr(p, '=') != nullptr) {
+        if(!gcode::assign(p, params, err)) {
             fail(stream, err.c_str());
             return;
         }
-        while(*p == ' ') p++;
-        if(*p != 0 && *p != ';' && *p != '(' && *p != '\r' && *p != '\n') {
-            fail(stream, "trailing characters");
-            return;
-        }
-        if(!params.set(n, v)) {
-            fail(stream, "parameter is read-only");
-            return;
-        }
-    } else if(params.get(n, v)) {
-        stream->printf("#%d = %.4f\r\n", n, v);
     } else {
-        stream->printf("#%d not set\r\n", n);
+        char *end;
+        int n= strtol(p + 1, &end, 10);
+        float v;
+        if(end == p + 1) {
+            fail(stream, "bad parameter number");
+            return;
+        }
+        if(params.get(n, v)) stream->printf("#%d = %.4f\r\n", n, v);
+        else stream->printf("#%d not set\r\n", n);
     }
     stream->printf("ok\r\n");
 }
@@ -318,10 +324,20 @@ void GcodeDispatch::execute(const std::vector<gcode::Word> &words, const string 
 
         if(c.rank == MOTION) {
             if(blocks[c.block].mcs) THEROBOT.next_command_is_MCS= true;
-            if(c.index < words.size() && gcode.g < 4) modal_group_1= gcode.g; // a synthesized word is not a mode change
+            // G80 cancels a canned cycle, so the mode goes back to the last plain motion
+            if(!internal && c.index < words.size() && (gcode.g < 4 || (gcode.g >= 81 && gcode.g <= 89))) modal_group_1= gcode.g;
+            if(!internal && gcode.g == 80) modal_group_1= 0;
         }
 
         THEKERNEL->call_event(ON_GCODE_RECEIVED, &gcode);
+
+        // a scripted code runs its sub after the modules have seen it, so their handlers still apply;
+        // the ok follows when the sub is done, which is the last block of the line by rank
+        std::string err;
+        if(scripts != nullptr && !internal && scripts->trigger(gcode, stream, err)) {
+            if(!err.empty()) fail(stream, err.c_str());
+            return;
+        }
 
         if(gcode.is_error) {
             stream->printf("error:%s\r\n", gcode.txt_after_ok.empty() ? "unknown" : gcode.txt_after_ok.c_str());

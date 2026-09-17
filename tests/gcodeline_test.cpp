@@ -14,6 +14,7 @@ static int failures = 0;
 
 struct Params : gcode::ParamStore {
     std::map<int, float> v;
+    std::map<std::string, float> named;
     bool get(int n, float &out) const override {
         auto it = v.find(n);
         if (it == v.end()) return false;
@@ -21,6 +22,13 @@ struct Params : gcode::ParamStore {
         return true;
     }
     bool set(int n, float val) override { v[n] = val; return true; }
+    bool get_named(const char *name, float &out) const override {
+        auto it = named.find(name);
+        if (it == named.end()) return false;
+        out = it->second;
+        return true;
+    }
+    bool set_named(const char *name, float val, std::string &) override { named[name] = val; return true; }
 };
 
 static const gcode::Word *word(const gcode::Line &l, char c) {
@@ -99,6 +107,26 @@ int main() {
     const char *e = "1 + 2 * 3 - 4 / 2";
     float v; std::string err;
     CHECK(gcode::eval(e, v, &p, err) && NEAR(v, 5) && *e == 0);
+    p.named["_clamp"] = 2; p.named["tool_x"] = -100.5f;
+    struct { const char *text; float want; } exprs[] = {
+        {"2 ** 3 ** 2", 64}, {"2 ** 3 * 2", 16}, {"7 MOD 3", 1}, {"1 + 2 EQ 3", 1}, {"1 + 2 EQ 4", 0},
+        {"[1 EQ 1] AND [2 GT 1]", 1}, {"1 EQ 1 AND 2 GT 3", 0}, {"0 OR 5", 1}, {"1 XOR 1", 0}, {"3 NE 3", 0},
+        {"2 LE 2", 1}, {"2 GE 3", 0}, {"#<_clamp> NE 2", 0}, {"#<tool_x> + 0.5", -100}, {"ABS[-3]", 3},
+        {"SQRT[16]", 4}, {"SIN[30]", 0.5f}, {"COS[60]", 0.5f}, {"ATAN[1]/[1]", 45}, {"FIX[2.7]", 2}, {"FUP[2.2]", 3},
+        {"ROUND[2.5]", 3}, {"FIX[-2.5]", -3}, {"EXISTS[#<_clamp>]", 1}, {"EXISTS[#<nope>]", 0}, {"-2 ** 2", 4}, // the sign belongs to the value, as in LinuxCNC
+        {"10 - 2 - 3", 5}, {"2 * [3 + 4]", 14}, {"[#101 + 1] * 2", 12},
+    };
+    for (auto &x : exprs) {
+        const char *q = x.text; float r;
+        bool ok = gcode::eval(q, r, &p, err);
+        if (!ok || !NEAR(r, x.want) || *q != 0) { printf("FAIL expr %s -> %g (%s) want %g rest '%s'\n", x.text, r, err.c_str(), x.want, q); failures++; }
+    }
+    CHECK(!l.parse("X[1 EQ]", &p));
+    CHECK(!l.parse("X[FOO[1]]", &p) && l.error_text() == "unknown function FOO");
+    CHECK(!l.parse("X[7 MOD 0]", &p) && l.error_text() == "division by zero");
+    CHECK(!l.parse("X#<nope>", &p) && l.error_text() == "no value for parameter #<nope>");
+    CHECK(l.parse("X#<TOOL_X> Y#<_clamp>", &p) && NEAR(word(l, 'X')->value, -100.5f) && word(l, 'Y')->value == 2);
+    CHECK(l.parse("X[1 AND 0]", &p) && word(l, 'X')->value == 0);
 
     Gcode g1("G32 X1.2 Y2.3", nullptr);
     CHECK(g1.has_g && !g1.has_m && g1.g == 32 && g1.subcode == 0);

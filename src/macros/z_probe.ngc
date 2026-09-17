@@ -1,0 +1,11 @@
+(probe Z at work #1 #2 and set the work Z origin there)
+o<z_probe> sub
+  M497.5
+  G53 G0 Z#<_clearance_z>
+  G90 G0 X#1 Y#2
+  G38.2 Z#<_probe_mz> F#<_atc_probe_fast_rate>
+  G91 G0 Z#<_atc_probe_retract>
+  G38.2 Z[-1 - #<_atc_probe_retract>] F#<_atc_probe_slow_rate>
+  G10 L20 P0 Z#<_atc_probe_height>
+  G91 G0 Z#<_atc_probe_retract>
+o<z_probe> endsub

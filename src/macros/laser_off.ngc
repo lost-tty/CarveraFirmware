@@ -1,0 +1,5 @@
+(M322: back to CNC mode)
+o<laser_off> sub
+  M322.2
+  G92.1
+o<laser_off> endsub

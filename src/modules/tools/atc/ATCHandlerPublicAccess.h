@@ -14,6 +14,13 @@
 #define set_wp_laser_checksum	CHECKSUM("set_wp_laser")
 #define get_wp_voltage_checksum	CHECKSUM("get_wp_voltage")
 #define show_wp_state_checksum  CHECKSUM("show_wp_state")
+#define get_param_checksum      CHECKSUM("get_param")
+
+// a #<_name> read by a script; the ATC fills value and takes the request if it knows the name
+struct atc_param {
+	const char *name;
+	float value;
+};
 
 struct tool_status {
 	int active_tool;

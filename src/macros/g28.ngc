@@ -1,0 +1,5 @@
+(G28 on the Carvera goes to the clearance position)
+o<g28> sub
+  G53 G0 Z#<_clearance_z>
+  G53 G0 X#<_clearance_x> Y#<_clearance_y>
+o<g28> endsub

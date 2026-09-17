@@ -1,0 +1,43 @@
+(change to tool #1; -1 empties the spindle, 0 is the wireless probe)
+o<atc_change> sub
+  o1 if [#1 GT 6]
+    o<atc_change> abort [6]
+  o1 endif
+  M5
+  o2 if [#<_spindle_on> NE 0]
+    o<atc_change> abort [5]
+  o2 endif
+  o3 if [#1 EQ #<_active_tool>]
+    o4 if [[#1 EQ -1] AND [#<_laser_mode> NE 0]]
+      #<sx> = #5021
+      #<sy> = #5022
+      o<calibrate_at> call [#<_clearance_z>] [0]
+      G53 G0 Z#<_clearance_z>
+      G53 G0 X#<sx> Y#<sy>
+    o4 endif
+    o<atc_change> return
+  o3 endif
+  o5 if [[#1 GT -1] AND [#<_laser_mode> NE 0]]
+    o<atc_change> return
+  o5 endif
+  #<sx> = #5021
+  #<sy> = #5022
+  (DEBUG, tool change T#<_active_tool> -> T#1)
+  o6 if [#<_active_tool> LT 0]
+    o<atc_pick> call [#1] [1]
+    o<calibrate_at> call [#<_atc_safe_z>] [#1 EQ 0]
+    M493.2 T#1
+  o6 elseif [#1 LT 0]
+    o<atc_drop> call [#<_active_tool>]
+    o7 if [#<_laser_mode> NE 0]
+      o<calibrate_at> call [#<_atc_safe_z>] [0]
+    o7 endif
+  o6 else
+    o<atc_drop> call [#<_active_tool>]
+    o<atc_pick> call [#1] [0]
+    o<calibrate_at> call [#<_atc_safe_z>] [#1 EQ 0]
+    M493.2 T#1
+  o6 endif
+  G53 G0 Z#<_clearance_z>
+  G53 G0 X#<sx> Y#<sy>
+o<atc_change> endsub

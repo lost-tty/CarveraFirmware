@@ -33,6 +33,7 @@ class Gcode {
         uint32_t get_uint(char letter) const;
         int get_num_args() const;
         std::map<char,float> get_args() const;
+        const std::vector<gcode::Word>& get_words() const { return words; }
 
         unsigned int m;
         unsigned int g;

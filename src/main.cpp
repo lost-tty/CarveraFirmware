@@ -16,8 +16,8 @@
 #include "RotaryDeltaCalibration.h"
 #include "modules/tools/switch/SwitchPool.h"
 #include "modules/tools/temperatureswitch/TemperatureSwitch.h"
-#include "modules/tools/drillingcycles/Drillingcycles.h"
 #include "modules/tools/atc/ATCHandler.h"
+#include "modules/utils/script/Scripts.h"
 #include "modules/utils/wifi/WifiProvider.h"
 #include "modules/utils/webserver/WebServer.h"
 #include "modules/robot/Conveyor.h"
@@ -26,6 +26,7 @@
 #include "modules/utils/player/Player.h"
 #include "modules/utils/mainbutton/MainButton.h"
 #include "modules/communication/GcodeDispatch.h"
+#include "modules/communication/Source.h"
 #include "modules/communication/WirelessProbe.h"
 #include "modules/communication/usb/UsbHost.h"
 #include "Config.h"
@@ -122,6 +123,7 @@ Kernel kernel;
 Conveyor THECONVEYOR __attribute__((section("AHBSRAM")));
 Robot THEROBOT;
 GcodeDispatch gcode_dispatch;
+SourceStack sources;
 SimpleShell simpleshell __attribute__((section("AHBSRAM")));
 WifiProvider wifi_provider;
 WebServer web_server (&wifi_provider);
@@ -130,12 +132,12 @@ Player player;
 WirelessProbe wireless_probe;
 MainButton mainbutton;
 ATCHandler atc_handler;
+Scripts scripts;
 Endstops endstops;
 Laser laser;
 ZProbe zprobe;
 RotaryDeltaCalibration rotary_delta_calibration;
 TemperatureSwitch temperature_switch;
-Drillingcycles drilling_cycles;
 UsbHost usb_host;
 
 Kernel* THEKERNEL = &kernel;
@@ -156,6 +158,7 @@ void init() {
 
     gcode_dispatch.init();
     THEKERNEL->add_module(&gcode_dispatch);
+    THEKERNEL->add_module(&sources); // before player: on halt a script pops its state before the suspend state
 
     THEROBOT.init();
     THEKERNEL->add_module(&THEROBOT);
@@ -175,6 +178,7 @@ void init() {
     // Create and add main modules
     THEKERNEL->add_module(&player);
     THEKERNEL->add_module(&atc_handler);
+    THEKERNEL->add_module(&scripts);
     THEKERNEL->add_module(&wireless_probe);
     THEKERNEL->add_module(&usb_host);
     THEKERNEL->add_module(&mainbutton);
@@ -219,9 +223,6 @@ void init() {
     #ifndef NO_TOOLS_TEMPERATURESWITCH
     // Must be loaded after TemperatureControl
     THEKERNEL->add_module(&temperature_switch);
-    #endif
-    #ifndef NO_TOOLS_DRILLINGCYCLES
-    THEKERNEL->add_module(&drilling_cycles);
     #endif
 
     // 10 second watchdog timeout (or config as seconds)

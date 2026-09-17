@@ -76,7 +76,7 @@ ifeq "$(CNC)" "1"
 export EXCLUDE_MODULES = tools/filamentdetector tools/scaracal tools/extruder
 else
 # 3D build excludes these
-export EXCLUDE_MODULES = tools/drillingcycles tools/spindle
+export EXCLUDE_MODULES = tools/spindle
 endif
 
 endif

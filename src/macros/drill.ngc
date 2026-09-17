@@ -1,0 +1,110 @@
+(G81/G82/G83 canned cycle. G98 retracts to the Z the cycle started at, G99 to the R plane, G80 cancels.)
+(Z depth, R retract, F feed, Q peck, P dwell seconds stay set until the cycle ends or they are given again.)
+o<drill> sub
+  o1 if [EXISTS[#<z>]]
+    #<_drill_z> = #<z>
+  o1 endif
+  o13 if [EXISTS[#<_drill_z>] EQ 0]
+    o<drill> abort [17]
+  o13 endif
+  o2 if [EXISTS[#<r>]]
+    #<_drill_r> = #<r>
+  o2 endif
+  o14 if [EXISTS[#<_drill_r>] EQ 0]
+    o<drill> abort [17]
+  o14 endif
+  o3 if [EXISTS[#<f>]]
+    #<_drill_f> = #<f>
+  o3 endif
+  o4 if [[#<code> EQ 83] AND EXISTS[#<q>]]
+    #<_drill_q> = #<q>
+  o4 endif
+  o5 if [[#<code> EQ 82] AND EXISTS[#<p>]]
+    #<_drill_p> = #<p>
+  o5 endif
+  o6 if [EXISTS[#<_drill_f>] EQ 0]
+    o<drill> abort [17]
+  o6 endif
+  o16 if [#<_drill_f> LE 0]
+    o<drill> abort [17]
+  o16 endif
+
+  #<started> = 0
+  o7 if [EXISTS[#<_drill_on>]]
+    #<started> = #<_drill_on>
+  o7 endif
+  o15 if [#<started> EQ 0]
+    #<_drill_initial> = #5043
+    #<_drill_on> = 1
+  o15 endif
+  #<to_r> = 0
+  o8 if [EXISTS[#<_drill_to_r>]]
+    #<to_r> = #<_drill_to_r>
+  o8 endif
+  o17 if [#<to_r> NE 0]
+    #<_drill_plane> = #<_drill_r>
+  o17 else
+    #<_drill_plane> = #<_drill_initial>
+  o17 endif
+
+  G0 Z#<_drill_initial>
+  o9 if [EXISTS[#<x>] AND EXISTS[#<y>]]
+    G0 X#<x> Y#<y>
+  o9 elseif [EXISTS[#<x>]]
+    G0 X#<x>
+  o9 elseif [EXISTS[#<y>]]
+    G0 Y#<y>
+  o9 endif
+  G0 Z#<_drill_r>
+
+  #<peck> = 0
+  o18 if [[#<code> EQ 83] AND EXISTS[#<_drill_q>]]
+    #<peck> = #<_drill_q>
+  o18 endif
+  o10 if [#<peck> GT 0]
+    #<zz> = #<_drill_r>
+    o11 while [[#<zz> - #<peck>] GT #<_drill_z>]
+      #<zz> = [#<zz> - #<peck>]
+      G1 Z#<zz> F#<_drill_f>
+      G0 Z#<_drill_r>
+    o11 endwhile
+    G1 Z#<_drill_z> F#<_drill_f>
+  o10 else
+    G1 Z#<_drill_z> F#<_drill_f>
+  o10 endif
+
+  #<dwell> = 0
+  o19 if [[#<code> EQ 82] AND EXISTS[#<_drill_p>]]
+    #<dwell> = #<_drill_p>
+  o19 endif
+  o12 if [#<dwell> GT 0]
+    G4 P#<dwell>
+  o12 endif
+  G0 Z#<_drill_plane>
+o<drill> endsub
+
+(G98)
+o<drill_retract_z> sub
+  #<_drill_to_r> = 0
+o<drill_retract_z> endsub
+
+(G99)
+o<drill_retract_r> sub
+  #<_drill_to_r> = 1
+o<drill_retract_r> endsub
+
+(G80: lift clear before ordinary motion resumes)
+o<drill_cancel> sub
+  o1 if [EXISTS[#<_drill_on>] EQ 0]
+    o<drill_cancel> return
+  o1 endif
+  o2 if [#<_drill_on> NE 0]
+    G0 Z#<_drill_initial>
+    #<_drill_on> = 0
+    #<_drill_z> = 0
+    #<_drill_r> = 0
+    #<_drill_f> = 0
+    #<_drill_q> = 0
+    #<_drill_p> = 0
+  o2 endif
+o<drill_cancel> endsub

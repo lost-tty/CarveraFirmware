@@ -204,42 +204,13 @@ void Laser::on_gcode_received(void *argument)
         	THEKERNEL->set_laser_mode(true);
         	// turn on laser pin
         	this->laser_pin->set(true);
-        	if (gcode->subcode == 2) {
-            	printk("turning laser mode on\n");
-        	} else {
-            	char buf[32];
-            	// drop current tool
-                int n = snprintf(buf, sizeof(buf), "M6T-1");
-                string g1(buf, n);
-                Gcode gc1(g1, &(StreamOutput::NullStream));
-                THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc1);
-            	// change g92 offset
-                n = snprintf(buf, sizeof(buf), "G92.5Z0");
-                string g2(buf, n);
-                Gcode gc2(g2, &(StreamOutput::NullStream));
-                THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc2);
-
-            	printk("turning laser mode on and change offset\n");
-        	}
-
+            printk("turning laser mode on\n"); // the laser_on script empties the spindle and moves the Z origin
         } else if (gcode->m == 322) { // change to CNC mode
         	THECONVEYOR.wait_for_idle();
         	THEKERNEL->set_laser_mode(false);
         	this->laser_pin->set(false);
         	this->testing = false;
-        	if (gcode->subcode == 2) {
-            	printk("turning laser mode off and return to CNC mode\n");
-        	} else {
-            	// change g92 offset
-                char buf[32];
-                int n = snprintf(buf, sizeof(buf), "G92.1");
-                string g(buf, n);
-                Gcode gc(g, &(StreamOutput::NullStream));
-                THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
-
-            	// turn off laser pin
-            	printk("turning laser mode off and restore offset\n");
-        	}
+            printk("turning laser mode off and return to CNC mode\n");
         } else if (gcode->m == 323) {
         	this->testing = true;
 			// turn on test mode

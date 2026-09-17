@@ -1,0 +1,17 @@
+(M496.n: 0/1 clearance, 2 work origin, 3 anchor 1, 4 anchor 2, 5 work X Y, 6 machine X Y)
+o<goto> sub
+  G53 G0 Z#<_clearance_z>
+  o1 if [#<subcode> LE 1]
+    G53 G0 X#<_clearance_x> Y#<_clearance_y>
+  o1 elseif [#<subcode> EQ 2]
+    G90 G0 X0 Y0
+  o1 elseif [#<subcode> EQ 3]
+    G53 G0 X#<_anchor1_x> Y#<_anchor1_y>
+  o1 elseif [#<subcode> EQ 4]
+    G53 G0 X[#<_anchor1_x> + #<_anchor2_offset_x>] Y[#<_anchor1_y> + #<_anchor2_offset_y>]
+  o1 elseif [[#<subcode> EQ 5] AND EXISTS[#<x>] AND EXISTS[#<y>]]
+    G90 G0 X#<x> Y#<y>
+  o1 elseif [[#<subcode> EQ 6] AND EXISTS[#<x>] AND EXISTS[#<y>]]
+    G53 G0 X#<x> Y#<y>
+  o1 endif
+o<goto> endsub

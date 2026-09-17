@@ -1,0 +1,17 @@
+(measure the tool length on the tool setter; #1 = height to lift to first, #2 = 1 for the wireless probe)
+o<calibrate_at> sub
+  M497.3
+  o1 if [#<_laser_mode> NE 0]
+    M490.1
+  o1 endif
+  G53 G0 Z#1
+  G53 G0 X#<_probe_mx> Y#<_probe_my>
+  G38.6 Z#<_probe_mz> F#<_atc_probe_fast_rate>
+  G91 G0 Z#<_atc_probe_retract>
+  G38.6 Z[-1 - #<_atc_probe_retract>] F#<_atc_probe_slow_rate>
+  M493.1
+  G53 G0 Z#<_atc_safe_z>
+  o2 if [#2 NE 0]
+    M492.3
+  o2 endif
+o<calibrate_at> endsub
