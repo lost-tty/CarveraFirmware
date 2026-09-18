@@ -13,6 +13,7 @@
 #include "StepperMotor.h"
 #include "Logging.h"
 #include "Gcode.h"
+#include "GcodeDispatch.h"
 #include "Conveyor.h"
 #include "checksumm.h"
 #include "ConfigValue.h"
@@ -305,10 +306,8 @@ void ZProbe::on_gcode_received(void *argument)
                 if(set_z) {
                     // set current Z to the specified value, shortcut for G92 Znnn
                     char buf[32];
-                    int n = snprintf(buf, sizeof(buf), "G92 Z%f", gcode->get_value('Z'));
-                    string g(buf, n);
-                    Gcode gc(g, &(StreamOutput::NullStream));
-                    THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
+                    snprintf(buf, sizeof(buf), "G92 Z%f", gcode->get_value('Z'));
+                    gcode_dispatch.run_line(buf, &StreamOutput::NullStream, true);
                 }
 
             } else {
@@ -599,8 +598,7 @@ void ZProbe::coordinated_move(float x, float y, float z, float feedrate, bool re
 // issue home command
 void ZProbe::home()
 {
-    Gcode gc("G28.2", &(StreamOutput::NullStream));
-    THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
+    gcode_dispatch.run_line("G28.2", &StreamOutput::NullStream, true);
 }
 
 void ZProbe::on_get_public_data(void* argument)

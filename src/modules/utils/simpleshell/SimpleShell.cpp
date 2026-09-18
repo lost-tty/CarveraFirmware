@@ -199,8 +199,7 @@ void SimpleShell::on_console_line_received( void *argument )
                 {
                     if(THEKERNEL->is_halted()) THEKERNEL->call_event(ON_HALT, (void *)1); // clears on_halt
                     // issue G28.2 which is force homing cycle
-                    Gcode gcode("G28.2", new_message.stream);
-                    THEKERNEL->call_event(ON_GCODE_RECEIVED, &gcode);
+                    gcode_dispatch.run_line("G28.2", new_message.stream, false);
 
                     new_message.stream->printf("ok\n");
                 }
@@ -1173,11 +1172,8 @@ void SimpleShell::calc_thermistor_command( string parameters, StreamOutput *stre
             stream->printf("  Paste the above in the M305 S0 command, then save with M500\n");
         }else{
             char buf[80];
-            size_t n = snprintf(buf, sizeof(buf), "M305 S%d I%1.18f J%1.18f K%1.18f", saveto, c1, c2, c3);
-            if(n > sizeof(buf)) n= sizeof(buf);
-            string g(buf, n);
-            Gcode gcode(g, &(StreamOutput::NullStream));
-            THEKERNEL->call_event(ON_GCODE_RECEIVED, &gcode );
+            snprintf(buf, sizeof(buf), "M305 S%d I%1.18f J%1.18f K%1.18f", saveto, c1, c2, c3);
+            gcode_dispatch.run_line(buf, &StreamOutput::NullStream, true);
             stream->printf("  Setting Thermistor %d to those settings, save with M500\n", saveto);
         }
 

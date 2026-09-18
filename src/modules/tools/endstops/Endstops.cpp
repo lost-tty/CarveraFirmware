@@ -507,48 +507,32 @@ void Endstops::on_idle(void *argument)
 // checks if triggered and only backs off if triggered
 void Endstops::back_off_home(axis_bitmap_t axis)
 {
-    std::vector<std::pair<char, float>> params;
-    this->status = BACK_OFF_HOME;
-
+    float delta[k_max_actuators]{0};
+    bool moving= false;
     float slow_rate= NAN; // default mm/sec
+
+    this->status = BACK_OFF_HOME;
 
     // these are handled differently
     if(is_delta) {
         // Move off of the endstop using a regular relative move in Z only
-        params.push_back({'Z', THEROBOT.from_millimeters(homing_axis[Z_AXIS].retract * (homing_axis[Z_AXIS].home_direction ? 1 : -1))});
+        delta[Z_AXIS]= homing_axis[Z_AXIS].retract * (homing_axis[Z_AXIS].home_direction ? 1 : -1);
         slow_rate= homing_axis[Z_AXIS].slow_rate;
+        moving= true;
 
     } else {
-        // cartesians concatenate all the moves we need to do into one gcode
+        // cartesians move every triggered axis off its endstop at once
         for( auto& e : homing_axis) {
             if(!axis[e.axis_index]) continue; // only for axes we asked to move
-
-            // if not triggered no need to move off
-//            if(e.pin_info != nullptr && e.pin_info->limit_enable && debounced_get(&e.pin_info->pin)) {
-			if(e.pin_info != nullptr && e.pin_info->limit_enable && e.pin_info->triggered) {
-                char ax= e.axis;
-                params.push_back({ax, THEROBOT.from_millimeters(e.retract * (e.home_direction ? 1 : -1))});
-                // select slowest of them all
-                slow_rate= isnan(slow_rate) ? e.slow_rate : std::min(slow_rate, e.slow_rate);
-            }
+            if(e.pin_info == nullptr || !e.pin_info->limit_enable || !e.pin_info->triggered) continue;
+            delta[e.axis_index]= e.retract * (e.home_direction ? 1 : -1);
+            moving= true;
+            // select slowest of them all
+            slow_rate= isnan(slow_rate) ? e.slow_rate : std::min(slow_rate, e.slow_rate);
         }
     }
 
-    if(!params.empty()) {
-        // Move off of the endstop using a regular relative move
-        params.insert(params.begin(), {'G', 0});
-        // use X slow rate to move, Z should have a max speed set anyway
-        params.push_back({'F', THEROBOT.from_millimeters(slow_rate * 60.0F)});
-        char gcode_buf[64];
-        append_parameters(gcode_buf, params, sizeof(gcode_buf));
-        Gcode gc(gcode_buf, &(StreamOutput::NullStream));
-        THEROBOT.push_state();
-        THEROBOT.absolute_mode = false; // needs to be relative mode
-        THEROBOT.on_gcode_received(&gc); // send to robot directly
-        // Wait for above to finish
-        THECONVEYOR.wait_for_idle();
-        THEROBOT.pop_state();
-    }
+    if(moving) THEROBOT.delta_move_sync(delta, slow_rate, THEROBOT.get_number_registered_motors());
 
     this->status = NOT_HOMING;
 }

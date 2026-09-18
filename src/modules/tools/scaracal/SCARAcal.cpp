@@ -14,6 +14,7 @@
 #include "StepperMotor.h"
 #include "Logging.h"
 #include "Gcode.h"
+#include "GcodeDispatch.h"
 #include "Conveyor.h"
 #include "checksumm.h"
 #include "ConfigValue.h"
@@ -63,8 +64,7 @@ void SCARAcal::on_config_reload(void *argument)
 // issue home command
 void SCARAcal::home()
 {
-    Gcode gc("G28", &(StreamOutput::NullStream));
-    THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
+    gcode_dispatch.run_line("G28", &StreamOutput::NullStream, true);
 }
 
 bool SCARAcal::get_trim(float& x, float& y, float& z)
@@ -117,8 +117,7 @@ bool SCARAcal::set_home_offset(float x, float y, float z, StreamOutput *stream)
     // Assemble Gcode to add onto the queue
     snprintf(cmd, sizeof(cmd), "M206 X%1.3f Y%1.3f Z%1.3f", x, y, z); // Send saved Z homing offset
 
-    Gcode gc(cmd, &(StreamOutput::NullStream));
-    THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
+    gcode_dispatch.run_line(cmd, &StreamOutput::NullStream, true);
 
     stream->printf("Set home_offset to X:%f Y:%f Z:%f\n", x, y, z);
 
@@ -176,8 +175,7 @@ void SCARAcal::SCARA_ang_move(float theta, float psi, float z, float feedrate)
 
     //printk("DEBUG: move: %s\n", cmd);
 
-    Gcode gc(cmd, &(StreamOutput::NullStream));
-    THEROBOT.on_gcode_received(&gc); // send to robot directly
+    gcode_dispatch.run_line(cmd, &StreamOutput::NullStream, true);
 }
 
 //A GCode has been received

@@ -91,6 +91,7 @@
 #include "Robot.h"
 #include "Logging.h"
 #include "Gcode.h"
+#include "GcodeDispatch.h"
 #include "checksumm.h"
 #include "ConfigValue.h"
 #include "PublicDataRequest.h"
@@ -382,8 +383,8 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
             }
 
             if(!before_probe.empty()) {
-                Gcode gc(before_probe, &(StreamOutput::NullStream));
-                THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
+                gcode_dispatch.run_line(before_probe, &StreamOutput::NullStream, true);
+                THECONVEYOR.wait_for_idle(); // it is a user string, it may move
             }
 
             THEROBOT.disable_segmentation= true;
@@ -395,8 +396,8 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
             THEROBOT.disable_segmentation= false;
 
             if(!after_probe.empty()) {
-                Gcode gc(after_probe, &(StreamOutput::NullStream));
-                THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
+                gcode_dispatch.run_line(after_probe, &StreamOutput::NullStream, true);
+                THECONVEYOR.wait_for_idle(); // it is a user string, it may move
             }
 
             return true;
@@ -411,8 +412,8 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
             }
 
             if(!before_probe.empty()) {
-                Gcode gc(before_probe, &(StreamOutput::NullStream));
-                THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
+                gcode_dispatch.run_line(before_probe, &StreamOutput::NullStream, true);
+                THECONVEYOR.wait_for_idle(); // it is a user string, it may move
             }
 
             if(!scan_bed(gcode)) {
@@ -420,8 +421,8 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
             }
 
             if(!after_probe.empty()) {
-                Gcode gc(after_probe, &(StreamOutput::NullStream));
-                THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
+                gcode_dispatch.run_line(after_probe, &StreamOutput::NullStream, true);
+                THECONVEYOR.wait_for_idle(); // it is a user string, it may move
             }
             return true;
         }

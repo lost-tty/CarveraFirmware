@@ -21,6 +21,7 @@
 
 #include "libs/Pin.h"
 #include "Gcode.h"
+#include "GcodeDispatch.h"
 #include "InterruptIn.h"
 #include "PwmOut.h"
 #include "port_api.h"
@@ -205,24 +206,18 @@ void PWMSpindleControl::on_update_speed()
 void PWMSpindleControl::turn_on() {
     spindle_on = true;
     if (delay_s > 0) {
-        char buf[80];
-        size_t n = snprintf(buf, sizeof(buf), "G4P%d", delay_s);
-        if(n > sizeof(buf)) n= sizeof(buf);
-        string g(buf, n);
-        Gcode gcode(g, &(StreamOutput::NullStream));
-        THEKERNEL->call_event(ON_GCODE_RECEIVED, &gcode);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "G4P%d", delay_s);
+        gcode_dispatch.run_line(buf, &StreamOutput::NullStream, true);
     }
 }
 
 void PWMSpindleControl::turn_off() {
     spindle_on = false;
     if (delay_s > 0) {
-        char buf[80];
-        size_t n = snprintf(buf, sizeof(buf), "G4P%d", delay_s);
-        if(n > sizeof(buf)) n= sizeof(buf);
-        string g(buf, n);
-        Gcode gcode(g, &(StreamOutput::NullStream));
-        THEKERNEL->call_event(ON_GCODE_RECEIVED, &gcode);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "G4P%d", delay_s);
+        gcode_dispatch.run_line(buf, &StreamOutput::NullStream, true);
     }
 }
 

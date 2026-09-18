@@ -57,6 +57,7 @@
 #include "Robot.h"
 #include "Logging.h"
 #include "Gcode.h"
+#include "GcodeDispatch.h"
 #include "checksumm.h"
 #include "ConfigValue.h"
 #include "PublicDataRequest.h"
@@ -246,8 +247,7 @@ bool ThreePointStrategy::handleGcode(Gcode *gcode)
 
 void ThreePointStrategy::homeXY()
 {
-    Gcode gc("G28.2 X0 Y0", &(StreamOutput::NullStream));
-    THEKERNEL->call_event(ON_GCODE_RECEIVED, &gc);
+    gcode_dispatch.run_line("G28.2 X0 Y0", &StreamOutput::NullStream, true);
 }
 
 bool ThreePointStrategy::doProbing(StreamOutput *stream)
