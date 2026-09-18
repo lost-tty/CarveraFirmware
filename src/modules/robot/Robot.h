@@ -68,6 +68,8 @@ class Robot : public Module {
         bool delta_move(const float delta[], float rate_mm_s, uint8_t naxis);
         bool delta_move_sync(const float delta[], float rate_mm_s, uint8_t naxis);
         uint8_t register_motor(StepperMotor*);
+        void enable_motors(bool on);
+        void disable_motors(uint32_t axis_mask); // bit per axis, X is bit 0
         uint8_t get_number_registered_motors() const {return n_motors; }
         uint8_t get_current_motion_mode() const {return current_motion_mode; }
         void clearLaserOffset();

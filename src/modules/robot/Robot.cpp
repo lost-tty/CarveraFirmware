@@ -344,6 +344,18 @@ uint8_t Robot::register_motor(StepperMotor *motor)
     return n_motors++;
 }
 
+void Robot::enable_motors(bool on)
+{
+    for (StepperMotor *m : actuators) m->enable(on);
+}
+
+void Robot::disable_motors(uint32_t axis_mask)
+{
+    for (uint8_t i= 0; i < n_motors; i++) {
+        if(axis_mask & (1 << i)) actuators[i]->enable(false);
+    }
+}
+
 void  Robot::push_state()
 {
     bool am = this->absolute_mode;
@@ -721,16 +733,15 @@ void Robot::on_gcode_received(Gcode *argument)
                 gcode_dispatch.run_line("M9", &StreamOutput::NullStream);
                 break;
             case 17:
-                THEKERNEL->call_event(ON_ENABLE, (void*)1); // turn all enable pins on
+                THEROBOT.enable_motors(true);
                 break;
 
             case 18: // this allows individual motors to be turned off, no parameters falls through to turn all off
                 if(gcode->get_num_args() > 0) {
-                    // bitmap of motors to turn off, where bit 1:X, 2:Y, 3:Z, 4:A, 5:B, 6:C
                     uint32_t bm= 0;
                     for (int i = 0; i < n_motors; ++i) {
                         char axis= (i <= Z_AXIS ? 'X'+i : 'A'+(i-3));
-                        if(gcode->has_letter(axis)) bm |= (0x02<<i); // set appropriate bit
+                        if(gcode->has_letter(axis)) bm |= (1<<i);
                     }
 
                     // handle E parameter as currently selected extruder ABC
@@ -738,18 +749,18 @@ void Robot::on_gcode_received(Gcode *argument)
                         // find first selected extruder
                         int i= get_active_extruder();
                         if(i > 0) {
-                            bm |= (0x02<<i); // set appropriate bit
+                            bm |= (1<<i);
                         }
                     }
 
                     THECONVEYOR.wait_for_idle();
-                    THEKERNEL->call_event(ON_ENABLE, (void *)bm);
+                    THEROBOT.disable_motors(bm);
                     break;
                 }
                 // fall through
             case 84:
                 THECONVEYOR.wait_for_idle();
-                THEKERNEL->call_event(ON_ENABLE, nullptr); // turn all enable pins off
+                THEROBOT.enable_motors(false);
                 break;
 
             case 92: // M92 - set steps per mm
