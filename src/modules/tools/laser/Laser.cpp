@@ -8,6 +8,7 @@
 #include "Laser.h"
 #include "Module.h"
 #include "Kernel.h"
+#include "SimpleShell.h"
 #include "nuts_bolts.h"
 #include "Config.h"
 #include "Logging.h"
@@ -104,8 +105,8 @@ void Laser::on_module_loaded()
     //register for events
     this->register_for_event(ON_HALT);
     this->register_for_event(ON_GCODE_RECEIVED);
-    this->register_for_event(ON_CONSOLE_LINE_RECEIVED);
     this->register_for_event(ON_GET_PUBLIC_DATA);
+    SimpleShell::add_command(shell_slot, "laser", &Laser::shell, this, "laser on|off|status|test - laser mode");
 
     // no point in updating the power more than the PWM frequency, but not faster than 1KHz
     ms_per_tick = 1000 / std::min(1000UL, 1000000 / period);
@@ -117,45 +118,44 @@ void Laser::on_module_loaded()
 
 }
 
-void Laser::on_console_line_received( void *argument )
+const SimpleShell::Sub<Laser> Laser::SUBS[] = {
+    {"on",     &Laser::sub_on,     "laser mode on"},
+    {"off",    &Laser::sub_off,    "laser mode off, back to CNC"},
+    {"status", &Laser::sub_status, "is laser mode on"},
+    {"test",   &Laser::sub_test,   "fire at the test power, laser mode only"},
+    {nullptr, nullptr, nullptr},
+};
+
+void Laser::shell(void *self, const char *cmd, std::string args, StreamOutput *stream)
 {
-    if(THEKERNEL->is_halted()) return; // if in halted state ignore any commands
+    SimpleShell::dispatch(static_cast<Laser *>(self), SUBS, cmd, args, stream);
+}
 
-    SerialMessage *msgp = static_cast<SerialMessage *>(argument);
-    string possible_command = msgp->message;
+void Laser::sub_on(std::string, StreamOutput *)
+{
+    THEKERNEL->set_laser_mode(true);
+    laser_pin->set(true);
+    printk("turning laser mode on\n");
+}
 
-    // ignore anything that is not lowercase or a letter
-    if(possible_command.empty() || !islower(possible_command[0]) || !isalpha(possible_command[0])) {
-        return;
-    }
+void Laser::sub_off(std::string, StreamOutput *)
+{
+    THEKERNEL->set_laser_mode(false);
+    laser_pin->set(false);
+    testing = false;
+    set_laser_power(0);
+    printk("turning laser mode off and return to CNC mode\n");
+}
 
-    string cmd = shift_parameter(possible_command);
+void Laser::sub_status(std::string, StreamOutput *)
+{
+    printk("laser mode state: %s\n", THEKERNEL->get_laser_mode() ? "on" : "off");
+}
 
-    // Act depending on command
-    if (cmd == "laser") {
-        string laser_cmd = shift_parameter(possible_command);
-        if (laser_cmd.empty()) {
-        	printk("Usage: laser on|off|status|test|testoff\n");
-            return;
-        }
-        if (laser_cmd == "on") {
-        	THEKERNEL->set_laser_mode(true);
-        	// turn on laser pin
-        	this->laser_pin->set(true);
-        	printk("turning laser mode on\n");
-        } else if (laser_cmd == "off") {
-        	THEKERNEL->set_laser_mode(false);
-        	this->laser_pin->set(false);
-        	this->testing = false;
-        	this->set_laser_power(0);
-        	// turn off laser pin
-        	printk("turning laser mode off and return to CNC mode\n");
-        } else if (laser_cmd == "status") {
-        	printk("laser mode state: %s\n", THEKERNEL->get_laser_mode() ? "on" : "off");
-        } else if (laser_cmd == "test" && THEKERNEL->get_laser_mode()) {
-        	this->testing = true;
-        }
-    }
+void Laser::sub_test(std::string, StreamOutput *stream)
+{
+    if(THEKERNEL->get_laser_mode()) testing = true;
+    else stream->printf("error:not in laser mode\n");
 }
 
 // returns instance

@@ -9,6 +9,9 @@
 #include "checksumm.h"
 #include "PublicData.h"
 #include "ScriptsPublicAccess.h"
+#include "ATCHandlerPublicAccess.h"
+#include "utils/Parameters.h"
+#include "SimpleShell.h"
 #include "PublicDataRequest.h"
 #include "utils.h"
 
@@ -38,9 +41,10 @@ static const Trigger TRIGGERS[]= {
 
 void Scripts::on_module_loaded()
 {
-    register_for_event(ON_CONSOLE_LINE_RECEIVED);
     register_for_event(ON_SET_PUBLIC_DATA);
     gcode_dispatch.set_script_hook(this);
+    SimpleShell::add_command(shell_slot, "macro", &Scripts::shell, this,
+                             "macro list | params | check | run <sub> [args] | trace on|off");
     load(&THEKERNEL->streams);
 }
 
@@ -221,39 +225,58 @@ void Scripts::on_set_public_data(void *argument)
     else printk("error:script %s %s\n", c->sub, err.c_str());
 }
 
-void Scripts::on_console_line_received(void *argument)
-{
-    SerialMessage *msg= static_cast<SerialMessage *>(argument);
-    std::string cmd= msg->message;
-    if(shift_parameter(cmd) != "macro") return;
-    StreamOutput *stream= msg->stream;
-    std::string what= shift_parameter(cmd);
+const SimpleShell::Sub<Scripts> Scripts::SUBS[] = {
+    {"check",  &Scripts::sub_check,  "reload the scripts and validate them"},
+    {"list",   &Scripts::sub_list,   "the subs that are defined"},
+    {"params", &Scripts::sub_params, "the #<_name> values a script can read"},
+    {"run",    &Scripts::sub_run,    "run one sub: run <sub> [args]"},
+    {"trace",  &Scripts::sub_trace,  "echo every executed line: trace on|off"},
+    {nullptr, nullptr, nullptr},
+};
 
-    if(what == "check" || what == "reload") {
-        if(load(stream)) stream->printf("ok\n");
-    } else if(what == "list") {
-        if(!loaded) {
-            stream->printf("error:no scripts, try macro check\n");
-            return;
-        }
-        const script::Program &p= macros.program();
-        for (const script::Control &c : p.controls) {
-            if(c.kind == script::SUB) stream->printf("%s\n", p.label_text(p.labels[c.label]).c_str());
-        }
-        stream->printf("ok\n");
-    } else if(what == "trace") {
-        trace= shift_parameter(cmd) == "on";
-        stream->printf("ok\n");
-    } else if(what == "run") {
-        std::string sub= shift_parameter(cmd);
-        float args[script::Runner::MAX_ARGS];
-        unsigned n= 0;
-        while(!cmd.empty() && n < script::Runner::MAX_ARGS) args[n++]= strtof(shift_parameter(cmd).c_str(), nullptr);
-        std::string err;
-        if(THEKERNEL->is_halted()) stream->printf("error:Alarm lock\n");
-        else if(!run(sub.c_str(), args, n, stream, err)) stream->printf("error:%s\n", err.c_str());
-        // ok follows when the script has finished
-    } else {
-        stream->printf("macro list | check | run <sub> [args] | trace on|off\n");
+void Scripts::shell(void *self, const char *cmd, std::string args, StreamOutput *stream)
+{
+    SimpleShell::dispatch(static_cast<Scripts *>(self), SUBS, cmd, args, stream);
+}
+
+void Scripts::sub_check(std::string, StreamOutput *stream)
+{
+    if(load(stream)) stream->printf("ok\n");
+}
+
+void Scripts::sub_list(std::string, StreamOutput *stream)
+{
+    if(!loaded) {
+        stream->printf("error:no scripts, try macro check\n");
+        return;
     }
+    const script::Program &p= macros.program();
+    for (const script::Control &c : p.controls) {
+        if(c.kind == script::SUB) stream->printf("%s\n", p.label_text(p.labels[c.label]).c_str());
+    }
+    stream->printf("ok\n");
+}
+
+void Scripts::sub_params(std::string, StreamOutput *stream)
+{
+    Parameters::list_named(stream);
+    stream->printf("ok\n");
+}
+
+void Scripts::sub_run(std::string cmd, StreamOutput *stream)
+{
+    std::string sub= shift_parameter(cmd);
+    float args[script::Runner::MAX_ARGS];
+    unsigned n= 0;
+    while(!cmd.empty() && n < script::Runner::MAX_ARGS) args[n++]= strtof(shift_parameter(cmd).c_str(), nullptr);
+    std::string err;
+    if(THEKERNEL->is_halted()) stream->printf("error:Alarm lock\n");
+    else if(!run(sub.c_str(), args, n, stream, err)) stream->printf("error:%s\n", err.c_str());
+    // ok follows when the script has finished
+}
+
+void Scripts::sub_trace(std::string cmd, StreamOutput *stream)
+{
+    trace= shift_parameter(cmd) == "on";
+    stream->printf("ok\n");
 }

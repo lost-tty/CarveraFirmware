@@ -1,7 +1,10 @@
 #pragma once
 
+#include "SimpleShell.h"
+
 #include "libs/Module.h"
 
+#include <string>
 #include <vector>
 
 struct SerialMessage;
@@ -25,7 +28,8 @@ public:
     void on_module_loaded() override;
     void on_main_loop(void *) override;
     void on_halt(void *) override;
-    void on_console_line_received(void *) override;
+    static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
+    SimpleShell::Registered shell_slot;
     bool push(Source *s);   // false when already stacked
     void clear();           // aborts every source, top first
     void suspend();         // freezes what is running; a source pushed afterwards still feeds

@@ -8,6 +8,7 @@
 #include "Player.h"
 
 #include "libs/Kernel.h"
+#include "SimpleShell.h"
 #include "Robot.h"
 #include "libs/nuts_bolts.h"
 #include "libs/utils.h"
@@ -63,8 +64,8 @@ void Player::on_module_loaded()
     this->suspend_pending = false;
     this->slope = 0.0;
 
-    this->register_for_event(ON_CONSOLE_LINE_RECEIVED);
     this->register_for_event(ON_MAIN_LOOP);
+    for (unsigned i= 0; COMMANDS[i].name != nullptr; i++) SimpleShell::add_command(shell_slots[i], COMMANDS[i].name, &Player::shell, this, COMMANDS[i].help);
     this->register_for_event(ON_GET_PUBLIC_DATA);
     this->register_for_event(ON_SET_PUBLIC_DATA);
     this->register_for_event(ON_GCODE_RECEIVED);
@@ -137,38 +138,23 @@ void Player::on_gcode_received(void *argument)
 }
 
 // When a new line is received, check if it is a command, and if it is, act upon it
-void Player::on_console_line_received( void *argument )
+const Player::Cmd Player::COMMANDS[] = {
+    {"play",     &Player::play_command,     "play file [-v] - play a gcode file"},
+    {"progress", &Player::progress_command, "progress [-b] - progress of the file being played"},
+    {"abort",    &Player::abort_command,    "abort - abort the file being played"},
+    {"suspend",  &Player::suspend_command,  "suspend [h] - suspend the job, h keeps the spindle on"},
+    {"resume",   &Player::resume_command,   "resume - resume a suspended job"},
+    {"goto",     &Player::goto_command,     "goto line - jump to a line while suspended"},
+    {nullptr, nullptr, nullptr},
+};
+
+void Player::shell(void *self, const char *name, std::string args, StreamOutput *stream)
 {
-    if(THEKERNEL->is_halted()) return; // if in halted state ignore any commands
-
-    SerialMessage new_message = *static_cast<SerialMessage *>(argument);
-
-    string possible_command = new_message.message;
-
-    // ignore anything that is not lowercase or a letter
-    if(possible_command.empty() || !islower(possible_command[0]) || !isalpha(possible_command[0])) {
-        return;
+    if(THEKERNEL->is_halted()) return;
+    Player *me= static_cast<Player *>(self);
+    for (const Cmd *c= COMMANDS; c->name != nullptr; ++c) {
+        if(strcmp(c->name, name) == 0) { (me->*(c->fn))(args, stream); return; }
     }
-
-    string cmd = shift_parameter(possible_command);
-
-	// new_message.stream->printf("Play Received %s\r\n", possible_command.c_str());
-
-    // Act depending on command
-    if (cmd == "play"){
-        this->play_command( possible_command, new_message.stream );
-    }else if (cmd == "progress"){
-        this->progress_command( possible_command, new_message.stream );
-    }else if (cmd == "abort") {
-        this->abort_command( possible_command, new_message.stream );
-    }else if (cmd == "suspend") {
-        this->suspend_command( possible_command, new_message.stream );
-    }else if (cmd == "resume") {
-        this->resume_command( possible_command, new_message.stream );
-    }else if (cmd == "goto") {
-    	this->goto_command( possible_command, new_message.stream );
-    }
-
 }
 
 // Play a gcode file by considering each line as if it was received on the serial console

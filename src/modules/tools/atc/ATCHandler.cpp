@@ -6,39 +6,24 @@
 */
 
 #include "ATCHandler.h"
-
 #include <cstring>
-
-#include "libs/Module.h"
 #include "libs/Kernel.h"
-#include "ATCHandler.h"
-#include "Tool.h"
 #include "PublicDataRequest.h"
 #include "Config.h"
 #include "StepperMotor.h"
 #include "Robot.h"
 #include "ConfigValue.h"
 #include "Conveyor.h"
-#include "checksumm.h"
 #include "PublicData.h"
 #include "Gcode.h"
-#include "modules/robot/Conveyor.h"
 #include "libs/Logging.h"
-#include "libs/StreamOutput.h"
 #include "SwitchPublicAccess.h"
-#include "libs/utils.h"
-
-#include "libs/SerialMessage.h"
-#include "libs/StreamOutput.h"
-#include "modules/utils/player/PlayerPublicAccess.h"
 #include "ATCHandlerPublicAccess.h"
+#include "utils/Parameters.h"
+#include "SimpleShell.h"
 #include "ZProbePublicAccess.h"
-#include "SpindlePublicAccess.h"
-
 #include "us_ticker_api.h"
 
-#include "FileStream.h"
-#include <math.h>
 
 #define ATC_AXIS 4
 #define STEPPER THEROBOT.actuators
@@ -93,10 +78,6 @@ void ATCHandler::on_module_loaded()
     atc_home_info.clamp_status = UNHOMED;
     atc_home_info.triggered = false;
     detector_info.triggered = false;
-    ref_tool_mz = 0.0;
-    cur_tool_mz = 0.0;
-    tool_offset = 0.0;
-    tool_number = 6;
 
 
     this->register_for_event(ON_GCODE_RECEIVED);
@@ -106,20 +87,15 @@ void ATCHandler::on_module_loaded()
 
     this->on_config_reload(this);
 
+    this->register_params();
+    SimpleShell::add_command(shell_slot, "atc", &ATCHandler::shell, this, "atc [rack] - tool and clamp state, rack geometry");
+
 	read_endstop_timer.start();
 	read_detector_timer.start();
-
-    // load data from eeprom
-    this->active_tool = THEKERNEL->eeprom_data.TOOL;
-    this->ref_tool_mz = THEKERNEL->eeprom_data.REFMZ;
-    this->cur_tool_mz = THEKERNEL->eeprom_data.TOOLMZ;
-    this->tool_offset = THEKERNEL->eeprom_data.TLO;
 }
 
 void ATCHandler::on_config_reload(void *argument)
 {
-	char buff[10];
-
 	atc_home_info.pin.from_string( THEKERNEL->config->value(atc_checksum, endstop_pin_checksum)->by_default("1.0^" )->as_string())->as_input();
 	atc_home_info.debounce_ms    = THEKERNEL->config->value(atc_checksum, debounce_ms_checksum)->by_default(1  )->as_number();
 	atc_home_info.max_travel    = THEKERNEL->config->value(atc_checksum, max_travel_mm_checksum)->by_default(8  )->as_number();
@@ -153,17 +129,6 @@ void ATCHandler::on_config_reload(void *argument)
 	this->toolrack_offset_x = THEKERNEL->config->value(coordinate_checksum, toolrack_offset_x_checksum)->by_default(356  )->as_number();
 	this->toolrack_offset_y = THEKERNEL->config->value(coordinate_checksum, toolrack_offset_y_checksum)->by_default(0  )->as_number();
 
-	atc_tools.clear();
-	for (int i = 0; i <=  6; i ++) {
-		struct atc_tool tool;
-		tool.num = i;
-	    // lift z axis to atc start position
-		snprintf(buff, sizeof(buff), "tool%d", i);
-		tool.mx_mm = this->anchor1_x + this->toolrack_offset_x;
-		tool.my_mm = this->anchor1_y + this->toolrack_offset_y + (i == 0 ? 210 : (6 - i) * 30);
-		tool.mz_mm = this->toolrack_z;
-		atc_tools.push_back(tool);
-	}
 	probe_mx_mm = this->anchor1_x + this->toolrack_offset_x;
 	probe_my_mm = this->anchor1_y + this->toolrack_offset_y + 180;
 	probe_mz_mm = this->toolrack_z - 40;
@@ -214,7 +179,6 @@ void ATCHandler::read_endstop()
 // Called every millisecond in an ISR
 void ATCHandler::read_detector()
 {
-
     if(!detecting || detector_info.triggered) return;
 
     if (detector_info.detect_pin.get()) {
@@ -404,118 +368,160 @@ void ATCHandler::set_tool_offset()
     float px, py, pz;
     uint8_t ps;
     std::tie(px, py, pz, ps) = THEROBOT.get_last_probe_position();
-    if (ps == 1) {
-        cur_tool_mz = pz;
-        if (ref_tool_mz < 0) {
-        	tool_offset = cur_tool_mz - ref_tool_mz;
-        	const float offset[3] = {0.0, 0.0, tool_offset};
-        	THEROBOT.saveToolOffset(offset, cur_tool_mz);
-        }
-    }
-	
+    if (ps != 1) return;
+
+    float ref = THEKERNEL->eeprom_data.REFMZ;
+    const float offset[3] = {0.0, 0.0, ref < 0 ? pz - ref : 0.0};
+    THEROBOT.saveToolOffset(offset, pz);
+}
+
+static void halt(int reason, const char *msg)
+{
+    THEKERNEL->call_event(ON_HALT, nullptr);
+    THEKERNEL->set_halt_reason(reason);
+    printk("ERROR: %s\n", msg);
 }
 
 void ATCHandler::on_gcode_received(void *argument)
 {
     Gcode *gcode = static_cast<Gcode*>(argument);
+    if (!gcode->has_m) return;
+    uint8_t sub = gcode->subcode;
 
-    if (gcode->has_m) {
-    	// gcode->stream->printf("Has m: %d\r\n", gcode->m);
-		if (gcode->m == 490)  {
-			if (gcode->subcode == 0) {
-				// home tool change
-				home_clamp();
-			} else if (gcode->subcode == 1) {
-				// clamp tool
-				clamp_tool();
-			} else if (gcode->subcode == 2) {
-				// loose tool
-				loose_tool();
-			}
-		} else if (gcode->m == 492) {
-			if (gcode->subcode == 0 || gcode->subcode == 1) {
-				// check true
-				tool_detected = laser_detect();
-				if (!tool_detected) {
-			        THEKERNEL->call_event(ON_HALT, nullptr);
-			        THEKERNEL->set_halt_reason(ATC_NO_TOOL);
-			        printk("ERROR: Tool confliction occured, please check tool rack!\n");
-				}
-			} else if (gcode->subcode == 2) {
-				// check false
-				tool_detected = laser_detect();
-				if (tool_detected) {
-			        THEKERNEL->call_event(ON_HALT, nullptr);
-			        THEKERNEL->set_halt_reason(ATC_HAS_TOOL);
-			        printk("ERROR: Tool confliction occured, please check tool rack!\n");
-				}
-			} else if (gcode->subcode == 4) {
-				tool_detected = laser_detect(); // a script decides what a wrong result means
-			} else if (gcode->subcode == 3) {
-				// check if the probe was triggered
-				if (!probe_detect()) {
-			        THEKERNEL->call_event(ON_HALT, nullptr);
-			        THEKERNEL->set_halt_reason(PROBE_INVALID);
-			        printk("ERROR: Wireless probe dead or not set, please charge or set first!\n");
-				}
-			}
-		} else if (gcode->m == 493) {
-			if (gcode->subcode == 0 || gcode->subcode == 1) {
-				// set tooll offset
-				set_tool_offset();
-			} else if (gcode->subcode == 2) {
-				// set new tool
-				if (gcode->has_letter('T')) {
-		    		this->active_tool = gcode->get_value('T');
-		    		// save current tool data to eeprom
-		    		if (THEKERNEL->eeprom_data.TOOL != this->active_tool) {
-		        	    THEKERNEL->eeprom_data.TOOL = this->active_tool;
-		        	    THEKERNEL->write_eeprom_data();
-		    		}
+    switch (gcode->m) {
+        case 490: // clamp
+            switch (sub) {
+                case 0: home_clamp(); break;
+                case 1: clamp_tool(); break;
+                case 2: loose_tool(); break;
+            }
+            break;
 
-				} else {
-					THEKERNEL->call_event(ON_HALT, nullptr);
-					THEKERNEL->set_halt_reason(ATC_NO_TOOL);
-					printk("ERROR: No tool was set!\n");
+        case 492: // is the slot occupied, is the probe alive
+            switch (sub) {
+                case 0: case 1:
+                    tool_detected = laser_detect();
+                    if (!tool_detected) halt(ATC_NO_TOOL, "Tool confliction occured, please check tool rack!");
+                    break;
+                case 2:
+                    tool_detected = laser_detect();
+                    if (tool_detected) halt(ATC_HAS_TOOL, "Tool confliction occured, please check tool rack!");
+                    break;
+                case 3:
+                    if (!probe_detect()) halt(PROBE_INVALID, "Wireless probe dead or not set, please charge or set first!");
+                    break;
+                case 4:
+                    tool_detected = laser_detect(); // a script decides what a wrong result means
+                    break;
+            }
+            break;
 
-				}
-			}
-		} else if (gcode->m == 494) {
-			// control probe laser
-			if (gcode->subcode == 0 || gcode->subcode == 1) {
-				// open probe laser
-				probe_laser_countdown = 120;
-				probe_laser_timer.start();
-			} else if (gcode->subcode == 2) {
-				// close probe laser
-				probe_laser_timer.stop();
-			}
-		} else if (gcode->m == 497) {
-		    // wait for the queue to be empty
-		    THECONVEYOR.wait_for_idle();
-			THEKERNEL->set_atc_state(gcode->subcode);
-		} else if (gcode->m == 498) {
-			if (gcode->subcode == 0 || gcode->subcode == 1) {
-				printk("EEPRROM Data: TOOL:%d\n", THEKERNEL->eeprom_data.TOOL);
-				printk("EEPRROM Data: TLO:%1.3f\n", THEKERNEL->eeprom_data.TLO);
-				printk("EEPRROM Data: TOOLMZ:%1.3f\n", THEKERNEL->eeprom_data.TOOLMZ);
-				printk("EEPRROM Data: REFMZ:%1.3f\n", THEKERNEL->eeprom_data.REFMZ);
-				printk("EEPRROM Data: G54: %1.3f, %1.3f, %1.3f\n", THEKERNEL->eeprom_data.G54[0], THEKERNEL->eeprom_data.G54[1], THEKERNEL->eeprom_data.G54[2]);
-			} else if (gcode->subcode == 2) {
-				// Show EEPROM DATA
-				THEKERNEL->erase_eeprom_data();
-			}
-		} else if ( gcode->m == 499 ) {
-			if (gcode->subcode == 0 || gcode->subcode == 1) {
-				printk("tool:%d ref:%1.3f cur:%1.3f offset:%1.3f\n", active_tool, ref_tool_mz, cur_tool_mz, tool_offset);
-			} else if (gcode->subcode == 2) {
-				printk("probe -- mx:%1.1f my:%1.1f mz:%1.1f\n", probe_mx_mm, probe_my_mm, probe_mz_mm);
-				for (int i = 0; i <=  tool_number; i ++) {
-					printk("tool%d -- mx:%1.1f my:%1.1f mz:%1.1f\n", atc_tools[i].num, atc_tools[i].mx_mm, atc_tools[i].my_mm, atc_tools[i].mz_mm);
-				}
-			}
-		}
+        case 493: // tool length offset, active tool
+            switch (sub) {
+                case 0: case 1:
+                    set_tool_offset();
+                    break;
+                case 2:
+                    if (!gcode->has_letter('T')) {
+                        halt(ATC_NO_TOOL, "No tool was set!");
+                    } else {
+                        int tool = gcode->get_value('T');
+                        if (THEKERNEL->eeprom_data.TOOL != tool) { // the write blocks the main loop for ~0.4 s
+                            THEKERNEL->eeprom_data.TOOL = tool;
+                            THEKERNEL->write_eeprom_data();
+                        }
+                    }
+                    break;
+            }
+            break;
+
+        case 494: // probe laser
+            switch (sub) {
+                case 0: case 1:
+                    probe_laser_countdown = 120;
+                    probe_laser_timer.start();
+                    break;
+                case 2:
+                    probe_laser_timer.stop();
+                    break;
+            }
+            break;
+
+        case 497:
+            THECONVEYOR.wait_for_idle();
+            THEKERNEL->set_atc_state(sub);
+            break;
+
     }
+}
+
+const ATCHandler::Param ATCHandler::PARAMS[] = {
+    {"_clamp_state", [](void *c) { return (float)((ATCHandler *)c)->atc_home_info.clamp_status; }},
+    {"_tool_detected", [](void *c) { return (float)((ATCHandler *)c)->tool_detected; }},
+    {"_active_tool", [](void *) { return (float)THEKERNEL->eeprom_data.TOOL; }},
+    {"_anchor1_x", [](void *c) { return (float)((ATCHandler *)c)->anchor1_x; }},
+    {"_anchor1_y", [](void *c) { return (float)((ATCHandler *)c)->anchor1_y; }},
+    {"_anchor2_offset_x", [](void *c) { return (float)((ATCHandler *)c)->anchor2_offset_x; }},
+    {"_anchor2_offset_y", [](void *c) { return (float)((ATCHandler *)c)->anchor2_offset_y; }},
+    {"_toolrack_offset_x", [](void *c) { return (float)((ATCHandler *)c)->toolrack_offset_x; }},
+    {"_toolrack_offset_y", [](void *c) { return (float)((ATCHandler *)c)->toolrack_offset_y; }},
+    {"_toolrack_z", [](void *c) { return (float)((ATCHandler *)c)->toolrack_z; }},
+    {"_rotation_offset_x", [](void *c) { return (float)((ATCHandler *)c)->rotation_offset_x; }},
+    {"_rotation_offset_y", [](void *c) { return (float)((ATCHandler *)c)->rotation_offset_y; }},
+    {"_rotation_offset_z", [](void *c) { return (float)((ATCHandler *)c)->rotation_offset_z; }},
+    {"_clearance_x", [](void *c) { return (float)((ATCHandler *)c)->clearance_x; }},
+    {"_clearance_y", [](void *c) { return (float)((ATCHandler *)c)->clearance_y; }},
+    {"_clearance_z", [](void *c) { return (float)((ATCHandler *)c)->clearance_z; }},
+    {"_atc_safe_z", [](void *c) { return (float)((ATCHandler *)c)->safe_z_mm; }},
+    {"_atc_safe_z_empty", [](void *c) { return (float)((ATCHandler *)c)->safe_z_empty_mm; }},
+    {"_atc_safe_z_offset", [](void *c) { return (float)((ATCHandler *)c)->safe_z_offset_mm; }},
+    {"_atc_fast_z_rate", [](void *c) { return (float)((ATCHandler *)c)->fast_z_rate; }},
+    {"_atc_slow_z_rate", [](void *c) { return (float)((ATCHandler *)c)->slow_z_rate; }},
+    {"_atc_margin_rate", [](void *c) { return (float)((ATCHandler *)c)->margin_rate; }},
+    {"_atc_probe_fast_rate", [](void *c) { return (float)((ATCHandler *)c)->probe_fast_rate; }},
+    {"_atc_probe_slow_rate", [](void *c) { return (float)((ATCHandler *)c)->probe_slow_rate; }},
+    {"_atc_probe_retract", [](void *c) { return (float)((ATCHandler *)c)->probe_retract_mm; }},
+    {"_atc_probe_height", [](void *c) { return (float)((ATCHandler *)c)->probe_height_mm; }},
+    {"_probe_mx", [](void *c) { return (float)((ATCHandler *)c)->probe_mx_mm; }},
+    {"_probe_my", [](void *c) { return (float)((ATCHandler *)c)->probe_my_mm; }},
+    {"_probe_mz", [](void *c) { return (float)((ATCHandler *)c)->probe_mz_mm; }},
+};
+
+const SimpleShell::Sub<ATCHandler> ATCHandler::SUBS[] = {
+    {"",      &ATCHandler::sub_state, "tool, offsets and clamp state"},
+    {"rack",  &ATCHandler::sub_rack,  "where each slot and the probe sit"},
+    {nullptr, nullptr, nullptr},
+};
+
+void ATCHandler::shell(void *self, const char *cmd, std::string args, StreamOutput *stream)
+{
+    SimpleShell::dispatch(static_cast<ATCHandler *>(self), SUBS, cmd, args, stream);
+}
+
+void ATCHandler::sub_state(std::string, StreamOutput *stream)
+{
+    stream->printf("tool %d, length offset %1.3f\r\n", THEKERNEL->eeprom_data.TOOL, THEKERNEL->eeprom_data.TLO);
+    stream->printf("reference tool z %1.3f, current tool z %1.3f\r\n", THEKERNEL->eeprom_data.REFMZ, THEKERNEL->eeprom_data.TOOLMZ);
+    stream->printf("clamp %s, slot %s\r\n", atc_home_info.clamp_status == CLAMPED ? "clamped" :
+                   atc_home_info.clamp_status == LOOSED ? "loosed" : "unhomed",
+                   tool_detected ? "occupied" : "empty");
+    stream->printf("ok\r\n");
+}
+
+void ATCHandler::sub_rack(std::string, StreamOutput *stream)
+{
+    for (int i = 0; i <= 6; i++) {
+        stream->printf("tool%d  x %1.1f  y %1.1f  z %1.1f\r\n", i, anchor1_x + toolrack_offset_x,
+                       anchor1_y + toolrack_offset_y + (i == 0 ? 210 : (6 - i) * 30), toolrack_z);
+    }
+    stream->printf("probe  x %1.1f  y %1.1f  z %1.1f\r\n", probe_mx_mm, probe_my_mm, probe_mz_mm);
+    stream->printf("ok\r\n");
+}
+
+void ATCHandler::register_params()
+{
+    static Parameters::Named slots[sizeof(PARAMS) / sizeof(*PARAMS)];
+    for (unsigned i = 0; i < sizeof(PARAMS) / sizeof(*PARAMS); i++) Parameters::add(slots[i], PARAMS[i].name, PARAMS[i].get, this);
 }
 
 void ATCHandler::on_get_public_data(void* argument)
@@ -524,33 +530,13 @@ void ATCHandler::on_get_public_data(void* argument)
 
     if(!pdr->starts_with(atc_handler_checksum)) return;
 
-    if(pdr->second_element_is(get_param_checksum)) {
-        struct atc_param *p = static_cast<struct atc_param *>(pdr->get_data_ptr());
-        struct { const char *name; float value; } table[] = {
-            {"_clamp_state", (float)atc_home_info.clamp_status}, {"_tool_detected", (float)tool_detected}, {"_active_tool", (float)active_tool},
-            {"_anchor1_x", anchor1_x}, {"_anchor1_y", anchor1_y}, {"_anchor2_offset_x", anchor2_offset_x}, {"_anchor2_offset_y", anchor2_offset_y},
-            {"_toolrack_offset_x", toolrack_offset_x}, {"_toolrack_offset_y", toolrack_offset_y}, {"_toolrack_z", toolrack_z},
-            {"_rotation_offset_x", rotation_offset_x}, {"_rotation_offset_y", rotation_offset_y}, {"_rotation_offset_z", rotation_offset_z},
-            {"_clearance_x", clearance_x}, {"_clearance_y", clearance_y}, {"_clearance_z", clearance_z},
-            {"_atc_safe_z", safe_z_mm}, {"_atc_safe_z_empty", safe_z_empty_mm}, {"_atc_safe_z_offset", safe_z_offset_mm},
-            {"_atc_fast_z_rate", fast_z_rate}, {"_atc_slow_z_rate", slow_z_rate}, {"_atc_margin_rate", margin_rate},
-            {"_atc_probe_fast_rate", probe_fast_rate}, {"_atc_probe_slow_rate", probe_slow_rate}, {"_atc_probe_retract", probe_retract_mm},
-            {"_atc_probe_height", probe_height_mm}, {"_probe_mx", probe_mx_mm}, {"_probe_my", probe_my_mm}, {"_probe_mz", probe_mz_mm},
-        };
-        for (auto &e : table) {
-            if (strcmp(e.name, p->name) == 0) {
-                p->value = e.value;
-                pdr->set_taken();
-                break;
-            }
-        }
-    } else if(pdr->second_element_is(get_tool_status_checksum)) {
-    	if (this->active_tool >= 0) {
+    if(pdr->second_element_is(get_tool_status_checksum)) {
+    	if (THEKERNEL->eeprom_data.TOOL >= 0) {
             struct tool_status *t= static_cast<tool_status*>(pdr->get_data_ptr());
-            t->active_tool = this->active_tool;
-            t->ref_tool_mz = this->ref_tool_mz;
-            t->cur_tool_mz = this->cur_tool_mz;
-            t->tool_offset = this->tool_offset;
+            t->active_tool = THEKERNEL->eeprom_data.TOOL;
+            t->ref_tool_mz = THEKERNEL->eeprom_data.REFMZ;
+            t->cur_tool_mz = THEKERNEL->eeprom_data.TOOLMZ;
+            t->tool_offset = THEKERNEL->eeprom_data.TLO;
             pdr->set_taken();
     	}
     } else if (pdr->second_element_is(get_atc_pin_status_checksum)) {
@@ -569,13 +555,12 @@ void ATCHandler::on_set_public_data(void* argument)
     if(!pdr->starts_with(atc_handler_checksum)) return;
 
     if(pdr->second_element_is(set_ref_tool_mz_checksum)) {
-        this->ref_tool_mz = cur_tool_mz;
-        // update eeprom data if needed
-        if (this->ref_tool_mz != THEKERNEL->eeprom_data.REFMZ) {
-        	THEKERNEL->eeprom_data.REFMZ = this->ref_tool_mz;
+        // the current tool becomes the reference, so its offset is zero
+        if (THEKERNEL->eeprom_data.REFMZ != THEKERNEL->eeprom_data.TOOLMZ || THEKERNEL->eeprom_data.TLO != 0) {
+        	THEKERNEL->eeprom_data.REFMZ = THEKERNEL->eeprom_data.TOOLMZ;
+        	THEKERNEL->eeprom_data.TLO = 0;
 		    THEKERNEL->write_eeprom_data();
         }
-        this->tool_offset = 0.0;
         pdr->set_taken();
     }
 }

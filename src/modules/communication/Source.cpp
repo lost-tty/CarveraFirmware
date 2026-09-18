@@ -4,6 +4,7 @@
 #include "libs/SerialMessage.h"
 #include "libs/StreamOutput.h"
 #include "GcodeDispatch.h"
+#include "SimpleShell.h"
 #include "utils.h"
 
 #include <algorithm>
@@ -13,18 +14,16 @@ void SourceStack::on_module_loaded()
 {
     register_for_event(ON_MAIN_LOOP);
     register_for_event(ON_HALT);
-    register_for_event(ON_CONSOLE_LINE_RECEIVED);
+    SimpleShell::add_command(shell_slot, "list", &SourceStack::shell, this, "list [n] - lines around the one running");
 }
 
-void SourceStack::on_console_line_received(void *argument)
+void SourceStack::shell(void *self, const char *, std::string cmd, StreamOutput *stream)
 {
-    SerialMessage *msg= static_cast<SerialMessage *>(argument);
-    std::string cmd= msg->message;
-    if(shift_parameter(cmd) != "list") return;
+    SourceStack *me= static_cast<SourceStack *>(self);
     std::string n= shift_parameter(cmd);
     unsigned around= n.empty() ? 10 : strtoul(n.c_str(), nullptr, 10);
-    if(stack.empty()) msg->stream->printf("Nothing running\r\n");
-    for (Source *s : stack) s->list(msg->stream, around);
+    if(me->stack.empty()) stream->printf("Nothing running\r\n");
+    for (Source *s : me->stack) s->list(stream, around);
 }
 
 bool SourceStack::push(Source *s)

@@ -3,10 +3,10 @@
 
 using namespace std;
 #include "Module.h"
-#include <vector>
 #include "Pin.h"
 
 #include "SoftTimer.h"
+#include "SimpleShell.h"
 
 class ATCHandler : public Module
 {
@@ -22,10 +22,17 @@ public:
     void on_get_public_data(void *argument);
     void on_set_public_data(void *argument);
     void on_halt(void *argument);
-    int get_active_tool() const { return active_tool; }
     void on_config_reload(void *argument);
 
 private:
+    static const struct Param { const char *name; float (*get)(void *); } PARAMS[];
+    void register_params();
+    static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
+    static const SimpleShell::Sub<ATCHandler> SUBS[];
+    void sub_state(std::string args, StreamOutput *stream);
+    void sub_rack(std::string args, StreamOutput *stream);
+    SimpleShell::Registered shell_slot;
+
 
     typedef enum {
     	UNHOMED,	// need to home first
@@ -132,21 +139,7 @@ private:
     float clearance_y;
     float clearance_z;
 
-    struct atc_tool {
-    	int num;
-    	float mx_mm;
-    	float my_mm;
-    	float mz_mm;
-    };
 
-    vector<struct atc_tool> atc_tools;
-
-    int active_tool;
-    int tool_number;
-
-    float ref_tool_mz;
-    float cur_tool_mz;
-    float tool_offset;
 
 };
 

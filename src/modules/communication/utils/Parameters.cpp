@@ -73,27 +73,59 @@ static bool player_playing()
     return PublicData::get_value(player_checksum, is_playing_checksum, &p) && *static_cast<bool *>(p);
 }
 
+Parameters::Named *Parameters::named = nullptr;
+
+void Parameters::add(Named &slot, const char *name, getter get, void *context)
+{
+    slot = Named{name, get, context, named};
+    named = &slot;
+}
+
+static float probe_axis(unsigned i)
+{
+    std::tuple<float, float, float, uint8_t> p = THEROBOT.get_last_probe_position();
+    switch (i) {
+        case 0: return std::get<0>(p);
+        case 1: return std::get<1>(p);
+        case 2: return std::get<2>(p);
+        default: return std::get<3>(p);
+    }
+}
+
+static const struct { const char *name; Parameters::getter get; } BUILTIN[] = {
+    {"_laser_mode",  [](void *) { return (float)THEKERNEL->get_laser_mode(); }},
+    {"_homed",       [](void *) { return (float)THEROBOT.is_homed_all_axes(); }},
+    {"_spindle_on",  [](void *) { return (float)spindle_on(); }},
+    {"_playing",     [](void *) { return (float)player_playing(); }},
+    {"_tlo",         [](void *) { return THEKERNEL->eeprom_data.TLO; }},
+    {"_probe_x",     [](void *) { return probe_axis(0); }},
+    {"_probe_y",     [](void *) { return probe_axis(1); }},
+    {"_probe_z",     [](void *) { return probe_axis(2); }},
+    {"_probe_ok",    [](void *) { return probe_axis(3); }},
+};
+
+void Parameters::init()
+{
+    static Named slots[sizeof(BUILTIN) / sizeof(*BUILTIN)];
+    for (unsigned i = 0; i < sizeof(BUILTIN) / sizeof(*BUILTIN); i++) {
+        add(slots[i], BUILTIN[i].name, BUILTIN[i].get, nullptr);
+    }
+}
+
 bool Parameters::get_named(const char *name, float &v) const
 {
-    if (strcmp(name, "_laser_mode") == 0) v = THEKERNEL->get_laser_mode();
-    else if (strcmp(name, "_homed") == 0) v = THEROBOT.is_homed_all_axes();
-    else if (strcmp(name, "_spindle_on") == 0) v = spindle_on();
-    else if (strcmp(name, "_playing") == 0) v = player_playing();
-    else if (strcmp(name, "_tool") == 0) v = THEKERNEL->eeprom_data.TOOL;
-    else if (strcmp(name, "_tlo") == 0) v = THEKERNEL->eeprom_data.TLO;
-    else if (strcmp(name, "_probe_x") == 0 || strcmp(name, "_probe_y") == 0 ||
-             strcmp(name, "_probe_z") == 0 || strcmp(name, "_probe_ok") == 0) {
-        std::tuple<float, float, float, uint8_t> p = THEROBOT.get_last_probe_position();
-        if (name[7] == 'x') v = std::get<0>(p);
-        else if (name[7] == 'y') v = std::get<1>(p);
-        else if (name[7] == 'z') v = std::get<2>(p);
-        else v = std::get<3>(p);
-    } else { // the rest, including the ATC's own _probe_mx/my/mz
-        struct atc_param p{name, 0};
-        if (!PublicData::get_value(atc_handler_checksum, get_param_checksum, &p)) return false;
-        v = p.value;
+    for (const Named *p = named; p != nullptr; p = p->next) {
+        if (strcmp(p->name, name) == 0) {
+            v = p->get(p->context);
+            return true;
+        }
     }
-    return true;
+    return false;
+}
+
+void Parameters::list_named(StreamOutput *stream)
+{
+    for (const Named *p = named; p != nullptr; p = p->next) stream->printf("%-22s %.4f\n", p->name, p->get(p->context));
 }
 
 bool Parameters::set(int n, float v)

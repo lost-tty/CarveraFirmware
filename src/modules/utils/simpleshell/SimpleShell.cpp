@@ -93,6 +93,7 @@ const SimpleShell::ptentry_t SimpleShell::commands_table[] = {
     {"upload",    &SimpleShell::upload_command,    "upload filename - save incoming text to a file"},
     {"download",  &SimpleShell::download_command,  "download filename - download a file"},
     {"reset",     &SimpleShell::reset_command,     "reset - reboot the system"},
+    {"eeprom",    &SimpleShell::eeprom_command,    "eeprom [clear] - show the saved tool, offsets and #501-520; clear wipes them"},
     {"dfu",       &SimpleShell::dfu_command,       "dfu - enter DFU boot loader mode"},
     {"break",     &SimpleShell::break_command,     "break - enter debugger"},
     {"help",      &SimpleShell::help_command,      "help - display available commands"},
@@ -132,8 +133,22 @@ void SimpleShell::on_module_loaded()
     this->register_for_event(ON_CONSOLE_LINE_RECEIVED);
 }
 
+SimpleShell::Registered *SimpleShell::registered = nullptr;
+
+void SimpleShell::add_command(Registered &slot, const char *name, command_fn fn, void *context, const char *help)
+{
+    slot = Registered{name, fn, context, help, registered};
+    registered = &slot;
+}
+
 bool SimpleShell::parse_command(const char *cmd, std::string args, StreamOutput *stream)
 {
+    for (const Registered *r = registered; r != nullptr; r = r->next) {
+        if (strcasecmp(cmd, r->name) == 0) {
+            r->command(r->context, r->name, args, stream);
+            return true;
+        }
+    }
     for (const ptentry_t *p = commands_table; p->command != nullptr; ++p) {
         if (strncasecmp(cmd, p->name, strlen(p->name)) == 0) {
             (this->*(p->command))(args, stream);
@@ -232,13 +247,6 @@ void SimpleShell::on_console_line_received( void *argument )
         } else if (cmd == "play" || cmd == "progress" || cmd == "abort" || cmd == "suspend"
         		|| cmd == "resume" || cmd == "goto") {
             // these are handled by Player module
-
-        } else if (cmd == "macro") {
-            // handled by Scripts
-        } else if (cmd == "list") {
-            // handled by the source stack
-        } else if (cmd == "laser") {
-            // these are handled by Laser module
 
         } else if (cmd.substr(0, 2) == "ok") {
             // probably an echo so ignore the whole line
@@ -851,6 +859,41 @@ void SimpleShell::model_command( string parameters, StreamOutput *stream )
 }
 
 // Reset the system
+// tool number, tool length, the G54 offset and #501-520 all live in one EEPROM struct
+const SimpleShell::Sub<SimpleShell> SimpleShell::EEPROM_SUBS[] = {
+    {"",      &SimpleShell::eeprom_show,  "the saved tool, offsets and #501-520"},
+    {"clear", &SimpleShell::eeprom_clear, "wipe them, needs the word yes"},
+    {nullptr, nullptr, nullptr},
+};
+
+void SimpleShell::eeprom_command( string parameters, StreamOutput *stream)
+{
+    dispatch(this, EEPROM_SUBS, "eeprom", parameters, stream);
+}
+
+void SimpleShell::eeprom_show( string parameters, StreamOutput *stream)
+{
+    const EEPROM_data &e = THEKERNEL->eeprom_data;
+    stream->printf("tool: %d\r\n", e.TOOL);
+    stream->printf("tool length offset: %1.3f\r\n", e.TLO);
+    stream->printf("reference tool Z: %1.3f, current tool Z: %1.3f\r\n", e.REFMZ, e.TOOLMZ);
+    stream->printf("G54: %1.3f, %1.3f, %1.3f\r\n", e.G54[0], e.G54[1], e.G54[2]);
+    for (unsigned i = 0; i < 20; i++) {
+        if (!std::isnan(e.perm_vars[i])) stream->printf("#%u: %1.4f\r\n", 501 + i, e.perm_vars[i]);
+    }
+    stream->printf("ok\r\n");
+}
+
+void SimpleShell::eeprom_clear( string parameters, StreamOutput *stream)
+{
+    if (shift_parameter(parameters) != "yes") {
+        stream->printf("error:this loses the tool number, the tool length and the G54 offset; say: eeprom clear yes\r\n");
+        return;
+    }
+    THEKERNEL->erase_eeprom_data();
+    stream->printf("ok\r\n");
+}
+
 void SimpleShell::reset_command( string parameters, StreamOutput *stream)
 {
     stream->printf("Rebooting machine in 3 seconds...\r\n");
@@ -1355,6 +1398,7 @@ void SimpleShell::help_command(string parameters, StreamOutput *stream)
     for (const ptentry_t* cmd = commands_table; cmd->name != nullptr; ++cmd) {
         stream->printf("%s\r\n", cmd->help);
     }
+    for (const Registered *r = registered; r != nullptr; r = r->next) stream->printf("%s\r\n", r->help);
 }
 
 // output all configs

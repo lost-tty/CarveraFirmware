@@ -154,7 +154,7 @@ int main() {
     // a read-only machine name must not be shadowed by a script global (the read would still see the machine)
     m.readonly.insert("_tool");
     m.named["_tool"] = 3;
-    CHECK(run("#<_tool> = 9\nG0 X#<_tool>\n", m) == "ERROR: line 1: parameter is read-only");
+    CHECK(run("#<_tlo> = 9\nG0 X#<_tlo>\n", m) == "ERROR: line 1: parameter is read-only");
     CHECK(run("#<_clamp_state> = 9\nG0 X#<_clamp_state>\n", m) == "G0 X9"); // writable machine name
     {
         std::string many = "#<_i> = 0\no1 while [#<_i> LT 20000]\n#<_i> = [#<_i> + 1]\n(MSG, tick)\no1 endwhile\nG0 X1\n";

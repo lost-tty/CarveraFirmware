@@ -8,6 +8,7 @@
 #pragma once
 
 #include "Module.h"
+#include "utils.h"
 #include "FileTransfer.h"
 #include "Configurator.h"
 #include "SoftTimer.h"
@@ -26,6 +27,29 @@ class StreamOutput;
 class SimpleShell : public Module
 {
 public:
+    template<class T> struct Sub {
+        const char *name;
+        void (T::*fn)(std::string args, StreamOutput *stream);
+        const char *help;
+    };
+
+    template<class T> static void dispatch(T *self, const Sub<T> *subs, const char *cmd, std::string args, StreamOutput *stream)
+    {
+        std::string what = shift_parameter(args);
+        for (const Sub<T> *s = subs; s->fn != nullptr; ++s) {
+            if (what == s->name) {
+                (self->*(s->fn))(args, stream);
+                return;
+            }
+        }
+        for (const Sub<T> *s = subs; s->fn != nullptr; ++s) {
+            stream->printf("%s %s - %s\r\n", cmd, s->name, s->help);
+        }
+    }
+
+    typedef void (*command_fn)(void *context, const char *name, std::string args, StreamOutput *stream);
+    struct Registered { const char *name; command_fn command; void *context; const char *help; Registered *next; };
+    static void add_command(Registered &slot, const char *name, command_fn fn, void *context, const char *help);
     SimpleShell()
     : resetTimer("SimpleShell::resetTimer", 3000, false, this, &SimpleShell::system_reset_callback)
     {}
@@ -87,6 +111,10 @@ private:
     void config_restore_command(string parameters, StreamOutput *stream );
 
     void config_default_command(string parameters, StreamOutput *stream );
+    void eeprom_command(string parameters, StreamOutput *stream );
+    void eeprom_show(string parameters, StreamOutput *stream );
+    void eeprom_clear(string parameters, StreamOutput *stream );
+    static const Sub<SimpleShell> EEPROM_SUBS[];
 
     void system_reset_callback();
 
@@ -98,6 +126,8 @@ private:
     } ptentry_t;
 
     static const ptentry_t commands_table[];
+
+    static Registered *registered;
 
     FileTransfer transfer;
     Configurator      configurator;

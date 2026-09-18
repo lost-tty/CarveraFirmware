@@ -11,6 +11,7 @@
 #include "Module.h"
 #include "GcodeFile.h"
 #include "Source.h"
+#include "SimpleShell.h"
 
 #include <stdio.h>
 #include <string>
@@ -28,7 +29,7 @@ class StreamOutput;
 class Player : public Module, public Source {
     public:
         void on_module_loaded();
-        void on_console_line_received( void* argument );
+        static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
         void on_main_loop( void* argument );
         void on_get_public_data(void* argument);
         void on_set_public_data(void* argument);
@@ -39,6 +40,9 @@ class Player : public Module, public Source {
         void list(StreamOutput* stream, unsigned around) override;
 
     private:
+        typedef void (Player::*command_t)(string, StreamOutput *);
+        static const struct Cmd { const char *name; command_t fn; const char *help; } COMMANDS[];
+        SimpleShell::Registered shell_slots[6];
         void play_command( string parameters, StreamOutput* stream );
         void progress_command( string parameters, StreamOutput* stream );
         void abort_command( string parameters, StreamOutput* stream );

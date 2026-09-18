@@ -7,6 +7,12 @@
 
 #pragma once
 
+#include "SimpleShell.h"
+
+#include <string>
+
+class StreamOutput;
+
 #include "libs/Module.h"
 #include "SoftTimer.h"
 
@@ -27,7 +33,13 @@ class Laser : public Module{
         void on_module_loaded();
         void on_halt(void* argument);
         void on_gcode_received(void *argument);
-        void on_console_line_received(void *argument);
+        static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
+        static const SimpleShell::Sub<Laser> SUBS[];
+        void sub_on(std::string args, StreamOutput *stream);
+        void sub_off(std::string args, StreamOutput *stream);
+        void sub_status(std::string args, StreamOutput *stream);
+        void sub_test(std::string args, StreamOutput *stream);
+        SimpleShell::Registered shell_slot;
         void on_get_public_data(void* argument);
 
         void set_scale(float s) { scale= s/100; }

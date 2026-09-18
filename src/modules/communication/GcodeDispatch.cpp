@@ -89,6 +89,7 @@ static bool is_modal_setting(Class c) {
 
 void GcodeDispatch::init()
 {
+    Parameters::init();
     modal_group_1= 0;
     homed_check= true;
 }
