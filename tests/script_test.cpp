@@ -152,8 +152,8 @@ int main() {
     CHECK(load_error("o<a> sub\no<a> abort\no<a> endsub\n") == "line 2: expected one [condition]");
     CHECK(load_error("o<a> abort [1]\n") == "line 1: abort outside sub");
     // a read-only machine name must not be shadowed by a script global (the read would still see the machine)
-    m.readonly.insert("_tool");
-    m.named["_tool"] = 3;
+    m.readonly.insert("_tlo");
+    m.named["_tlo"] = 3;
     CHECK(run("#<_tlo> = 9\nG0 X#<_tlo>\n", m) == "ERROR: line 1: parameter is read-only");
     CHECK(run("#<_clamp_state> = 9\nG0 X#<_clamp_state>\n", m) == "G0 X9"); // writable machine name
     {
