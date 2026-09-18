@@ -10,6 +10,7 @@
 using std::string;
 #include "libs/Module.h"
 #include "libs/Kernel.h"
+#include "GcodeDispatch.h"
 #include "Gcode.h"
 #include "Config.h"
 #include "ConfigValue.h"
@@ -52,7 +53,7 @@ void WirelessProbe::on_module_loaded() {
     this->register_for_event(ON_MAIN_LOOP);
     this->register_for_event(ON_GET_PUBLIC_DATA);
     this->register_for_event(ON_SET_PUBLIC_DATA);
-    this->register_for_event(ON_GCODE_RECEIVED);
+    GcodeDispatch::add_handler(this);
 }
 
 
@@ -184,9 +185,9 @@ void WirelessProbe::on_set_public_data(void *argument) {
     }
 }
 
-void WirelessProbe::on_gcode_received(void *argument)
+void WirelessProbe::on_gcode_received(Gcode *argument)
 {
-    Gcode *gcode = static_cast<Gcode*>(argument);
+    Gcode *gcode = argument;
 
     if (gcode->has_m) {
     	if (gcode->m == 470) {

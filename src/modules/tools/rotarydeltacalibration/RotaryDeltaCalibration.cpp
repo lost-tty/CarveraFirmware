@@ -1,6 +1,7 @@
 #include "RotaryDeltaCalibration.h"
 #include "EndstopsPublicAccess.h"
 #include "Kernel.h"
+#include "GcodeDispatch.h"
 #include "Robot.h"
 #include "Config.h"
 #include "checksumm.h"
@@ -23,7 +24,7 @@ void RotaryDeltaCalibration::on_module_loaded()
     }
 
     // register event-handlers
-    register_for_event(ON_GCODE_RECEIVED);
+    GcodeDispatch::add_handler(this);
 }
 
 bool RotaryDeltaCalibration::get_homing_offset(float *theta_offset)
@@ -32,9 +33,9 @@ bool RotaryDeltaCalibration::get_homing_offset(float *theta_offset)
     return ok;
 }
 
-void RotaryDeltaCalibration::on_gcode_received(void *argument)
+void RotaryDeltaCalibration::on_gcode_received(Gcode *argument)
 {
-    Gcode *gcode = static_cast<Gcode *>(argument);
+    Gcode *gcode = argument;
 
     if( gcode->has_m) {
         switch( gcode->m ) {

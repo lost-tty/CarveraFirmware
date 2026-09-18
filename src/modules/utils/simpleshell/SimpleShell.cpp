@@ -185,7 +185,7 @@ void SimpleShell::on_console_line_received( void *argument )
 
             case 'X':
                 if(THEKERNEL->is_halted()) {
-                    THEKERNEL->call_event(ON_HALT, (void *)1); // clears on_halt
+                    THEKERNEL->clear_halt();
                     new_message.stream->printf("[Caution: Unlocked]\nok\n");
                 }
                 break;
@@ -197,7 +197,7 @@ void SimpleShell::on_console_line_received( void *argument )
 
             case 'H':
                 {
-                    if(THEKERNEL->is_halted()) THEKERNEL->call_event(ON_HALT, (void *)1); // clears on_halt
+                    if(THEKERNEL->is_halted()) THEKERNEL->clear_halt();
                     // issue G28.2 which is force homing cycle
                     gcode_dispatch.run_line("G28.2", new_message.stream, false);
 

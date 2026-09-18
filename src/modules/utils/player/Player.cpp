@@ -68,7 +68,7 @@ void Player::on_module_loaded()
     for (unsigned i= 0; COMMANDS[i].name != nullptr; i++) SimpleShell::add_command(shell_slots[i], COMMANDS[i].name, &Player::shell, this, COMMANDS[i].help);
     this->register_for_event(ON_GET_PUBLIC_DATA);
     this->register_for_event(ON_SET_PUBLIC_DATA);
-    this->register_for_event(ON_GCODE_RECEIVED);
+    GcodeDispatch::add_handler(this);
     this->register_for_event(ON_HALT);
 
     this->home_on_boot = THEKERNEL->config->value(home_on_boot_checksum)->by_default(true)->as_bool();
@@ -113,9 +113,9 @@ string Player::extract_options(string& args)
     return opts;
 }
 
-void Player::on_gcode_received(void *argument)
+void Player::on_gcode_received(Gcode *argument)
 {
-    Gcode *gcode = static_cast<Gcode *>(argument);
+    Gcode *gcode = argument;
     string args = get_arguments(gcode->get_command());
     if (gcode->has_m) {
         if (gcode->m == 1) { //optiional stop

@@ -21,70 +21,73 @@
 #include <cstdlib>
 #include <cstring>
 
-// Mxxx codes that still run while halted: status queries and things that turn stuff off
-static const int allowed_mcodes[]= {2,5,9,30,105,114,119,80,81,911,503,106,107};
-static bool is_allowed_mcode(int m) {
-    for (int c : allowed_mcodes) if(c == m) return true;
-    return false;
-}
-
-// commands that must not run on an unhomed machine: probing, tool change, ATC calibration/probe/goto
-static bool requires_homed(const gcode::Word &w) {
-    static const int gcodes[]= {30, 38};
-    static const int mcodes[]= {6, 491, 495, 496};
-    int n= w.value;
-    if(w.letter == 'G') for (int c : gcodes) if(n == c) return true;
-    if(w.letter == 'M') for (int c : mcodes) if(n == c) return true;
-    return false;
-}
-
-static bool is_command(const gcode::Word &w) { return w.letter == 'G' || w.letter == 'M'; }
-
-// group 0 codes that take the axis words themselves, so they cannot share a block with a motion word
-static bool takes_axis_words(const gcode::Word &w) {
-    unsigned n= w.value;
-    return w.letter == 'G' && (n == 10 || n == 28 || n == 30 || n == 31 || n == 32 || (n == 92 && w.subcode == 0));
-}
-
-
 // RS274 execution order of the commands in one block
 // Smoothie-specific M codes (OTHER_M) keep their traditional place after the motion
 enum Rank : uint8_t { FEED_MODE, TOOL_CHANGE, SPINDLE, COOLANT, DWELL, PLANE, UNITS, CUTTER_COMP,
                       TOOL_OFFSET, WCS, PATH, DISTANCE, RETRACT, NON_MODAL, MOTION, OTHER_M, STOP };
 
-struct Class { uint8_t group; Rank rank; };  // group 0: may be combined freely
+enum Flag : uint8_t {
+    AXIS_WORDS = 1,   // takes the axis words itself, so it cannot share a block with a motion word
+    NEEDS_HOMED = 2,  // probing, tool change and the ATC moves: refused on an unhomed machine
+    WHEN_HALTED = 4,  // still runs while halted: status queries and things that turn stuff off
+};
 
-static Class classify(const gcode::Word &w) {
+struct Class { uint8_t group; Rank rank; uint8_t flags; };  // group 0: may be combined freely
+
+static bool is_command(const gcode::Word &w) { return w.letter == 'G' || w.letter == 'M'; }
+
+static Class classify(const gcode::Word &w)
+{
     unsigned n= w.value;
     if(w.letter == 'G') {
-        if(n <= 3 || n == 38 || n == 73 || (n >= 80 && n <= 89)) return {1, MOTION};
+        if(n <= 3 || n == 73 || (n >= 80 && n <= 89)) return {1, MOTION, 0};
+        if(n == 38) return {1, MOTION, NEEDS_HOMED};
         switch(n) {
-            case 4: return {0, DWELL};
-            case 17: case 18: case 19: return {2, PLANE};
-            case 20: case 21: return {6, UNITS};
-            case 40: case 41: case 42: return {7, CUTTER_COMP};
-            case 43: case 49: return {8, TOOL_OFFSET};
-            case 54: case 55: case 56: case 57: case 58: case 59: return {12, WCS};
-            case 61: case 64: return {13, PATH};
-            case 90: case 91: return {uint8_t(w.subcode == 0 ? 3 : 4), DISTANCE};
-            case 93: case 94: case 95: return {5, FEED_MODE};
-            case 98: case 99: return {10, RETRACT};
+            case 4: return {0, DWELL, 0};
+            case 10: return {0, NON_MODAL, AXIS_WORDS};
+            case 17: case 18: case 19: return {2, PLANE, 0};
+            case 20: case 21: return {6, UNITS, 0};
+            case 28: return {0, NON_MODAL, AXIS_WORDS};
+            case 30: return {0, NON_MODAL, uint8_t(AXIS_WORDS | NEEDS_HOMED)};
+            case 31: case 32: return {0, NON_MODAL, AXIS_WORDS};
+            case 40: case 41: case 42: return {7, CUTTER_COMP, 0};
+            case 43: case 49: return {8, TOOL_OFFSET, 0};
+            case 54: case 55: case 56: case 57: case 58: case 59: return {12, WCS, 0};
+            case 61: case 64: return {13, PATH, 0};
+            case 90: case 91: return {uint8_t(w.subcode == 0 ? 3 : 4), DISTANCE, 0};
+            case 92: return {0, NON_MODAL, uint8_t(w.subcode == 0 ? AXIS_WORDS : 0)};
+            case 93: case 94: case 95: return {5, FEED_MODE, 0};
+            case 98: case 99: return {10, RETRACT, 0};
         }
-        return {0, NON_MODAL};
+        return {0, NON_MODAL, 0};
     }
     switch(n) {
-        case 0: case 1: case 2: case 30: case 60: return {14, STOP};
-        case 6: return {15, TOOL_CHANGE};
-        case 3: case 4: case 5: return {16, SPINDLE};
-        case 7: case 8: case 9: return {0, COOLANT};
-        case 48: case 49: return {17, OTHER_M};
+        case 0: case 1: case 60: return {14, STOP, 0};
+        case 2: case 30: return {14, STOP, WHEN_HALTED};
+        case 6: return {15, TOOL_CHANGE, NEEDS_HOMED};
+        case 3: case 4: return {16, SPINDLE, 0};
+        case 5: return {16, SPINDLE, WHEN_HALTED};
+        case 7: case 8: return {0, COOLANT, 0};
+        case 9: return {0, COOLANT, WHEN_HALTED};
+        case 48: case 49: return {17, OTHER_M, 0};
+        case 80: case 81: case 105: case 106: case 107: case 114: case 119: case 503: case 911:
+            return {0, OTHER_M, WHEN_HALTED};
+        case 491: case 495: case 496: return {0, OTHER_M, NEEDS_HOMED};
     }
-    return {0, OTHER_M};
+    return {0, OTHER_M, 0};
 }
 
 // a mode setting: axis words next to it are a move in the modal motion (G90 X10), unlike settings M codes (M92 X80)
 static bool is_modal_setting(Class c) {
     return c.rank != DWELL && c.rank != NON_MODAL && c.rank != OTHER_M && c.rank != STOP && c.rank != TOOL_CHANGE && c.rank != MOTION;
+}
+
+Module *GcodeDispatch::handlers = nullptr;
+
+void GcodeDispatch::add_handler(Module *module)
+{
+    module->next_gcode_handler = handlers;
+    handlers = module;
 }
 
 void GcodeDispatch::init()
@@ -190,6 +193,46 @@ void GcodeDispatch::parameter_statement(const char *p, StreamOutput *stream)
     stream->printf("ok\r\n");
 }
 
+// M999 is the only way out of a halt, so it is handled before the alarm lock refuses everything else
+bool GcodeDispatch::allowed_while_halted(const gcode::Words &words, StreamOutput *stream)
+{
+    if(!THEKERNEL->is_halted()) return true;
+
+    for (const gcode::Word &w : words) {
+        if(w.letter == 'M' && w.value == 999) {
+            THEKERNEL->clear_halt();
+            stream->printf("WARNING: After HALT you should HOME as position is currently unknown\nok\n");
+            return false;
+        }
+    }
+    for (const gcode::Word &w : words) {
+        if(!is_command(w)) continue;
+        if(classify(w).flags & WHEN_HALTED) continue;
+        stream->printf("error:Alarm lock\n");
+        return false;
+    }
+    return true;
+}
+
+bool GcodeDispatch::homed_enough(const gcode::Words &words, StreamOutput *stream)
+{
+    for (const gcode::Word &w : words) {
+        if(w.letter == 'M' && (w.value == 887 || w.value == 888)) {
+            homed_check= (w.value == 887);
+            stream->printf("Homed check %s\nok\n", homed_check ? "enabled" : "disabled");
+            return false;
+        }
+        if(!homed_check || !is_command(w)) continue;
+        if((classify(w).flags & NEEDS_HOMED) && !THEROBOT.is_homed_all_axes()) {
+            stream->printf("error:Machine has not been homed, home first (M888 disables this check)\n");
+            THEKERNEL->set_halt_reason(NON_HOME);
+            THEKERNEL->call_event(ON_HALT, nullptr);
+            return false;
+        }
+    }
+    return true;
+}
+
 void GcodeDispatch::execute(const gcode::Words &words, const string &text, StreamOutput *stream, unsigned int line)
 {
     if(words.empty()) {
@@ -197,39 +240,8 @@ void GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
         return;
     }
 
-    if(THEKERNEL->is_halted()) {
-        for (const gcode::Word &w : words) {
-            if(w.letter == 'M' && w.value == 999) {
-                THEKERNEL->call_event(ON_HALT, (void *)1); // clears on_halt
-                stream->printf("WARNING: After HALT you should HOME as position is currently unknown\nok\n");
-                return;
-            }
-        }
-        bool allowed= false;
-        for (const gcode::Word &w : words) {
-            if(!is_command(w)) continue;
-            allowed= w.letter == 'M' && is_allowed_mcode(w.value);
-            if(!allowed) break;
-        }
-        if(!allowed) {
-            stream->printf("error:Alarm lock\n");
-            return;
-        }
-    }
-
-    for (const gcode::Word &w : words) {
-        if(w.letter == 'M' && (w.value == 887 || w.value == 888)) {
-            homed_check= (w.value == 887);
-            stream->printf("Homed check %s\nok\n", homed_check ? "enabled" : "disabled");
-            return;
-        }
-        if(homed_check && requires_homed(w) && !THEROBOT.is_homed_all_axes()) {
-            stream->printf("error:Machine has not been homed, home first (M888 disables this check)\n");
-            THEKERNEL->set_halt_reason(NON_HOME);
-            THEKERNEL->call_event(ON_HALT, nullptr);
-            return;
-        }
-    }
+    if(!allowed_while_halted(words, stream)) return;
+    if(!homed_enough(words, stream)) return;
 
     // A line holds one or more blocks: a repeated modal group, or a G53 after a motion word, starts
     // the next one (Smoothie lines like "G0 A90 G53 G0 Z-2"). Words belong to the block they appear in.
@@ -263,7 +275,7 @@ void GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
         }
         groups|= 1u << c.group;
         if(c.rank == MOTION) b->motion= true;
-        if(takes_axis_words(w)) b->axis_code= true;
+        if(c.flags & AXIS_WORDS) b->axis_code= true;
         if(!is_modal_setting(c)) b->settings_only= false;
         size_t pos= order.size();
         while(pos > 0 && (order[pos - 1].block > block_of[i] || (order[pos - 1].block == block_of[i] && order[pos - 1].rank > c.rank))) pos--;
@@ -330,7 +342,7 @@ void GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
             if(!internal && gcode.g == 80) modal_group_1= 0;
         }
 
-        THEKERNEL->call_event(ON_GCODE_RECEIVED, &gcode);
+        for (Module *m = handlers; m != nullptr; m = m->next_gcode_handler) m->on_gcode_received(&gcode);
 
         // a scripted code runs its sub after the modules have seen it, so their handlers still apply;
         // the ok follows when the sub is done, which is the last block of the line by rank

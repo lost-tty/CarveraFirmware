@@ -68,7 +68,7 @@ void ZProbe::on_module_loaded()
     // load settings
     this->config_load();
     // register event-handlers
-    register_for_event(ON_GCODE_RECEIVED);
+    GcodeDispatch::add_handler(this);
     register_for_event(ON_GET_PUBLIC_DATA);
 
     // we read the probe in this timer
@@ -268,9 +268,9 @@ bool ZProbe::doProbeAt(float &mm, float x, float y)
     return run_probe_return(mm, slow_feedrate);
 }
 
-void ZProbe::on_gcode_received(void *argument)
+void ZProbe::on_gcode_received(Gcode *argument)
 {
-    Gcode *gcode = static_cast<Gcode *>(argument);
+    Gcode *gcode = argument;
 
     if( gcode->has_g && gcode->g >= 29 && gcode->g <= 32) {
 

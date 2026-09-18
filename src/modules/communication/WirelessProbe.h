@@ -9,6 +9,7 @@
 #define SERIALCONSOLE_H
 
 #include "libs/Module.h"
+class Gcode;
 #include "Serial.h" // mbed.h lib
 #include "libs/Kernel.h"
 #include <vector>
@@ -22,13 +23,14 @@ using std::string;
 #define baud_rate2_setting_checksum CHECKSUM("baud_rate2")
 
 class WirelessProbe : public Module {
+
     public:
         void on_module_loaded();
         void on_serial_char_received();
         void on_main_loop(void * argument);
         void on_get_public_data(void *argument);
         void on_set_public_data(void *argument);
-        void on_gcode_received(void *argument);
+        void on_gcode_received(Gcode *argument);
 
         float wp_voltage;
         float min_voltage;

@@ -6,6 +6,7 @@
 #define _PID_AUTOTUNE_H
 
 #include <stdint.h>
+class Gcode;
 
 #include "Module.h"
 #include "SoftTimer.h"
@@ -14,6 +15,7 @@ class TemperatureControl;
 
 class PID_Autotuner : public Module
 {
+
 public:
     PID_Autotuner()
     : timer("PIDAutotuner", 50, true, this, &PID_Autotuner::on_tick),
@@ -29,7 +31,7 @@ public:
     void on_module_loaded(void);
     void on_tick();
     void on_idle(void *);
-    void on_gcode_received(void *);
+    void on_gcode_received(Gcode *);
 
 private:
     void begin(float, int );

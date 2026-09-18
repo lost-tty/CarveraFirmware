@@ -7,6 +7,7 @@
 
 #include "libs/Module.h"
 #include "libs/Kernel.h"
+#include "GcodeDispatch.h"
 #include "libs/SerialMessage.h"
 #include <math.h>
 #include "Switch.h"
@@ -74,7 +75,7 @@ void Switch::on_module_loaded()
 {
     this->switch_changed = false;
 
-    this->register_for_event(ON_GCODE_RECEIVED);
+    GcodeDispatch::add_handler(this);
     this->register_for_event(ON_MAIN_LOOP);
     this->register_for_event(ON_GET_PUBLIC_DATA);
     this->register_for_event(ON_SET_PUBLIC_DATA);
@@ -424,9 +425,9 @@ void Switch::turn_off_switch()
 
 }
 
-void Switch::on_gcode_received(void *argument)
+void Switch::on_gcode_received(Gcode *argument)
 {
-    Gcode *gcode = static_cast<Gcode *>(argument);
+    Gcode *gcode = argument;
     // Add the gcode to the queue ourselves if we need it
     if (!(match_input_on_gcode(gcode) || match_input_off_gcode(gcode))) {
         return;

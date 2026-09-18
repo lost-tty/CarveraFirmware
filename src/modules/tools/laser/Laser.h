@@ -8,6 +8,7 @@
 #pragma once
 
 #include "SimpleShell.h"
+class Gcode;
 
 #include <string>
 
@@ -25,6 +26,7 @@ class Pin;
 class Block;
 
 class Laser : public Module{
+
     public:
         Laser()
         : laser_power_timer("LaserPower", 1, true, this, &Laser::set_proportional_power)
@@ -32,7 +34,7 @@ class Laser : public Module{
 
         void on_module_loaded();
         void on_halt(void* argument);
-        void on_gcode_received(void *argument);
+        void on_gcode_received(Gcode *argument);
         static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
         static const SimpleShell::Sub<Laser> SUBS[];
         void sub_on(std::string args, StreamOutput *stream);

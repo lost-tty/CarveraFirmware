@@ -120,6 +120,7 @@ class Kernel {
 
         bool is_using_leds() const { return use_leds; }
         bool is_halted() const { return halted; }
+        void clear_halt() { call_event(ON_HALT, (void *)1); }
         bool is_ok_per_line() const { return ok_per_line; }
 
         void set_feed_hold(bool f) { feed_hold= f; }

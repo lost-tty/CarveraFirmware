@@ -1,5 +1,6 @@
 #include "PID_Autotuner.h"
 #include "Kernel.h"
+#include "GcodeDispatch.h"
 #include "Gcode.h"
 #include "TemperatureControl.h"
 #include "StreamOutput.h"
@@ -21,7 +22,7 @@ void PID_Autotuner::on_module_loaded()
     timer.start();
 
     register_for_event(ON_IDLE);
-    register_for_event(ON_GCODE_RECEIVED);
+    GcodeDispatch::add_handler(this);
 }
 
 void PID_Autotuner::begin(float target, int ncycles)
@@ -71,9 +72,9 @@ void PID_Autotuner::abort()
     lastInputs = NULL;
 }
 
-void PID_Autotuner::on_gcode_received(void *argument)
+void PID_Autotuner::on_gcode_received(Gcode *argument)
 {
-    Gcode *gcode = static_cast<Gcode *>(argument);
+    Gcode *gcode = argument;
 
     if(gcode->has_m) {
         if(gcode->m == 304) {

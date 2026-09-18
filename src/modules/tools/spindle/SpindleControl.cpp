@@ -15,10 +15,10 @@
 #include "SwitchPublicAccess.h"
 #include "ATCHandlerPublicAccess.h"
 
-void SpindleControl::on_gcode_received(void *argument) 
+void SpindleControl::on_gcode_received(Gcode *argument) 
 {
     
-    Gcode *gcode = static_cast<Gcode *>(argument);
+    Gcode *gcode = argument;
         
     if (gcode->has_m)
     {

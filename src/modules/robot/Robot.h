@@ -27,11 +27,12 @@ class StepperMotor;
 #define MAX_WCS 9UL
 
 class Robot : public Module {
+
     public:
         using wcs_t= std::tuple<float, float, float>;
         void init();
         void on_module_loaded();
-        void on_gcode_received(void* argument);
+        void on_gcode_received(Gcode *argument);
 
         void reset_axis_position(float position, int axis);
         void reset_axis_position(float x, float y, float z);

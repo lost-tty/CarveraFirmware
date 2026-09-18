@@ -25,9 +25,10 @@ class LevelingStrategy;
 class ZProbe: public Module
 {
 
+
 public:
     void on_module_loaded();
-    void on_gcode_received(void *argument);
+    void on_gcode_received(Gcode *argument);
 
     bool run_probe(float& mm, float feedrate, float max_dist= -1, bool reverse= false);
     bool run_probe_return(float& mm, float feedrate, float max_dist= -1, bool reverse= false);

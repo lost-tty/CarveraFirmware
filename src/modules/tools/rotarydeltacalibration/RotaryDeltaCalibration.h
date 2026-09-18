@@ -6,10 +6,11 @@ class Gcode;
 
 class RotaryDeltaCalibration : public Module
 {
+
 public:
     void on_module_loaded();
 
 private:
-    void on_gcode_received(void *argument);
+    void on_gcode_received(Gcode *argument);
     bool get_homing_offset(float*);
 };

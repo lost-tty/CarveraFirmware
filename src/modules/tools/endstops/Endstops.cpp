@@ -7,6 +7,7 @@
 
 #include "libs/Module.h"
 #include "libs/Kernel.h"
+#include "GcodeDispatch.h"
 #include "modules/communication/utils/Gcode.h"
 #include "modules/robot/Conveyor.h"
 #include "modules/robot/ActuatorCoordinates.h"
@@ -121,7 +122,7 @@ void Endstops::on_module_loaded()
         }
     }
 
-    register_for_event(ON_GCODE_RECEIVED);
+    GcodeDispatch::add_handler(this);
     register_for_event(ON_GET_PUBLIC_DATA);
     register_for_event(ON_SET_PUBLIC_DATA);
 
@@ -960,9 +961,9 @@ void Endstops::set_homing_offset(Gcode *gcode)
 
 
 // parse gcodes
-void Endstops::on_gcode_received(void *argument)
+void Endstops::on_gcode_received(Gcode *argument)
 {
-    Gcode *gcode = static_cast<Gcode *>(argument);
+    Gcode *gcode = argument;
     if ( gcode->has_g && gcode->g == 28) {
         switch(gcode->subcode) {
             case 0: // G28 in grbl mode will do a rapid to the predefined position otherwise it is home command

@@ -141,7 +141,7 @@ void Robot::init()
 //Called when the module has just been loaded
 void Robot::on_module_loaded()
 {
-    this->register_for_event(ON_GCODE_RECEIVED);
+    GcodeDispatch::add_handler(this);
 
     // Configuration
     this->load_config();
@@ -498,9 +498,9 @@ void Robot::check_max_actuator_speeds()
 
 //A GCode has been received
 //See if the current Gcode line has some orders for us
-void Robot::on_gcode_received(void *argument)
+void Robot::on_gcode_received(Gcode *argument)
 {
-    Gcode *gcode = static_cast<Gcode *>(argument);
+    Gcode *gcode = argument;
 
     enum MOTION_MODE_T motion_mode= NONE;
 

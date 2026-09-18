@@ -29,6 +29,7 @@ public:
 class GcodeDispatch : public Module
 {
 public:
+    static void add_handler(Module *module); // for a module that handles G or M codes
     void init();
 
     virtual void on_module_loaded();
@@ -42,12 +43,15 @@ public:
     void run_line(const std::string &line, StreamOutput *stream, bool internal);
 private:
     void dispatch(const SerialMessage &msg, bool mdi);
+    bool allowed_while_halted(const gcode::Words &words, StreamOutput *stream);
+    bool homed_enough(const gcode::Words &words, StreamOutput *stream);
     void execute(const gcode::Words &words, const std::string &text, StreamOutput *stream, unsigned int line);
     void parameter_statement(const char *p, StreamOutput *stream);
     void fail(StreamOutput *stream, const char *msg);
     void halt();
 
     Parameters params;
+    static Module *handlers;
     ScriptHook *scripts= nullptr;
     bool internal= false;
     uint8_t modal_group_1;

@@ -9,12 +9,14 @@
 #define TEMPERATURECONTROL_H
 
 #include "Module.h"
+class Gcode;
 #include "Pwm.h"
 #include "TempSensor.h"
 #include "TemperatureControlPublicAccess.h"
 #include "SoftTimer.h"
 
 class TemperatureControl : public Module {
+
 
     public:
         TemperatureControl(uint16_t name, int index)
@@ -33,7 +35,7 @@ class TemperatureControl : public Module {
 
         void on_module_loaded();
         void on_main_loop(void* argument);
-        void on_gcode_received(void* argument);
+        void on_gcode_received(Gcode *argument);
         void on_second_tick(void* argument);
         void on_get_public_data(void* argument);
         void on_set_public_data(void* argument);

@@ -7,6 +7,7 @@
 
 #include "libs/Module.h"
 #include "libs/Kernel.h"
+#include "GcodeDispatch.h"
 #include <math.h>
 #include "TemperatureControl.h"
 #include "TemperatureControlPool.h"
@@ -85,7 +86,7 @@ void TemperatureControl::on_module_loaded()
     this->load_config();
 
     // Register for events
-    this->register_for_event(ON_GCODE_RECEIVED);
+    GcodeDispatch::add_handler(this);
     this->register_for_event(ON_GET_PUBLIC_DATA);
     this->register_for_event(ON_IDLE);
     this->register_for_event(ON_SECOND_TICK);
@@ -227,9 +228,9 @@ void TemperatureControl::load_config()
     this->last_reading = 0.0;
 }
 
-void TemperatureControl::on_gcode_received(void *argument)
+void TemperatureControl::on_gcode_received(Gcode *argument)
 {
-    Gcode *gcode = static_cast<Gcode *>(argument);
+    Gcode *gcode = argument;
     if (gcode->has_m) {
 
         if( gcode->m == this->get_m_code ) {

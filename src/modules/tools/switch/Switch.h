@@ -22,6 +22,7 @@ namespace mbed {
 }
 
 class Switch : public Module {
+
     public:
         Switch(): Switch(0) {};
 
@@ -34,7 +35,7 @@ class Switch : public Module {
         void on_module_loaded();
         void on_main_loop(void *argument);
         void on_config_reload(void* argument);
-        void on_gcode_received(void* argument);
+        void on_gcode_received(Gcode *argument);
         void on_get_public_data(void* argument);
         void on_set_public_data(void* argument);
         void on_halt(void *arg);

@@ -10,16 +10,18 @@
 
 using namespace std;
 #include <vector>
+class Gcode;
 
 class Tool;
 
 class ToolManager : public Module
 {
+
 public:
     ToolManager();
 
     void on_module_loaded();
-    void on_gcode_received(void *);
+    void on_gcode_received(Gcode *);
     void on_get_public_data(void *argument);
     void on_set_public_data(void *argument);
     void add_tool(Tool *tool_to_add);

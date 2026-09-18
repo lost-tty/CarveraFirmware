@@ -48,7 +48,7 @@ void SCARAcal::on_module_loaded()
     // load settings
     this->on_config_reload(this);
     // register event-handlers
-    register_for_event(ON_GCODE_RECEIVED);
+    GcodeDispatch::add_handler(this);
 }
 
 void SCARAcal::on_config_reload(void *argument)
@@ -180,9 +180,9 @@ void SCARAcal::SCARA_ang_move(float theta, float psi, float z, float feedrate)
 
 //A GCode has been received
 //See if the current Gcode line has some orders for us
-void SCARAcal::on_gcode_received(void *argument)
+void SCARAcal::on_gcode_received(Gcode *argument)
 {
-    Gcode *gcode = static_cast<Gcode *>(argument);
+    Gcode *gcode = argument;
 
     if( gcode->has_m) {
         switch( gcode->m ) {

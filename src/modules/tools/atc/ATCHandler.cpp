@@ -8,6 +8,7 @@
 #include "ATCHandler.h"
 #include <cstring>
 #include "libs/Kernel.h"
+#include "GcodeDispatch.h"
 #include "PublicDataRequest.h"
 #include "Config.h"
 #include "StepperMotor.h"
@@ -80,7 +81,7 @@ void ATCHandler::on_module_loaded()
     detector_info.triggered = false;
 
 
-    this->register_for_event(ON_GCODE_RECEIVED);
+    GcodeDispatch::add_handler(this);
     this->register_for_event(ON_GET_PUBLIC_DATA);
     this->register_for_event(ON_SET_PUBLIC_DATA);
     this->register_for_event(ON_HALT);
@@ -353,9 +354,9 @@ static void halt(int reason, const char *msg)
     printk("ERROR: %s\n", msg);
 }
 
-void ATCHandler::on_gcode_received(void *argument)
+void ATCHandler::on_gcode_received(Gcode *argument)
 {
-    Gcode *gcode = static_cast<Gcode*>(argument);
+    Gcode *gcode = argument;
     if (!gcode->has_m) return;
     uint8_t sub = gcode->subcode;
 

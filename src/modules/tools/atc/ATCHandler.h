@@ -3,6 +3,7 @@
 
 using namespace std;
 #include "Module.h"
+class Gcode;
 #include "Pin.h"
 
 #include "SoftTimer.h"
@@ -10,6 +11,7 @@ using namespace std;
 
 class ATCHandler : public Module
 {
+
 public:
     ATCHandler()
     : probe_laser_timer("ProbeLaserCountdown", 1000, true, this, &ATCHandler::countdown_probe_laser),
@@ -18,7 +20,7 @@ public:
     {}
 
     void on_module_loaded();
-    void on_gcode_received(void *argument);
+    void on_gcode_received(Gcode *argument);
     void on_get_public_data(void *argument);
     void on_set_public_data(void *argument);
     void on_halt(void *argument);

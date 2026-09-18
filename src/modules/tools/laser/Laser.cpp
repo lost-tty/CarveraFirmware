@@ -8,6 +8,7 @@
 #include "Laser.h"
 #include "Module.h"
 #include "Kernel.h"
+#include "GcodeDispatch.h"
 #include "SimpleShell.h"
 #include "nuts_bolts.h"
 #include "Config.h"
@@ -104,7 +105,7 @@ void Laser::on_module_loaded()
 
     //register for events
     this->register_for_event(ON_HALT);
-    this->register_for_event(ON_GCODE_RECEIVED);
+    GcodeDispatch::add_handler(this);
     this->register_for_event(ON_GET_PUBLIC_DATA);
     SimpleShell::add_command(shell_slot, "laser", &Laser::shell, this, "laser on|off|status|test - laser mode");
 
@@ -178,9 +179,9 @@ void Laser::on_get_public_data(void* argument)
 }
 
 
-void Laser::on_gcode_received(void *argument)
+void Laser::on_gcode_received(Gcode *argument)
 {
-    Gcode *gcode = static_cast<Gcode *>(argument);
+    Gcode *gcode = argument;
 
     // M codes execute immediately
     if (gcode->has_m) {

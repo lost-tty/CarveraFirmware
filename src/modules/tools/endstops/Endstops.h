@@ -20,13 +20,14 @@ class Gcode;
 class Pin;
 
 class Endstops : public Module{
+
     public:
         Endstops()
         : read_endstops_timer("Endstops", 1, true, this, &Endstops::read_endstops)
         {}
 
         void on_module_loaded();
-        void on_gcode_received(void* argument);
+        void on_gcode_received(Gcode *argument);
 
     private:
         bool load_old_config();

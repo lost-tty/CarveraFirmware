@@ -7,6 +7,7 @@
 
 #include "libs/Module.h"
 #include "libs/Kernel.h"
+#include "GcodeDispatch.h"
 #include "ToolManager.h"
 #include "Tool.h"
 #include "PublicDataRequest.h"
@@ -34,14 +35,14 @@ ToolManager::ToolManager()
 void ToolManager::on_module_loaded()
 {
 
-    this->register_for_event(ON_GCODE_RECEIVED);
+    GcodeDispatch::add_handler(this);
     this->register_for_event(ON_GET_PUBLIC_DATA);
     this->register_for_event(ON_SET_PUBLIC_DATA);
 }
 
-void ToolManager::on_gcode_received(void *argument)
+void ToolManager::on_gcode_received(Gcode *argument)
 {
-    Gcode *gcode = static_cast<Gcode*>(argument);
+    Gcode *gcode = argument;
 
     if( gcode->has_letter('T') ) {
         int new_tool = gcode->get_value('T');

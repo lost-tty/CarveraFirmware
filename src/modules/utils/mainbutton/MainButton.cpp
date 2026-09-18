@@ -283,7 +283,7 @@ void MainButton::on_idle(void *argument)
         				system_reset(false);
     				} else {
     					// unlock
-    		            THEKERNEL->call_event(ON_HALT, (void *)1); // clears on_halt
+    		            THEKERNEL->clear_halt();
     		            printk("UnKill button pressed, Halt cleared\r\n");
     				}
     				break;

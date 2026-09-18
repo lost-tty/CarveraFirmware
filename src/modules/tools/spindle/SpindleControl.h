@@ -9,6 +9,7 @@
 #define SPINDLE_CONTROL_MODULE_H
 
 #include "libs/Module.h"
+class Gcode;
 
 class SpindleControl: public Module {
     public:
@@ -20,7 +21,7 @@ class SpindleControl: public Module {
         bool spindle_on;
 
     private:
-        void on_gcode_received(void *argument);
+        void on_gcode_received(Gcode *argument);
         void on_halt(void *argument);
         
         virtual void turn_on(void) {};

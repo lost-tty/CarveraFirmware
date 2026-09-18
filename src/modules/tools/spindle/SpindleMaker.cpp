@@ -6,6 +6,7 @@
 */
 
 #include "SpindleMaker.h"
+#include "GcodeDispatch.h"
 #include "libs/Module.h"
 #include "libs/Kernel.h"
 #include "SpindleControl.h"
@@ -57,7 +58,7 @@ void SpindleMaker::load_spindle(){
     // Add the spindle if we successfully initialized one
     if( spindle != NULL) {
 
-        spindle->register_for_event(ON_GCODE_RECEIVED);
+        GcodeDispatch::add_handler(spindle);
         spindle->register_for_event(ON_GET_PUBLIC_DATA);
         spindle->register_for_event(ON_SET_PUBLIC_DATA);
         spindle->register_for_event(ON_IDLE);

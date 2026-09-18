@@ -9,6 +9,7 @@
 #pragma once
 
 #include "Module.h"
+class Gcode;
 #include "GcodeFile.h"
 #include "Source.h"
 #include "SimpleShell.h"
@@ -27,13 +28,14 @@ class StreamOutput;
 
 // Job control: plays a file as the bottom source of the stack and feeds the stack from its main loop.
 class Player : public Module, public Source {
+
     public:
         void on_module_loaded();
         static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
         void on_main_loop( void* argument );
         void on_get_public_data(void* argument);
         void on_set_public_data(void* argument);
-        void on_gcode_received(void *argument);
+        void on_gcode_received(Gcode *argument);
         void on_halt(void *argument);
         Source::Result next(SerialMessage &msg) override;
         void abort() override;
