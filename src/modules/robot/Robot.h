@@ -64,6 +64,7 @@ class Robot : public Module {
         std::tuple<float, float, float, uint8_t> get_last_probe_position() const { return last_probe_position; }
         void set_last_probe_position(std::tuple<float, float, float, uint8_t> p) { last_probe_position = p; }
         bool delta_move(const float delta[], float rate_mm_s, uint8_t naxis);
+        bool delta_move_sync(const float delta[], float rate_mm_s, uint8_t naxis);
         uint8_t register_motor(StepperMotor*);
         uint8_t get_number_registered_motors() const {return n_motors; }
         uint8_t get_current_motion_mode() const {return current_motion_mode; }

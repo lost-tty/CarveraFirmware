@@ -214,25 +214,14 @@ bool ATCHandler::laser_detect() {
     detecting = true;
     detector_info.triggered = false;
 
-	float delta[Y_AXIS + 1];
-	for (size_t i = 0; i <= Y_AXIS; i++) delta[i] = 0;
-	delta[Y_AXIS]= detector_info.detect_travel / 2;
-	THEROBOT.delta_move(delta, detector_info.detect_rate, Y_AXIS + 1);
-	// wait for it
-	THECONVEYOR.wait_for_idle();
-	if(THEKERNEL->is_halted()) return false;
-
-	delta[Y_AXIS]= 0 - detector_info.detect_travel;
-	THEROBOT.delta_move(delta, detector_info.detect_rate, Y_AXIS + 1);
-	// wait for it
-	THECONVEYOR.wait_for_idle();
-	if(THEKERNEL->is_halted()) return false;
-
-	delta[Y_AXIS]= detector_info.detect_travel / 2;
-	THEROBOT.delta_move(delta, detector_info.detect_rate, Y_AXIS + 1);
-	// wait for it
-	THECONVEYOR.wait_for_idle();
-	if(THEKERNEL->is_halted()) return false;
+	float delta[Y_AXIS + 1] = {0};
+	float half = detector_info.detect_travel / 2;
+	delta[Y_AXIS] = half;
+	if(!THEROBOT.delta_move_sync(delta, detector_info.detect_rate, Y_AXIS + 1)) return false;
+	delta[Y_AXIS] = -detector_info.detect_travel;
+	if(!THEROBOT.delta_move_sync(delta, detector_info.detect_rate, Y_AXIS + 1)) return false;
+	delta[Y_AXIS] = half;
+	if(!THEROBOT.delta_move_sync(delta, detector_info.detect_rate, Y_AXIS + 1)) return false;
 
 
 	detecting = false;
@@ -278,15 +267,11 @@ void ATCHandler::home_clamp()
     atc_homing = true;
 
     // home atc
-	float delta[ATC_AXIS + 1];
-	for (size_t i = 0; i <= ATC_AXIS; i++) delta[i] = 0;
-	delta[ATC_AXIS]= atc_home_info.max_travel; // we go the max
-	THEROBOT.delta_move(delta, atc_home_info.homing_rate, ATC_AXIS + 1);
-	// wait for it
-	THECONVEYOR.wait_for_idle();
-	if(THEKERNEL->is_halted()) return;
-
+	float delta[ATC_AXIS + 1] = {0};
+	delta[ATC_AXIS] = atc_home_info.max_travel; // we go the max
+	bool moved = THEROBOT.delta_move_sync(delta, atc_home_info.homing_rate, ATC_AXIS + 1);
 	atc_homing = false;
+	if(!moved) return;
 
     if (!atc_home_info.triggered) {
         THEKERNEL->call_event(ON_HALT, nullptr);
@@ -298,12 +283,8 @@ void ATCHandler::home_clamp()
     }
 
     // Move back
-	for (size_t i = 0; i <= ATC_AXIS; i++) delta[i] = 0;
 	delta[ATC_AXIS] = -atc_home_info.retract; // we go to retract position
-	THEROBOT.delta_move(delta, atc_home_info.homing_rate, ATC_AXIS + 1);
-	// wait for it
-	THECONVEYOR.wait_for_idle();
-	if(THEKERNEL->is_halted()) return;
+	if(!THEROBOT.delta_move_sync(delta, atc_home_info.homing_rate, ATC_AXIS + 1)) return;
 
 	atc_home_info.clamp_status = CLAMPED;
 	printk("ATC homed!\r\n");
@@ -321,16 +302,11 @@ void ATCHandler::clamp_tool()
 		return;
 	}
 
-    // First wait for the queue to be empty
-    THECONVEYOR.wait_for_idle();
+	THECONVEYOR.wait_for_idle(); // the spindle must have stopped moving before the clamp acts
 
-	float delta[ATC_AXIS + 1];
-	for (size_t i = 0; i <= ATC_AXIS; i++) delta[i] = 0;
-	delta[4] = atc_home_info.action_dist;
-	THEROBOT.delta_move(delta, atc_home_info.homing_rate, ATC_AXIS + 1);
-	// wait for it
-	THECONVEYOR.wait_for_idle();
-	if(THEKERNEL->is_halted()) return;
+	float delta[ATC_AXIS + 1] = {0};
+	delta[ATC_AXIS] = atc_home_info.action_dist;
+	if(!THEROBOT.delta_move_sync(delta, atc_home_info.homing_rate, ATC_AXIS + 1)) return;
 
 	// change clamp status
 	atc_home_info.clamp_status = CLAMPED;
@@ -347,16 +323,11 @@ void ATCHandler::loose_tool()
 		home_clamp();
 	}
 
-	// First wait for the queue to be empty
-    THECONVEYOR.wait_for_idle();
+	THECONVEYOR.wait_for_idle(); // the spindle must have stopped moving before the clamp acts
 
-	float delta[ATC_AXIS + 1];
-	for (size_t i = 0; i <= ATC_AXIS; i++) delta[i] = 0;
-	delta[4] = -atc_home_info.action_dist;
-	THEROBOT.delta_move(delta, atc_home_info.action_rate, ATC_AXIS + 1);
-	// wait for it
-	THECONVEYOR.wait_for_idle();
-	if(THEKERNEL->is_halted()) return;
+	float delta[ATC_AXIS + 1] = {0};
+	delta[ATC_AXIS] = -atc_home_info.action_dist;
+	if(!THEROBOT.delta_move_sync(delta, atc_home_info.action_rate, ATC_AXIS + 1)) return;
 
 	// change clamp status
 	atc_home_info.clamp_status = LOOSED;

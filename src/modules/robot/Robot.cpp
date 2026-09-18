@@ -1681,6 +1681,14 @@ bool Robot::delta_move(const float *delta, float rate_mm_s, uint8_t naxis)
     return false;
 }
 
+// plan the move and return once the machine stands still, so the caller can read or switch hardware
+bool Robot::delta_move_sync(const float *delta, float rate_mm_s, uint8_t naxis)
+{
+    if(!delta_move(delta, rate_mm_s, naxis)) return false;
+    THECONVEYOR.wait_for_idle();
+    return !THEKERNEL->is_halted();
+}
+
 // Append a move to the queue ( cutting it into segments if needed )
 bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s, float delta_e)
 {
