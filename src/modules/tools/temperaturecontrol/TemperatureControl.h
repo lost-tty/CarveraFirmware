@@ -47,7 +47,6 @@ class TemperatureControl : public Module {
         float get_temperature();
 
 
-        friend class PID_Autotuner;
 
     private:
         void load_config();

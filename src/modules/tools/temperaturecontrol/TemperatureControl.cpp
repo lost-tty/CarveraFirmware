@@ -22,22 +22,17 @@
 #include "checksumm.h"
 #include "Gcode.h"
 #include "ConfigValue.h"
-#include "PID_Autotuner.h"
 #include "SerialMessage.h"
 #include "utils.h"
 #include "StreamOutput.h"
 
 // Temp sensor implementations:
 #include "Thermistor.h"
-#include "max31855.h"
-#include "AD8495.h"
-#include "PT100_E3D.h"
 
 #include "MRI_Hooks.h"
 
 #define UNDEFINED -1
 
-#define sensor_checksum                    CHECKSUM("sensor")
 
 #define readings_per_second_checksum       CHECKSUM("readings_per_second")
 #define max_pwm_checksum                   CHECKSUM("max_pwm")
@@ -166,23 +161,8 @@ void TemperatureControl::load_config()
         this->readonly= true;
     }
 
-    // For backward compatibility, default to a thermistor sensor.
-    std::string sensor_type = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, sensor_checksum)->by_default("thermistor")->as_string();
-
-    // Instantiate correct sensor (TBD: TempSensor factory?)
     delete sensor;
-    sensor = nullptr; // In case we fail to create a new sensor.
-    if(sensor_type.compare("thermistor") == 0) {
-        sensor = new Thermistor();
-    } else if(sensor_type.compare("max31855") == 0) {
-        sensor = new Max31855();
-    } else if(sensor_type.compare("ad8495") == 0) {
-        sensor = new AD8495();
-    } else if(sensor_type.compare("pt100_e3d") == 0) {
-        sensor = new PT100_E3D();
-    } else {
-        sensor = new TempSensor(); // A dummy implementation
-    }
+    sensor = new Thermistor();
     sensor->UpdateConfig(temperature_control_checksum, this->name_checksum);
 
     this->preset1 = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, preset1_checksum)->by_default(0)->as_number();

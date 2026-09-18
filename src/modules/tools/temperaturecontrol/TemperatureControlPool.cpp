@@ -12,7 +12,6 @@ using namespace std;
 #include <vector>
 #include "TemperatureControlPool.h"
 #include "TemperatureControl.h"
-#include "PID_Autotuner.h"
 #include "Config.h"
 #include "checksumm.h"
 #include "ConfigValue.h"
@@ -31,11 +30,5 @@ void TemperatureControlPool::load_tools()
             TemperatureControl *controller = new TemperatureControl(cs, cnt++);
             THEKERNEL->add_module(controller);
         }
-    }
-
-    // no need to create one of these if no heaters defined
-    if(cnt > 0) {
-        PID_Autotuner *pidtuner = new PID_Autotuner();
-        THEKERNEL->add_module( pidtuner );
     }
 }
