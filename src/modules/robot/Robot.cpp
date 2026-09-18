@@ -122,6 +122,7 @@ void Robot::init()
 {
     this->inch_mode = false;
     this->absolute_mode = true;
+    this->absolute_arc_centre = false;
     this->select_plane(X_AXIS, Y_AXIS, Z_AXIS);
     memset(this->machine_position, 0, sizeof machine_position);
     memset(this->compensated_machine_position, 0, sizeof compensated_machine_position);
@@ -226,8 +227,10 @@ void Robot::load_config()
     }
 
     // default s value for laser
+    this->max_s_value = THEKERNEL->config->value(laser_module_maximum_s_value_checksum)->by_default(1.0f)->as_number();
+    if(this->max_s_value <= 0.0F) this->max_s_value = 1.0F;
     this->s_value = THEKERNEL->config->value(laser_module_default_power_checksum)->by_default(0.8F)->as_number()
-    					* THEKERNEL->config->value(laser_module_maximum_s_value_checksum)->by_default(1.0f)->as_number();
+    					* this->max_s_value;
 
     // 2024
     /*
@@ -511,7 +514,7 @@ void Robot::on_gcode_received(void *argument)
                 uint32_t delay_ms = 0;
                 if (gcode->has_letter('P')) {
                     float f= gcode->get_value('P');
-                    delay_ms= f * 1000.0F;
+                    if(f > 0.0F) delay_ms= f * 1000.0F;
                 }
                 if (delay_ms > 0) {
                     // drain queue
@@ -535,9 +538,11 @@ void Robot::on_gcode_received(void *argument)
                         	this->clearToolOffset();
                         }
                         if(gcode->get_int('L') == 20) {
-                            // this makes the current machine position (less compensation transform) the offset
-                            // get current position in WCS
-                            wcs_t pos= mcs2wcs(machine_position);
+                            // the offset is measured in the WCS being written, which is not always the active one
+                            wcs_t pos= std::make_tuple(
+                                machine_position[X_AXIS] - x + std::get<X_AXIS>(g92_offset) - std::get<X_AXIS>(tool_offset),
+                                machine_position[Y_AXIS] - y + std::get<Y_AXIS>(g92_offset) - std::get<Y_AXIS>(tool_offset),
+                                machine_position[Z_AXIS] - z + std::get<Z_AXIS>(g92_offset) - std::get<Z_AXIS>(tool_offset));
 
                             if(gcode->has_letter('X')){
                                 x -= to_millimeters(gcode->get_value('X')) - std::get<X_AXIS>(pos);
@@ -594,8 +599,8 @@ void Robot::on_gcode_received(void *argument)
                 }
                 break;
 
-            case 90: if (gcode->subcode == 0) this->absolute_mode = true; break;  // G90.1 is arc center mode, not handled
-            case 91: if (gcode->subcode == 0) this->absolute_mode = false; break;
+            case 90: if(gcode->subcode == 0) this->absolute_mode = true; else if(gcode->subcode == 1) this->absolute_arc_centre = true; break;
+            case 91: if(gcode->subcode == 0) this->absolute_mode = false; else if(gcode->subcode == 1) this->absolute_arc_centre = false; break;
 
             case 92: {
                 if(gcode->subcode == 1 || gcode->subcode == 2 || gcode->get_num_args() == 0) {
@@ -610,6 +615,7 @@ void Robot::on_gcode_received(void *argument)
                     if(gcode->has_letter('Z')){ THEROBOT.reset_axis_position(gcode->get_value('Z'), Z_AXIS); }
 
                     if(gcode->has_letter('A')){
+                    	THECONVEYOR.wait_for_idle(); // the actuator position below is only valid once the queue has drained
                     	if (gcode->has_letter('S')) {
                     		// shrink A value
                     		float ma = actuators[A_AXIS]->get_current_position();
@@ -628,7 +634,7 @@ void Robot::on_gcode_received(void *argument)
                     		float delta[A_AXIS+1];
                     		for (size_t j = 0; j <= A_AXIS; ++j) delta[j]= 0;
                     		delta[A_AXIS]= mb - ma; // we go the max
-                    		THEROBOT.delta_move(delta, this->seek_rate, A_AXIS+1);
+                    		THEROBOT.delta_move(delta, this->seek_rate / seconds_per_minute, A_AXIS+1);
                     		// wait for A moving
         					THECONVEYOR.wait_for_idle();
                     		// third
@@ -1114,6 +1120,7 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
     for(char letter = 'I'; letter <= 'K'; letter++) {
         if( gcode->has_letter(letter) ) {
             offset[letter - 'I'] = this->to_millimeters(gcode->get_value(letter));
+            if(absolute_arc_centre) offset[letter - 'I'] -= arc_milestone[letter - 'I'];
         }
     }
 
@@ -1191,11 +1198,6 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
     	s_value = gcode->get_value('S');
     }
 
-    // S is modal When specified on a G0/1/2/3 command
-    if(gcode->has_letter('S')) {
-    	s_value = gcode->get_value('S');
-    }
-
     /*
 	s_count = 1;
 	int index = gcode->index_of_letter('S');
@@ -1269,6 +1271,11 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
         case CW_ARC:
         case CCW_ARC:
             // Note arcs are not currently supported by extruder based machines, as 3D slicers do not use arcs (G2/G3)
+            if(gcode->has_letter('R') && !arc_radius_to_offset(gcode, target, motion_mode, offset)) {
+                gcode->is_error= true;
+                gcode->txt_after_ok= "arc radius too small for the endpoints";
+                return;
+            }
             moved = this->compute_arc(gcode, offset, target, motion_mode);
             break;
     }
@@ -1280,6 +1287,26 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
         // set machine_position to the calculated target
         memcpy(machine_position, target, n_motors * sizeof(float));
     }
+}
+
+// R > 0 takes the short arc, R < 0 the long one
+bool Robot::arc_radius_to_offset(Gcode *gcode, const float target[], MOTION_MODE_T mode, float offset[3])
+{
+    float r= this->to_millimeters(gcode->get_value('R'));
+    float dx= target[plane_axis_0] - arc_milestone[plane_axis_0];
+    float dy= target[plane_axis_1] - arc_milestone[plane_axis_1];
+    float chord2= dx * dx + dy * dy;
+    if(chord2 == 0.0F) return false; // a full circle needs I/J, R cannot say which one
+
+    float h2= r * r - chord2 / 4.0F;
+    if(h2 < 0.0F) return false;
+    float h= sqrtf(h2) / sqrtf(chord2);
+    // the perpendicular points left of the chord; CW with R > 0 and CCW with R < 0 take the other side
+    if((mode == CW_ARC) == (r > 0.0F)) h= -h;
+    offset[plane_axis_0]= dx / 2.0F - dy * h;
+    offset[plane_axis_1]= dy / 2.0F + dx * h;
+    offset[plane_axis_2]= 0.0F;
+    return true;
 }
 
 // reset the machine position for all axis. Used for homing.

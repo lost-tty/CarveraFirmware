@@ -25,6 +25,8 @@
 #include "FileStream.h"
 #include "checksumm.h"
 #include "PublicData.h"
+#include "ScriptsPublicAccess.h"
+#include "Source.h"
 #include "Gcode.h"
 #include "Robot.h"
 #include "ToolManagerPublicAccess.h"
@@ -326,6 +328,10 @@ void SimpleShell::remount_command( string parameters, StreamOutput *stream )
 // Delete a file
 void SimpleShell::rm_command( string parameters, StreamOutput *stream )
 {
+    if(sources.active()) {
+        stream->printf("error:busy, a job or script is running\r\n");
+        return;
+    }
     string path = absolute_from_relative(shift_parameter( parameters ));
     string md5_path = change_to_md5_path(path);
     string lz_path = change_to_lz_path(path);
@@ -338,6 +344,7 @@ void SimpleShell::rm_command( string parameters, StreamOutput *stream )
     } else {
     	remove(absolute_from_relative(md5_path).c_str());
     	remove(absolute_from_relative(lz_path).c_str());
+    	PublicData::set_value(scripts_checksum, file_changed_checksum, (void *)toRemove.c_str());
     	stream->send(Frame::LOAD_FINISH, "ok\r\n", 4);
     }
 }
@@ -345,6 +352,10 @@ void SimpleShell::rm_command( string parameters, StreamOutput *stream )
 // Rename a file
 void SimpleShell::mv_command( string parameters, StreamOutput *stream )
 {
+    if(sources.active()) {
+        stream->printf("error:busy, a job or script is running\r\n");
+        return;
+    }
     string from = absolute_from_relative(shift_parameter( parameters ));
     string md5_from = change_to_md5_path(from);
     string lz_from = change_to_lz_path(from);
@@ -359,6 +370,8 @@ void SimpleShell::mv_command( string parameters, StreamOutput *stream )
     } else  {
     	rename(md5_from.c_str(), md5_to.c_str());
         rename(lz_from.c_str(), lz_to.c_str());
+        PublicData::set_value(scripts_checksum, file_changed_checksum, (void *)from.c_str());
+        PublicData::set_value(scripts_checksum, file_changed_checksum, (void *)to.c_str());
         stream->send(Frame::LOAD_FINISH, "ok\r\n", 4);
 		stream->printf("renamed %s to %s\r\n", from.c_str(), to.c_str());
     }

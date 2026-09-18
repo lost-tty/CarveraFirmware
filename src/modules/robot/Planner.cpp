@@ -97,7 +97,8 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
 
     // info needed by laser
     // 2024
-    block->s_value = roundf(s_value*(1<<11)); // 1.11 fixed point
+    float power = s_value / THEROBOT.get_max_s_value();
+    block->s_value = roundf((power < 0.0F ? 0.0F : power > 1.0F ? 1.0F : power) * (1 << 11));
     block->is_g123 = g123;
 
     /*

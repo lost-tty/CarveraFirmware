@@ -6,6 +6,8 @@
 #include "utils.h"
 #include "mbed.h"
 #include "PublicData.h"
+#include "ScriptsPublicAccess.h"
+#include "Source.h"
 #include "ATCHandlerPublicAccess.h"
 #include "md5.h"
 #include <cstring>
@@ -107,6 +109,10 @@ void FileTransfer::set_serial_rx_irq(bool enable)
 
 bool FileTransfer::upload(const std::string& filename, StreamOutput* stream)
 {
+    if (sources.active()) {
+        stream->printf("error:busy, a job or script is running\r\n");
+        return false;
+    }
     enum { WAIT_MD5, WAIT_VIEW, DATA } state = WAIT_MD5;
     uint32_t total_packets = 0, seq = 1, file_size = 0;
     int retries = 0;
@@ -291,6 +297,7 @@ done:
         string dest = filename.substr(0, filename.find(".lz"));
         ok = decompress(datafile, dest, file_size, stream);
     }
+    if (ok) PublicData::set_value(scripts_checksum, file_changed_checksum, (void *)filename.c_str());
     return ok;
 }
 

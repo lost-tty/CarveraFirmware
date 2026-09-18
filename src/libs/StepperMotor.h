@@ -74,10 +74,11 @@ class StepperMotor  : public Module {
         int32_t last_milestone_steps;
         float   last_milestone_mm;
 
-        volatile struct {
+        volatile bool direction;
+        volatile bool moving;
+
+        struct {
             uint8_t motor_id:8;
-            volatile bool direction:1;
-            volatile bool moving:1;
             bool selected:1;
             bool extruder:1;
         };

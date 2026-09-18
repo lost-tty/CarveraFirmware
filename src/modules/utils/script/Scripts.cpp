@@ -44,7 +44,7 @@ void Scripts::on_module_loaded()
     load(&THEKERNEL->streams);
 }
 
-#define SD_DIR "/sd/macros/"
+#define SD_DIR SCRIPTS_DIR
 
 bool Scripts::load(StreamOutput *stream)
 {
@@ -202,7 +202,18 @@ void Scripts::abort()
 void Scripts::on_set_public_data(void *argument)
 {
     PublicDataRequest *pdr= static_cast<PublicDataRequest *>(argument);
-    if(!pdr->starts_with(scripts_checksum) || !pdr->second_element_is(run_script_checksum)) return;
+    if(!pdr->starts_with(scripts_checksum)) return;
+
+    if(pdr->second_element_is(file_changed_checksum)) {
+        const char *path= static_cast<const char *>(pdr->get_data_ptr());
+        if(path == nullptr || strncmp(path, SD_DIR, sizeof(SD_DIR) - 1) != 0) return;
+        loaded= false;
+        load(&THEKERNEL->streams);
+        pdr->set_taken();
+        return;
+    }
+
+    if(!pdr->second_element_is(run_script_checksum)) return;
     const script_call *c= static_cast<const script_call *>(pdr->get_data_ptr());
     if(!loaded || macros.program().find_sub(c->sub) < 0) return;
     std::string err;

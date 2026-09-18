@@ -45,6 +45,7 @@ class Robot : public Module {
         float get_feed_rate() const;
         float get_s_value() const { return s_value; }
         void set_s_value(float s) { s_value= s; }
+        float get_max_s_value() const { return max_s_value; }
         float get_max_delta() const { return max_delta; }
         void set_max_delta(float delta) {max_delta = delta; }
         void  push_state();
@@ -87,6 +88,7 @@ class Robot : public Module {
         struct {
             bool inch_mode:1;                                 // true for inch mode, false for millimeter mode ( default )
             bool absolute_mode:1;                             // true for absolute mode ( default ), false for relative mode
+            bool absolute_arc_centre:1;                       // G90.1: I/J/K are centre coordinates, not offsets
             bool next_command_is_MCS:1;                       // set by G53
             bool disable_segmentation:1;                      // set to disable segmentation
             bool disable_arm_solution:1;                      // set to disable the arm solution
@@ -114,6 +116,7 @@ class Robot : public Module {
         bool append_milestone(const float target[], float rate_mm_s, unsigned int line);
         bool append_line( Gcode* gcode, const float target[], float rate_mm_s, float delta_e);
         bool append_arc( Gcode* gcode, const float target[], const float offset[], float radius, bool is_clockwise );
+        bool arc_radius_to_offset(Gcode *gcode, const float target[], MOTION_MODE_T mode, float offset[3]);
         bool compute_arc(Gcode* gcode, const float offset[], const float target[], enum MOTION_MODE_T motion_mode);
         void process_move(Gcode *gcode, enum MOTION_MODE_T);
         bool is_homed(uint8_t i) const;
@@ -146,6 +149,7 @@ class Robot : public Module {
         float seconds_per_minute;                            // for realtime speed change
         float default_acceleration;                          // the defualt accleration if not set for each axis
         float s_value;                                       // modal S value
+        float max_s_value;                                   // S that means full power, laser_module_maximum_s_value
         // 2024
         /*
         float s_values[8];                                   // block S values

@@ -272,7 +272,7 @@ bool Laser::get_laser_power(float& power) const
     // as this is an interrupt if that flag is not clear then it cannot be cleared while this is running and the block will still be valid (albeit it may have finished)
     if (block != nullptr && block->is_ready && block->is_g123) {
     	// 2024
-        float requested_power = (float)block->s_value / (1 << 11) / this->laser_maximum_s_value; // s_value is 1.11 Fixed point
+        float requested_power = (float)block->s_value / (1 << 11);
         float ratio = current_speed_ratio(block);
         power = requested_power * ratio * scale;
         return true;
