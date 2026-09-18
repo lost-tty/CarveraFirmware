@@ -54,7 +54,7 @@ class Pin {
             return this->inverting ^ (( this->port->FIOPIN >> this->pin ) & 1);
         }
 
-        inline void set(bool value)
+        __attribute__((always_inline)) inline void set(bool value)
         {
             if (!this->valid) return;
             if ( this->inverting ^ value )

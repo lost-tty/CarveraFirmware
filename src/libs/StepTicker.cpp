@@ -48,7 +48,7 @@ void StepTicker::init()
     this->set_frequency(100000);
     this->set_unstep_time(100);
 
-    this->unstep.reset();
+    this->unstep = 0;
     this->num_motors = 0;
 
     this->running = false;
@@ -94,12 +94,11 @@ void StepTicker::set_unstep_time( float microseconds )
 // Reset step pins on any motor that was stepped
 void StepTicker::unstep_tick()
 {
-    for (int i = 0; i < num_motors; i++) {
-        if(this->unstep[i]) {
-            this->motor[i]->unstep();
-        }
+    uint32_t bits = this->unstep;
+    this->unstep = 0;
+    for (uint8_t i = 0; bits != 0; i++, bits >>= 1) {
+        if(bits & 1) this->motor[i]->unstep();
     }
-    this->unstep.reset();
 }
 
 // The actual interrupt handler where we do all the work
@@ -180,7 +179,7 @@ void StepTicker::step_tick (void)
             // step the motor
             bool ismoving= motor[m]->step(); // returns false if the moving flag was set to false externally (probes, endstops etc)
             // we stepped so schedule an unstep
-            unstep.set(m);
+            unstep |= 1 << m;
 
             if(!ismoving || state[m].step_count == state[m].steps_to_move) {
                 // done
@@ -200,7 +199,7 @@ void StepTicker::step_tick (void)
     // Note there could be a race here if we run another tick before the unsteps have happened,
     // right now it takes about 3-4us but if the unstep were near 10uS or greater it would be an issue
     // also it takes at least 2us to get here so even when set to 1us pulse width it will still be about 3us
-    if( unstep.any()) {
+    if(unstep != 0) {
         LPC_TIM1->TCR = 3;
         LPC_TIM1->TCR = 1;
     }

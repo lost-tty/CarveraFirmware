@@ -53,7 +53,7 @@ class StepTicker{
         float frequency;
         uint32_t period;
         std::array<StepperMotor*, k_max_actuators> motor;
-        std::bitset<k_max_actuators> unstep;
+        uint32_t unstep;
 
         Block *current_block;
         uint32_t current_tick{0};
@@ -69,8 +69,6 @@ class StepTicker{
             uint32_t step_count;
         } state[k_max_actuators];
 
-        struct {
-            volatile bool running:1;
-            uint8_t num_motors:4;
-        };
+        volatile bool running;
+        uint8_t num_motors;
 };
