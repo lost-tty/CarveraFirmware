@@ -1,5 +1,6 @@
 #include "GcodeLine.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -8,6 +9,43 @@
 #include <strings.h>
 
 namespace gcode {
+
+void Words::reserve(size_t want)
+{
+    if (want <= capacity) return;
+    Word *bigger = new Word[want];
+    std::copy(data(), data() + n, bigger);
+    delete[] heap;
+    heap = bigger;
+    capacity = want;
+}
+
+void Words::push_back(const Word &w)
+{
+    if (n == capacity) reserve(capacity * 2);
+    data()[n++] = w;
+}
+
+void Words::assign(const Word *from, size_t count)
+{
+    n = 0;
+    reserve(count);
+    std::copy(from, from + count, data());
+    n = count;
+}
+
+// steal a heap buffer, copy an inline one: either way o is left empty
+void Words::take(Words &o)
+{
+    heap = o.heap;
+    n = o.n;
+    capacity = o.capacity;
+    if (heap == nullptr) std::copy(o.fixed, o.fixed + n, fixed);
+    o.heap = nullptr;
+    o.n = 0;
+    o.capacity = INLINE;
+}
+
 
 static bool is_digit(char c)
 {
@@ -323,7 +361,6 @@ static bool code(const char *&p, Word &w, std::string &err)
 bool Line::parse(const char *p, const ParamStore *params)
 {
     list.clear();
-    list.reserve(8);
     err.clear();
     for (;;) {
         skip_space(p);

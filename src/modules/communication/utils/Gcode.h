@@ -24,7 +24,7 @@ class Gcode {
     public:
         Gcode(const string& text, StreamOutput* stream, unsigned int line = 0);
         // command is an index into words, or words.size() for a line without G or M
-        Gcode(const std::vector<gcode::Word>& words, size_t command, const string& text, StreamOutput* stream, unsigned int line);
+        Gcode(const gcode::Words& words, size_t command, const string& text, StreamOutput* stream, unsigned int line);
 
         const char* get_command() const { return text.c_str(); }
         bool has_letter(char letter) const { return find(letter) != nullptr; }
@@ -33,7 +33,7 @@ class Gcode {
         uint32_t get_uint(char letter) const;
         int get_num_args() const;
         std::map<char,float> get_args() const;
-        const std::vector<gcode::Word>& get_words() const { return words; }
+        const gcode::Words& get_words() const { return words; }
 
         unsigned int m;
         unsigned int g;
@@ -55,7 +55,7 @@ class Gcode {
         void set_command(const gcode::Word& w);
         static bool is_parameter(char letter) { return letter != 'G' && letter != 'M' && letter != 'T'; }
 
-        std::vector<gcode::Word> words;
+        gcode::Words words;
         string text;
 };
 

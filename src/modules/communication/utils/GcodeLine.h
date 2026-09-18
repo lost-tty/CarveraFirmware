@@ -13,6 +13,39 @@ struct Word {
     bool has_value; // "G28 X Y": a bare letter reads as 0
 };
 
+class Words {
+public:
+    static const size_t INLINE = 8;
+    Words() {}
+    Words(const Words &o) { assign(o.begin(), o.size()); }
+    Words(Words &&o) { take(o); }
+    Words &operator=(const Words &o) { if (this != &o) assign(o.begin(), o.size()); return *this; }
+    Words &operator=(Words &&o) { if (this != &o) { delete[] heap; take(o); } return *this; }
+    ~Words() { delete[] heap; }
+
+    void clear() { n = 0; }
+    void reserve(size_t want);
+    void push_back(const Word &w);
+    size_t size() const { return n; }
+    bool empty() const { return n == 0; }
+    const Word &operator[](size_t i) const { return data()[i]; }
+    Word &operator[](size_t i) { return data()[i]; }
+    const Word *begin() const { return data(); }
+    const Word *end() const { return data() + n; }
+    Word *begin() { return data(); }
+    Word *end() { return data() + n; }
+
+private:
+    const Word *data() const { return heap != nullptr ? heap : fixed; }
+    Word *data() { return heap != nullptr ? heap : fixed; }
+    void assign(const Word *from, size_t count);
+    void take(Words &o);
+
+    Word *heap = nullptr;
+    size_t n = 0, capacity = INLINE;
+    Word fixed[INLINE];
+};
+
 class ParamStore {
 public:
     virtual ~ParamStore() {}
@@ -40,10 +73,10 @@ class Line {
 public:
     bool parse(const char *text, const ParamStore *params);
     const std::string &error_text() const { return err; }
-    const std::vector<Word> &words() const { return list; }
+    const Words &words() const { return list; }
 
 private:
-    std::vector<Word> list;
+    Words list;
     std::string err;
 };
 

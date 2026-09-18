@@ -189,7 +189,7 @@ void GcodeDispatch::parameter_statement(const char *p, StreamOutput *stream)
     stream->printf("ok\r\n");
 }
 
-void GcodeDispatch::execute(const std::vector<gcode::Word> &words, const string &text, StreamOutput *stream, unsigned int line)
+void GcodeDispatch::execute(const gcode::Words &words, const string &text, StreamOutput *stream, unsigned int line)
 {
     if(words.empty()) {
         stream->printf("ok\r\n");
@@ -236,7 +236,7 @@ void GcodeDispatch::execute(const std::vector<gcode::Word> &words, const string 
     struct Blk { bool mcs; bool motion; bool axis_code; bool axis; bool feed; bool settings_only; };
     std::vector<Cmd> order;
     std::vector<Blk> blocks(1, Blk{false, false, false, false, false, true});
-    std::vector<gcode::Word> all= words; // synthesized motion words are appended
+    gcode::Words all= words; // synthesized motion words are appended
     std::vector<uint8_t> block_of(words.size(), 0);
     uint32_t groups= 0;
     for (size_t i= 0; i < words.size(); i++) {
@@ -305,7 +305,7 @@ void GcodeDispatch::execute(const std::vector<gcode::Word> &words, const string 
 
     if(order.empty()) order.push_back(Cmd{words.size(), 0, OTHER_M}); // T or S alone
 
-    std::vector<gcode::Word> block_words;
+    gcode::Words block_words;
     int current= -1;
     for (size_t n= 0; n < order.size(); n++) {
         const Cmd &c= order[n];

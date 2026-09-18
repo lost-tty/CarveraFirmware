@@ -42,7 +42,7 @@ public:
     void run_line(const std::string &line, StreamOutput *stream, bool internal);
 private:
     void dispatch(const SerialMessage &msg, bool mdi);
-    void execute(const std::vector<gcode::Word> &words, const std::string &text, StreamOutput *stream, unsigned int line);
+    void execute(const gcode::Words &words, const std::string &text, StreamOutput *stream, unsigned int line);
     void parameter_statement(const char *p, StreamOutput *stream);
     void fail(StreamOutput *stream, const char *msg);
     void halt();
