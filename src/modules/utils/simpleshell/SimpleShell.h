@@ -50,12 +50,13 @@ public:
     typedef void (*command_fn)(void *context, const char *name, std::string args, StreamOutput *stream);
     struct Registered { const char *name; command_fn command; void *context; const char *help; Registered *next; };
     static void add_command(Registered &slot, const char *name, command_fn fn, void *context, const char *help);
+    static void run(const std::string &line, StreamOutput *stream);
+    void run_command(const std::string &line, StreamOutput *stream);
     SimpleShell()
     : resetTimer("SimpleShell::resetTimer", 3000, false, this, &SimpleShell::system_reset_callback)
     {}
 
     void on_module_loaded();
-    void on_console_line_received( void *argument );
     bool parse_command(const char *cmd, string args, StreamOutput *stream);
     void print_mem(StreamOutput *stream) { mem_command("", stream); }
     void version_command(string parameters, StreamOutput *stream );

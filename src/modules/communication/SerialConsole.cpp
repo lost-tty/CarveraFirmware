@@ -6,6 +6,7 @@
 */
 
 #include <string>
+#include "SimpleShell.h"
 #include <stdarg.h>
 using std::string;
 #include "libs/Module.h"
@@ -158,11 +159,7 @@ void SerialConsole::on_main_loop(void * argument){
            char c;
            this->buffer.pop_front(c);
            if( c == '\n' ){
-                struct SerialMessage message;
-                message.message = received;
-                message.stream = this;
-                message.line = 0;
-                THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
+                SimpleShell::run(received, this);
                 return;
             }else{
                 received += c;

@@ -46,7 +46,7 @@ void SourceStack::on_main_loop(void *)
     SerialMessage msg{&StreamOutput::NullStream, "", 0};
     switch(s->next(msg)) {
         case Source::LINE:
-            gcode_dispatch.run_line(msg, s->internal()); // a halt inside clears the stack, s is not touched after this
+            gcode_dispatch.run_line(msg); // a halt inside clears the stack, s is not touched after this
             break;
         case Source::DONE:
             if(!stack.empty() && stack.back() == s) stack.pop_back();

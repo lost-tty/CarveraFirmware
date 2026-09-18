@@ -717,8 +717,8 @@ void Robot::on_gcode_received(Gcode *argument)
                 absolute_mode = true;
                 seconds_per_minute= 60;
                 // issue M5 and M9 in case spindle and coolant are being used
-                gcode_dispatch.run_line("M5", &StreamOutput::NullStream, true);
-                gcode_dispatch.run_line("M9", &StreamOutput::NullStream, true);
+                gcode_dispatch.run_line("M5", &StreamOutput::NullStream);
+                gcode_dispatch.run_line("M9", &StreamOutput::NullStream);
                 break;
             case 17:
                 THEKERNEL->call_event(ON_ENABLE, (void*)1); // turn all enable pins on

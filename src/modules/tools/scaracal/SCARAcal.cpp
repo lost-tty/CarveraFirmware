@@ -64,7 +64,7 @@ void SCARAcal::on_config_reload(void *argument)
 // issue home command
 void SCARAcal::home()
 {
-    gcode_dispatch.run_line("G28", &StreamOutput::NullStream, true);
+    gcode_dispatch.run_line("G28", &StreamOutput::NullStream);
 }
 
 bool SCARAcal::get_trim(float& x, float& y, float& z)
@@ -117,7 +117,7 @@ bool SCARAcal::set_home_offset(float x, float y, float z, StreamOutput *stream)
     // Assemble Gcode to add onto the queue
     snprintf(cmd, sizeof(cmd), "M206 X%1.3f Y%1.3f Z%1.3f", x, y, z); // Send saved Z homing offset
 
-    gcode_dispatch.run_line(cmd, &StreamOutput::NullStream, true);
+    gcode_dispatch.run_line(cmd, &StreamOutput::NullStream);
 
     stream->printf("Set home_offset to X:%f Y:%f Z:%f\n", x, y, z);
 
@@ -175,7 +175,7 @@ void SCARAcal::SCARA_ang_move(float theta, float psi, float z, float feedrate)
 
     //printk("DEBUG: move: %s\n", cmd);
 
-    gcode_dispatch.run_line(cmd, &StreamOutput::NullStream, true);
+    gcode_dispatch.run_line(cmd, &StreamOutput::NullStream);
 }
 
 //A GCode has been received

@@ -15,7 +15,6 @@ Module::~Module(){}
 // NOTE this is stored in Flash so takes up no RAM
 const ModuleCallback kernel_callback_functions[NUMBER_OF_DEFINED_EVENTS] = {
     &Module::on_main_loop,
-    &Module::on_console_line_received,
     &Module::on_idle,
     &Module::on_second_tick,
     &Module::on_get_public_data,

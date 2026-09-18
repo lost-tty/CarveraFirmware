@@ -496,7 +496,7 @@ void Switch::on_main_loop(void *argument)
 {
     if(this->switch_changed) {
         if(this->switch_state) {
-            if(!this->output_on_command.empty()) this->send_gcode( this->output_on_command, &(StreamOutput::NullStream) );
+            if(!this->output_on_command.empty()) gcode_dispatch.run_line(this->output_on_command, &StreamOutput::NullStream);
 
             if(this->output_type == SIGMADELTA) {
                 this->sigmadelta_pin->pwm(this->switch_value); // this requires the value has been set otherwise it switches on to whatever it last was
@@ -517,7 +517,7 @@ void Switch::on_main_loop(void *argument)
 
         } else {
 
-            if(!this->output_off_command.empty()) this->send_gcode( this->output_off_command, &(StreamOutput::NullStream) );
+            if(!this->output_off_command.empty()) gcode_dispatch.run_line(this->output_off_command, &StreamOutput::NullStream);
 
             if(this->output_type == SIGMADELTA) {
                 this->sigmadelta_pin->set(false);
@@ -573,13 +573,5 @@ void Switch::flip()
 {
     this->switch_state = !this->switch_state;
     this->switch_changed = true;
-}
-
-void Switch::send_gcode(std::string msg, StreamOutput *stream)
-{
-    struct SerialMessage message;
-    message.message = msg;
-    message.stream = stream;
-    THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
 }
 

@@ -208,7 +208,7 @@ void PWMSpindleControl::turn_on() {
     if (delay_s > 0) {
         char buf[32];
         snprintf(buf, sizeof(buf), "G4P%d", delay_s);
-        gcode_dispatch.run_line(buf, &StreamOutput::NullStream, true);
+        gcode_dispatch.run_line(buf, &StreamOutput::NullStream);
     }
 }
 
@@ -217,7 +217,7 @@ void PWMSpindleControl::turn_off() {
     if (delay_s > 0) {
         char buf[32];
         snprintf(buf, sizeof(buf), "G4P%d", delay_s);
-        gcode_dispatch.run_line(buf, &StreamOutput::NullStream, true);
+        gcode_dispatch.run_line(buf, &StreamOutput::NullStream);
     }
 }
 

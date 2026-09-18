@@ -32,17 +32,14 @@ public:
     static void add_handler(Module *module); // for a module that handles G or M codes
     void init();
 
-    virtual void on_module_loaded();
-    virtual void on_console_line_received(void *line);
-
     uint8_t get_modal_command() const { return modal_group_1; }
     Parameters &parameters() { return params; }
     void set_script_hook(ScriptHook *hook) { scripts= hook; }
-    // a line from a source or a module, not MDI; internal: leaves the modal motion alone and triggers no script
-    void run_line(const SerialMessage &msg, bool internal);
-    void run_line(const std::string &line, StreamOutput *stream, bool internal);
+    void run_mdi(const SerialMessage &msg); // a console line: refused while a job or script runs
+    void run_line(const SerialMessage &msg);
+    void run_line(const std::string &line, StreamOutput *stream);
 private:
-    void dispatch(const SerialMessage &msg, bool mdi);
+    void dispatch(const SerialMessage &msg);
     bool allowed_while_halted(const gcode::Words &words, StreamOutput *stream);
     bool homed_enough(const gcode::Words &words, StreamOutput *stream);
     void execute(const gcode::Words &words, const std::string &text, StreamOutput *stream, unsigned int line);
@@ -53,7 +50,7 @@ private:
     Parameters params;
     static Module *handlers;
     ScriptHook *scripts= nullptr;
-    bool internal= false;
+    uint8_t depth= 0; // a line dispatched from inside another must not touch its modal state
     uint8_t modal_group_1;
     bool homed_check;
 };

@@ -6,6 +6,7 @@
  */
 
 #include "WifiProvider.h"
+#include "SimpleShell.h"
 
 #include "brd_cfg.h"
 #include "M8266HostIf.h"
@@ -295,10 +296,7 @@ void WifiProvider::on_main_loop(void* argument)
             char c;
             this->buffer.pop_front(c);
             if (c == '\n') {
-                struct SerialMessage message;
-                message.message = received;
-                message.stream = this;
-                THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
+                SimpleShell::run(received, this);
                 break;
             } else {
                 received += c;

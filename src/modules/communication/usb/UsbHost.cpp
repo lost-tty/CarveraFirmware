@@ -1,4 +1,5 @@
 #include "UsbHost.h"
+#include "SimpleShell.h"
 #include "libs/Kernel.h"
 #include "libs/Logging.h"
 #include "libs/Pin.h"
@@ -140,6 +141,5 @@ void UsbHost::on_main_loop(void*)
         if (c != '\n') line += c;
     } while (c != '\n' && lines.size() > 0);
 
-    SerialMessage message{&StreamOutput::NullStream, line, 0};
-    THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
+    SimpleShell::run(line, &StreamOutput::NullStream);
 }

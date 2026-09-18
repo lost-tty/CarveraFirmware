@@ -13,7 +13,6 @@
 // Module.cpp:16 in the same order
 enum _EVENT_ENUM {
     ON_MAIN_LOOP,
-    ON_CONSOLE_LINE_RECEIVED,
     ON_IDLE,
     ON_SECOND_TICK,
     ON_GET_PUBLIC_DATA,
@@ -45,7 +44,6 @@ public:
     // event callbacks, not every module will implement all of these
     // there should be one for each _EVENT_ENUM
     virtual void on_main_loop(void *) {};
-    virtual void on_console_line_received(void *) {};
     virtual void on_gcode_received(Gcode *) {};
     virtual void on_idle(void *) {};
     virtual void on_second_tick(void *) {};

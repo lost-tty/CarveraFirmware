@@ -97,11 +97,6 @@ void GcodeDispatch::init()
     homed_check= true;
 }
 
-void GcodeDispatch::on_module_loaded()
-{
-    this->register_for_event(ON_CONSOLE_LINE_RECEIVED);
-}
-
 void GcodeDispatch::halt()
 {
     THEKERNEL->set_halt_reason(MANUAL);
@@ -116,25 +111,29 @@ void GcodeDispatch::fail(StreamOutput *stream, const char *msg)
 }
 
 
-void GcodeDispatch::on_console_line_received(void *line)
+// an interleaved line would move the machine out of sequence; a suspended job is safe to jog
+void GcodeDispatch::run_mdi(const SerialMessage &msg)
 {
-    dispatch(*static_cast<SerialMessage *>(line), true);
+    if(sources.active()) {
+        msg.stream->printf("error:busy, a job or script is running\r\n");
+        return;
+    }
+    run_line(msg);
 }
 
-void GcodeDispatch::run_line(const SerialMessage &msg, bool is_internal)
+void GcodeDispatch::run_line(const SerialMessage &msg)
 {
-    bool saved= internal; // run_line can be called from inside a dispatch
-    internal= is_internal;
-    dispatch(msg, false);
-    internal= saved;
+    depth++;
+    dispatch(msg);
+    depth--;
 }
 
-void GcodeDispatch::run_line(const std::string &line, StreamOutput *stream, bool is_internal)
+void GcodeDispatch::run_line(const std::string &line, StreamOutput *stream)
 {
-    run_line(SerialMessage{stream, line, 0}, is_internal);
+    run_line(SerialMessage{stream, line, 0});
 }
 
-void GcodeDispatch::dispatch(const SerialMessage &msg, bool mdi)
+void GcodeDispatch::dispatch(const SerialMessage &msg)
 {
     const string &s= msg.message;
 
@@ -146,10 +145,6 @@ void GcodeDispatch::dispatch(const SerialMessage &msg, bool mdi)
 
     char c= s[i];
     if(c == '$' || islower((unsigned char)c)) return; // simpleshell command
-    if(mdi && sources.active()) { // an interleaved line would move the machine out of sequence; a suspended job is safe to jog
-        msg.stream->printf("error:busy, a job or script is running\r\n");
-        return;
-    }
 
     size_t j= i;
     if(c == 'N') {
@@ -338,8 +333,8 @@ void GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
         if(c.rank == MOTION) {
             if(blocks[c.block].mcs) THEROBOT.next_command_is_MCS= true;
             // G80 cancels a canned cycle, so the mode goes back to the last plain motion
-            if(!internal && c.index < words.size() && (gcode.g < 4 || (gcode.g >= 81 && gcode.g <= 89))) modal_group_1= gcode.g;
-            if(!internal && gcode.g == 80) modal_group_1= 0;
+            if(depth == 1 && c.index < words.size() && (gcode.g < 4 || (gcode.g >= 81 && gcode.g <= 89))) modal_group_1= gcode.g;
+            if(depth == 1 && gcode.g == 80) modal_group_1= 0;
         }
 
         for (Module *m = handlers; m != nullptr; m = m->next_gcode_handler) m->on_gcode_received(&gcode);
@@ -347,7 +342,7 @@ void GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
         // a scripted code runs its sub after the modules have seen it, so their handlers still apply;
         // the ok follows when the sub is done, which is the last block of the line by rank
         std::string err;
-        if(scripts != nullptr && !internal && scripts->trigger(gcode, stream, err)) {
+        if(scripts != nullptr && depth == 1 && scripts->trigger(gcode, stream, err)) {
             if(!err.empty()) fail(stream, err.c_str());
             return;
         }

@@ -130,7 +130,6 @@ void SimpleShell::system_reset_callback()
 
 void SimpleShell::on_module_loaded()
 {
-    this->register_for_event(ON_CONSOLE_LINE_RECEIVED);
 }
 
 SimpleShell::Registered *SimpleShell::registered = nullptr;
@@ -159,13 +158,23 @@ bool SimpleShell::parse_command(const char *cmd, std::string args, StreamOutput 
 }
 
 // When a new line is received, check if it is a command, and if it is, act upon it
-void SimpleShell::on_console_line_received( void *argument )
+void SimpleShell::run(const std::string &line, StreamOutput *stream)
 {
-    SerialMessage new_message = *static_cast<SerialMessage *>(argument);
-    string possible_command = new_message.message;
+    simpleshell.run_command(line, stream);
+}
 
-    // ignore anything that is not lowercase or a $ as it is not a command
-    if(possible_command.size() == 0 || (!islower(possible_command[0]) && possible_command[0] != '$')) {
+void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
+{
+    SerialMessage new_message{stream, line, 0};
+    string possible_command = line;
+
+    size_t i = possible_command.find_first_not_of(" \t");
+    if(i == string::npos) {
+        stream->printf("ok\r\n");
+        return;
+    }
+    if(!islower(possible_command[i]) && possible_command[i] != '$') {
+        gcode_dispatch.run_mdi(new_message);
         return;
     }
 
@@ -199,7 +208,7 @@ void SimpleShell::on_console_line_received( void *argument )
                 {
                     if(THEKERNEL->is_halted()) THEKERNEL->clear_halt();
                     // issue G28.2 which is force homing cycle
-                    gcode_dispatch.run_line("G28.2", new_message.stream, false);
+                    gcode_dispatch.run_line("G28.2", new_message.stream);
 
                     new_message.stream->printf("ok\n");
                 }
@@ -1066,15 +1075,10 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
         }
 
         if(move) {
-            // move to the calculated, or given, XYZ
-            char cmd[64];
-            snprintf(cmd, sizeof(cmd), "G53 G0 X%f Y%f Z%f", THEROBOT.from_millimeters(x), THEROBOT.from_millimeters(y), THEROBOT.from_millimeters(z));
-            struct SerialMessage message;
-            message.message = cmd;
-            message.stream = &(StreamOutput::NullStream);
-            message.line = 0;
-            THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-            THECONVEYOR.wait_for_idle();
+            float cur[3];
+            THEROBOT.get_axis_position(cur);
+            const float delta[3]{x - cur[X_AXIS], y - cur[Y_AXIS], z - cur[Z_AXIS]};
+            THEROBOT.delta_move_sync(delta, THEROBOT.get_seek_rate(), 3);
         }
 
    } else if (what == "pos") {
@@ -1173,7 +1177,7 @@ void SimpleShell::calc_thermistor_command( string parameters, StreamOutput *stre
         }else{
             char buf[80];
             snprintf(buf, sizeof(buf), "M305 S%d I%1.18f J%1.18f K%1.18f", saveto, c1, c2, c3);
-            gcode_dispatch.run_line(buf, &StreamOutput::NullStream, true);
+            gcode_dispatch.run_line(buf, &StreamOutput::NullStream);
             stream->printf("  Setting Thermistor %d to those settings, save with M500\n", saveto);
         }
 

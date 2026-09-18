@@ -247,7 +247,7 @@ bool ThreePointStrategy::handleGcode(Gcode *gcode)
 
 void ThreePointStrategy::homeXY()
 {
-    gcode_dispatch.run_line("G28.2 X0 Y0", &StreamOutput::NullStream, true);
+    gcode_dispatch.run_line("G28.2 X0 Y0", &StreamOutput::NullStream);
 }
 
 bool ThreePointStrategy::doProbing(StreamOutput *stream)

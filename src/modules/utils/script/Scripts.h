@@ -29,7 +29,6 @@ public:
     Source::Result next(SerialMessage &msg) override;
     void abort() override;
     void list(StreamOutput *stream, unsigned around) override;
-    bool internal() const override { return true; }
 
 private:
     bool load(StreamOutput *stream);

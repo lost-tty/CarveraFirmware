@@ -18,7 +18,6 @@ public:
     virtual Result next(SerialMessage &msg) = 0;
     virtual void abort() = 0;                        // the job ended under it or the machine halted
     virtual void list(StreamOutput *stream, unsigned around) = 0; // the lines around the current one, like a debugger
-    virtual bool internal() const { return false; } // lines leave the modal motion alone and trigger no scripts
 };
 
 // Feeds one line of the top source per main loop. Console G-code is refused while a source is active.

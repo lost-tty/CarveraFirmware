@@ -6,6 +6,7 @@
 */
 
 #include "ZProbe.h"
+#include "SimpleShell.h"
 
 #include "Kernel.h"
 #include "Config.h"
@@ -307,7 +308,7 @@ void ZProbe::on_gcode_received(Gcode *argument)
                     // set current Z to the specified value, shortcut for G92 Znnn
                     char buf[32];
                     snprintf(buf, sizeof(buf), "G92 Z%f", gcode->get_value('Z'));
-                    gcode_dispatch.run_line(buf, &StreamOutput::NullStream, true);
+                    gcode_dispatch.run_line(buf, &StreamOutput::NullStream);
                 }
 
             } else {
@@ -557,48 +558,28 @@ void ZProbe::calibrate_Z(Gcode *gcode)
 // NOTE must use G53 to force move in machine coordinates and ignore any WCS offsets
 void ZProbe::coordinated_move(float x, float y, float z, float feedrate, bool relative)
 {
-    #define CMDLEN 128
-    char *cmd= new char[CMDLEN]; // use heap here to reduce stack usage
-
-    if(relative) strcpy(cmd, "G91 G0 ");
-    else strcpy(cmd, "G53 G0 "); // G53 forces movement in machine coordinate system
-
-    if(!isnan(x)) {
-        size_t n= strlen(cmd);
-        snprintf(&cmd[n], CMDLEN-n, " X%1.3f", THEROBOT.from_millimeters(x));
-    }
-    if(!isnan(y)) {
-        size_t n= strlen(cmd);
-        snprintf(&cmd[n], CMDLEN-n, " Y%1.3f", THEROBOT.from_millimeters(y));
-    }
-    if(!isnan(z)) {
-        size_t n= strlen(cmd);
-        snprintf(&cmd[n], CMDLEN-n, " Z%1.3f", THEROBOT.from_millimeters(z));
+    float delta[3]{0, 0, 0};
+    if(relative) {
+        if(!isnan(x)) delta[X_AXIS]= x;
+        if(!isnan(y)) delta[Y_AXIS]= y;
+        if(!isnan(z)) delta[Z_AXIS]= z;
+    } else {
+        // machine coordinates, ignoring any WCS offset
+        float pos[3];
+        THEROBOT.get_current_machine_position(pos);
+        if(THEROBOT.compensationTransform) THEROBOT.compensationTransform(pos, true, false);
+        if(!isnan(x)) delta[X_AXIS]= x - pos[X_AXIS];
+        if(!isnan(y)) delta[Y_AXIS]= y - pos[Y_AXIS];
+        if(!isnan(z)) delta[Z_AXIS]= z - pos[Z_AXIS];
     }
 
-    {
-        size_t n= strlen(cmd);
-        // use specified feedrate (mm/sec)
-        snprintf(&cmd[n], CMDLEN-n, " F%1.1f", feedrate * 60); // feed rate is converted to mm/min
-    }
-
-    // send as a command line as may have multiple G codes in it
-    THEROBOT.push_state();
-    struct SerialMessage message;
-    message.message = cmd;
-    delete [] cmd;
-
-    message.stream = &(StreamOutput::NullStream);
-    THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message );
-    THECONVEYOR.wait_for_idle();
-    THEROBOT.pop_state();
-
+    THEROBOT.delta_move_sync(delta, feedrate, 3);
 }
 
 // issue home command
 void ZProbe::home()
 {
-    gcode_dispatch.run_line("G28.2", &StreamOutput::NullStream, true);
+    gcode_dispatch.run_line("G28.2", &StreamOutput::NullStream);
 }
 
 void ZProbe::on_get_public_data(void* argument)

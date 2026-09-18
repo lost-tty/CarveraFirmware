@@ -347,11 +347,7 @@ void Player::abort_command( string parameters, StreamOutput *stream )
 
     // turn off spindle
     {
-		struct SerialMessage message;
-		message.message = "M5";
-		message.stream = &THEKERNEL->streams;
-		message.line = 0;
-		THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
+		gcode_dispatch.run_line("M5", &StreamOutput::NullStream);
     }
 
     if (parameters.empty()) {
@@ -370,11 +366,7 @@ void Player::on_main_loop(void *argument)
     if( !this->booted ) {
         this->booted = true;
         if (this->home_on_boot) {
-    		struct SerialMessage message;
-    		message.message = "$H";
-    		message.stream = &THEKERNEL->streams;
-    		message.line = 0;
-    		THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
+    		gcode_dispatch.run_line("G28.2", &THEKERNEL->streams);
         }
 
         run_script("boot", nullptr, 0);
@@ -580,7 +572,7 @@ void Player::resume_command(string parameters, StreamOutput *stream )
     if (this->goto_line == 0 && current_motion_mode > 1) { // back to the arc mode the job was in
         char buf[8];
         snprintf(buf, sizeof(buf), "G%d", current_motion_mode - 1);
-        gcode_dispatch.run_line(buf, &StreamOutput::NullStream, false);
+        gcode_dispatch.run_line(buf, &StreamOutput::NullStream);
     }
 
     THEROBOT.pop_state();

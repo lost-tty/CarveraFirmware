@@ -383,7 +383,7 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
             }
 
             if(!before_probe.empty()) {
-                gcode_dispatch.run_line(before_probe, &StreamOutput::NullStream, true);
+                gcode_dispatch.run_line(before_probe, &StreamOutput::NullStream);
                 THECONVEYOR.wait_for_idle(); // it is a user string, it may move
             }
 
@@ -396,7 +396,7 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
             THEROBOT.disable_segmentation= false;
 
             if(!after_probe.empty()) {
-                gcode_dispatch.run_line(after_probe, &StreamOutput::NullStream, true);
+                gcode_dispatch.run_line(after_probe, &StreamOutput::NullStream);
                 THECONVEYOR.wait_for_idle(); // it is a user string, it may move
             }
 
@@ -412,7 +412,7 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
             }
 
             if(!before_probe.empty()) {
-                gcode_dispatch.run_line(before_probe, &StreamOutput::NullStream, true);
+                gcode_dispatch.run_line(before_probe, &StreamOutput::NullStream);
                 THECONVEYOR.wait_for_idle(); // it is a user string, it may move
             }
 
@@ -421,7 +421,7 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
             }
 
             if(!after_probe.empty()) {
-                gcode_dispatch.run_line(after_probe, &StreamOutput::NullStream, true);
+                gcode_dispatch.run_line(after_probe, &StreamOutput::NullStream);
                 THECONVEYOR.wait_for_idle(); // it is a user string, it may move
             }
             return true;
