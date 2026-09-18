@@ -42,6 +42,7 @@
 #include <algorithm>
 
 #define  default_seek_rate_checksum          CHECKSUM("default_seek_rate")
+#define  home_on_boot_checksum               CHECKSUM("home_on_boot")
 #define  default_feed_rate_checksum          CHECKSUM("default_feed_rate")
 #define  mm_per_line_segment_checksum        CHECKSUM("mm_per_line_segment")
 #define  delta_segments_per_second_checksum  CHECKSUM("delta_segments_per_second")
@@ -320,6 +321,7 @@ void Robot::load_config()
     //this->clearToolOffset();
 
     soft_endstop_enabled= THEKERNEL->config->value(soft_endstop_checksum, enable_checksum)->by_default(true)->as_bool();
+    home_on_boot= THEKERNEL->config->value(home_on_boot_checksum)->by_default(true)->as_bool();
     soft_endstop_halt = THEKERNEL->config->value(soft_endstop_checksum, halt_checksum)->by_default(true)->as_bool();
 
     soft_endstop_max[X_AXIS]= -1;
@@ -342,6 +344,11 @@ uint8_t Robot::register_motor(StepperMotor *motor)
     actuators.push_back(motor);
     motor->set_motor_id(n_motors);
     return n_motors++;
+}
+
+void Robot::home_on_startup()
+{
+    if(home_on_boot) gcode_dispatch.run_line("G28.2", &THEKERNEL->streams);
 }
 
 void Robot::enable_motors(bool on)

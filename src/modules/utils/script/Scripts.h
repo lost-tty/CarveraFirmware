@@ -29,6 +29,7 @@ public:
     Source::Result next(SerialMessage &msg) override;
     void abort() override;
     void list(StreamOutput *stream, unsigned around) override;
+    void boot();
 
 private:
     bool load(StreamOutput *stream);
@@ -44,3 +45,5 @@ private:
     bool loaded= false;
     bool trace= false;                  // echo every executed line with its origin
 };
+
+extern Scripts scripts;

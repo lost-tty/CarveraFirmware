@@ -265,6 +265,8 @@ void vTaskMainLoop(void *pvParameters) {
     uint16_t cnt = 0;
 
     init();
+    THEROBOT.home_on_startup(); // a boot script may assume a referenced machine
+    scripts.boot();
 
     printk("Mainloop started\n");
 

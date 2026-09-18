@@ -42,7 +42,6 @@
 
 #include "mbed.h"
 
-#define home_on_boot_checksum             CHECKSUM("home_on_boot")
 #define leave_heaters_on_suspend_checksum CHECKSUM("leave_heaters_on_suspend")
 #define laser_module_clustering_checksum 	  CHECKSUM("laser_module_clustering")
 
@@ -58,20 +57,16 @@ static bool run_script(const char *sub, const float *args, unsigned nargs)
 void Player::on_module_loaded()
 {
     this->playing_file = false;
-    this->booted = false;
     this->start_time = xTaskGetTickCount();
     this->reply_stream = nullptr;
     this->suspend_pending = false;
     this->slope = 0.0;
 
-    this->register_for_event(ON_MAIN_LOOP);
     for (unsigned i= 0; COMMANDS[i].name != nullptr; i++) SimpleShell::add_command(shell_slots[i], COMMANDS[i].name, &Player::shell, this, COMMANDS[i].help);
     this->register_for_event(ON_GET_PUBLIC_DATA);
     this->register_for_event(ON_SET_PUBLIC_DATA);
     GcodeDispatch::add_handler(this);
     this->register_for_event(ON_HALT);
-
-    this->home_on_boot = THEKERNEL->config->value(home_on_boot_checksum)->by_default(true)->as_bool();
 
     this->leave_heaters_on = THEKERNEL->config->value(leave_heaters_on_suspend_checksum)->by_default(false)->as_bool();
 
@@ -361,17 +356,6 @@ void Player::abort_command( string parameters, StreamOutput *stream )
     }
 }
 
-void Player::on_main_loop(void *argument)
-{
-    if( !this->booted ) {
-        this->booted = true;
-        if (this->home_on_boot) {
-    		gcode_dispatch.run_line("G28.2", &THEKERNEL->streams);
-        }
-
-        run_script("boot", nullptr, 0);
-    }
-}
 
 Source::Result Player::next(SerialMessage &msg)
 {

@@ -225,6 +225,13 @@ void Scripts::on_set_public_data(void *argument)
     else printk("error:script %s %s\n", c->sub, err.c_str());
 }
 
+// only queues the sub, the source stack runs it once the main loop is going
+void Scripts::boot()
+{
+    std::string err;
+    if(!run("boot", nullptr, 0, nullptr, err) && loaded) printk("error:script boot %s\n", err.c_str());
+}
+
 const SimpleShell::Sub<Scripts> Scripts::SUBS[] = {
     {"check",  &Scripts::sub_check,  "reload the scripts and validate them"},
     {"list",   &Scripts::sub_list,   "the subs that are defined"},

@@ -68,6 +68,7 @@ class Robot : public Module {
         bool delta_move(const float delta[], float rate_mm_s, uint8_t naxis);
         bool delta_move_sync(const float delta[], float rate_mm_s, uint8_t naxis);
         uint8_t register_motor(StepperMotor*);
+        void home_on_startup();
         void enable_motors(bool on);
         void disable_motors(uint32_t axis_mask); // bit per axis, X is bit 0
         uint8_t get_number_registered_motors() const {return n_motors; }
@@ -102,6 +103,7 @@ class Robot : public Module {
             bool save_g54:1;                                  // save WCS on M500 if set
             bool is_g123:1;
             bool soft_endstop_enabled:1;
+            bool home_on_boot:1;
             bool soft_endstop_halt:1;
             uint8_t plane_axis_0:2;                           // Current plane ( XY, XZ, YZ )
             uint8_t plane_axis_1:2;

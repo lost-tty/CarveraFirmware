@@ -32,7 +32,6 @@ class Player : public Module, public Source {
     public:
         void on_module_loaded();
         static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
-        void on_main_loop( void* argument );
         void on_get_public_data(void* argument);
         void on_set_public_data(void* argument);
         void on_gcode_received(Gcode *argument);
@@ -76,8 +75,6 @@ class Player : public Module, public Source {
         float slope;
         std::map<uint16_t, float> saved_temperatures;
         struct {
-            bool booted:1;
-            bool home_on_boot:1;
             bool playing_file:1;
             bool leave_heaters_on:1;
             bool override_leave_heaters_on:1;
