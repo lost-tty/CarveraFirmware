@@ -45,6 +45,7 @@ class Gcode {
             bool has_m:1;
             bool has_g:1;
             bool is_error:1;
+            bool mcs:1;                                       // G53: this motion is in machine coordinates
         };
 
         StreamOutput* stream;

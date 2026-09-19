@@ -117,7 +117,6 @@ void Robot::init()
     this->get_e_scale_fnc= nullptr;
     this->wcs_offsets.fill(wcs_t(0.0F, 0.0F, 0.0F));
     this->g92_offset = wcs_t(0.0F, 0.0F, 0.0F);
-    this->next_command_is_MCS = false;
     this->disable_segmentation= false;
     this->disable_arm_solution= false;
     this->n_motors= 0;
@@ -1156,8 +1155,6 @@ void Robot::on_gcode_received(Gcode *argument)
     }
 
     current_motion_mode = motion_mode;
-
-    next_command_is_MCS = false; // must be on same line as G0 or G1
 }
 
 int Robot::get_active_extruder() const
@@ -1196,7 +1193,7 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
     float target[n_motors];
     memcpy(target, machine_position, n_motors*sizeof(float));
 
-    if(!next_command_is_MCS) {
+    if(!gcode->mcs) {
         if (this->absolute_mode) {
             // apply wcs offsets and g92 offset and tool offset
             if(!isnan(param[X_AXIS])) {
@@ -1834,8 +1831,6 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s, flo
 
     // Append the end of this full move to the queue
     if(this->append_milestone(target, rate_mm_s, gcode->line)) moved= true;
-
-    this->next_command_is_MCS = false; // always reset this
 
     return moved;
 }

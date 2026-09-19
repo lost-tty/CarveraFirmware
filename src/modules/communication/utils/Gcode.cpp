@@ -10,7 +10,7 @@
 #include <climits>
 
 Gcode::Gcode(const string& text, StreamOutput* stream, unsigned int line)
-    : m(0), g(0), line(line), subcode(0), add_nl(false), has_m(false), has_g(false), is_error(false), stream(stream), text(text)
+    : m(0), g(0), line(line), subcode(0), add_nl(false), has_m(false), has_g(false), is_error(false), mcs(false), stream(stream), text(text)
 {
     gcode::Line parsed;
     if (!parsed.parse(text.c_str(), nullptr)) {
@@ -26,7 +26,7 @@ Gcode::Gcode(const string& text, StreamOutput* stream, unsigned int line)
 }
 
 Gcode::Gcode(const gcode::Words& words, size_t command, const string& text, StreamOutput* stream, unsigned int line)
-    : m(0), g(0), line(line), subcode(0), add_nl(false), has_m(false), has_g(false), is_error(false), stream(stream), words(words), text(text)
+    : m(0), g(0), line(line), subcode(0), add_nl(false), has_m(false), has_g(false), is_error(false), mcs(false), stream(stream), words(words), text(text)
 {
     if (command < words.size()) set_command(words[command]);
 }

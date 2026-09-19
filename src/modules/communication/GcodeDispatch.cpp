@@ -330,7 +330,7 @@ void GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
         Gcode gcode(block_words, index, text, stream, line);
 
         if(c.rank == MOTION) {
-            if(blocks[c.block].mcs) THEROBOT.next_command_is_MCS= true;
+            gcode.mcs= blocks[c.block].mcs;
             // G80 cancels a canned cycle, so the mode goes back to the last plain motion
             if(depth == 1 && c.index < words.size() && (gcode.g < 4 || (gcode.g >= 81 && gcode.g <= 89))) modal_group_1= gcode.g;
             if(depth == 1 && gcode.g == 80) modal_group_1= 0;
