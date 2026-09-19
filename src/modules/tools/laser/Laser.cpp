@@ -24,8 +24,6 @@
 #include "PwmOut.h" // mbed.h lib
 #include "Conveyor.h"
 
-#include "libs/PublicData.h"
-#include "PublicDataRequest.h"
 #include "LaserPublicAccess.h"
 #include "SwitchPublicAccess.h"
 

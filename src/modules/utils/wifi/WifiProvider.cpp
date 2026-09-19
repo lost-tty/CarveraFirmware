@@ -13,11 +13,9 @@
 
 #include "libs/Module.h"
 #include "libs/Kernel.h"
-#include "PublicDataRequest.h"
 #include "Config.h"
 #include "ConfigValue.h"
 #include "checksumm.h"
-#include "PublicData.h"
 #include "Gcode.h"
 #include "libs/Logging.h"
 #include "libs/StreamOutput.h"

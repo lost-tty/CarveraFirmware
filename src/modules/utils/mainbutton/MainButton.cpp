@@ -14,8 +14,7 @@
 #include "PlayerPublicAccess.h"
 #include "Player.h"
 #include "SwitchPublicAccess.h"
-#include "libs/PublicData.h"
-#include "PublicDataRequest.h"
+#include "SwitchPool.h"
 #include "MainButtonPublicAccess.h"
 #include "TemperatureControlPublicAccess.h"
 #include "LaserPublicAccess.h"
@@ -130,11 +129,11 @@ void MainButton::on_second_tick(void *)
 	bool toolsensor_on = false;
     // get switchs state
     struct pad_switch pad;
-    if (PublicData::get_value(switch_checksum, get_checksum("vacuum"), 0, &pad)) {
+    if (SwitchPool::get_state(get_checksum("vacuum"), &pad)) {
     	vacuum_on = pad.state;
     }
 
-    if (PublicData::get_value(switch_checksum, get_checksum("toolsensor"), 0, &pad)) {
+    if (SwitchPool::get_state(get_checksum("toolsensor"), &pad)) {
     	toolsensor_on = pad.state;
     }
 
@@ -199,13 +198,13 @@ void MainButton::on_idle(void *argument)
         		if (us_ticker_read() - light_countdown_us > (uint32_t)turn_off_light_min * 60 * 1000000) {
         			// turn off light
 					bool b = false;
-					PublicData::set_value( switch_checksum, light_checksum, state_checksum, &b );
+					SwitchPool::set_state(light_checksum, b);
         		}
         	} else {
         		light_countdown_us = us_ticker_read();
         		// turn on the light
 				bool b = true;
-				PublicData::set_value( switch_checksum, light_checksum, state_checksum, &b );
+				SwitchPool::set_state(light_checksum, b);
         	}
     	}
     	uint8_t halt_reason;

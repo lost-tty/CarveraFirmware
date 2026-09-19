@@ -9,7 +9,6 @@
 #include <cstring>
 #include "libs/Kernel.h"
 #include "GcodeDispatch.h"
-#include "PublicDataRequest.h"
 #include "Config.h"
 #include "StepperMotor.h"
 #include "Robot.h"
@@ -17,10 +16,10 @@
 #include "Conveyor.h"
 #include "ZProbe.h"
 #include "WirelessProbe.h"
-#include "PublicData.h"
 #include "Gcode.h"
 #include "libs/Logging.h"
 #include "SwitchPublicAccess.h"
+#include "SwitchPool.h"
 #include "ATCHandlerPublicAccess.h"
 #include "utils/Parameters.h"
 #include "SimpleShell.h"
@@ -205,7 +204,7 @@ bool ATCHandler::laser_detect() {
 
     // switch on detector
     bool switch_state = true;
-    bool ok = PublicData::set_value(switch_checksum, detector_switch_checksum, state_checksum, &switch_state);
+    bool ok = SwitchPool::set_state(detector_switch_checksum, switch_state);
     if (!ok) {
         printk("ERROR: Failed switch on detector switch.\r\n");
         return false;
@@ -228,7 +227,7 @@ bool ATCHandler::laser_detect() {
 	detecting = false;
 	// switch off detector
 	switch_state = false;
-    ok = PublicData::set_value(switch_checksum, detector_switch_checksum, state_checksum, &switch_state);
+    ok = SwitchPool::set_state(detector_switch_checksum, switch_state);
     if (!ok) {
         printk("ERROR: Failed switch off detector switch.\r\n");
         return false;

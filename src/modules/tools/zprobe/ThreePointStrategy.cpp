@@ -60,8 +60,6 @@
 #include "GcodeDispatch.h"
 #include "checksumm.h"
 #include "ConfigValue.h"
-#include "PublicDataRequest.h"
-#include "PublicData.h"
 #include "Conveyor.h"
 #include "ZProbe.h"
 #include "Plane3D.h"

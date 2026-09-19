@@ -19,6 +19,41 @@ using namespace std;
 
 #define enable_checksum              CHECKSUM("enable")
 
+std::vector<TemperatureControl *> TemperatureControlPool::controls;
+
+TemperatureControl *TemperatureControlPool::find(uint16_t name)
+{
+    for(TemperatureControl *c : controls) {
+        if(c->get_name() == name) return c;
+    }
+    return nullptr;
+}
+
+bool TemperatureControlPool::get_temperature(uint16_t name, struct pad_temperature *t)
+{
+    TemperatureControl *c = find(name);
+    if(c == nullptr) return false;
+    c->get_status(t);
+    return true;
+}
+
+bool TemperatureControlPool::set_temperature(uint16_t name, float target)
+{
+    TemperatureControl *c = find(name);
+    if(c == nullptr) return false;
+    c->set_desired_temperature(target);
+    return true;
+}
+
+void TemperatureControlPool::poll(std::vector<struct pad_temperature> &v)
+{
+    for(TemperatureControl *c : controls) {
+        struct pad_temperature t;
+        c->get_status(&t);
+        v.push_back(t);
+    }
+}
+
 void TemperatureControlPool::load_tools()
 {
     vector<uint16_t> modules;
@@ -28,6 +63,7 @@ void TemperatureControlPool::load_tools()
         // If module is enabled
         if( THEKERNEL->config->value(temperature_control_checksum, cs, enable_checksum )->as_bool() ) {
             TemperatureControl *controller = new TemperatureControl(cs, cnt++);
+            controls.push_back(controller);
             THEKERNEL->add_module(controller);
         }
     }

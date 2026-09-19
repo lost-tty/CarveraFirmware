@@ -18,11 +18,10 @@ using std::string;
 #include "WirelessProbe.h"
 #include "libs/RingBuffer.h"
 #include "libs/SerialMessage.h"
-#include "PublicDataRequest.h"
-#include "PublicData.h"
 #include "libs/Logging.h"
 #include "libs/StreamOutput.h"
 #include "SwitchPublicAccess.h"
+#include "SwitchPool.h"
 #include "ATCHandlerPublicAccess.h"
 
 #define wp_checksum						CHECKSUM("wp")
@@ -83,19 +82,19 @@ void WirelessProbe::on_main_loop(void * argument) {
                 	   // compare voltage value and switch probe charger
                 	   if (this->wp_voltage <= this->min_voltage) {
                 		   struct pad_switch pad;
-                           bool ok = PublicData::get_value(switch_checksum, probecharger_checksum, 0, &pad);
+                           bool ok = SwitchPool::get_state(probecharger_checksum, &pad);
                            if (!ok || !pad.state) {
                         	   printk("WP voltage: [%1.2fV], start charging\n", this->wp_voltage);
                     		   bool b = true;
-                    		   PublicData::set_value( switch_checksum, probecharger_checksum, state_checksum, &b );
+                    		   SwitchPool::set_state(probecharger_checksum, b);
                            }
                 	   } else if (this->wp_voltage >= this->max_voltage) {
                 		   struct pad_switch pad;
-                           bool ok = PublicData::get_value(switch_checksum, probecharger_checksum, 0, &pad);
+                           bool ok = SwitchPool::get_state(probecharger_checksum, &pad);
                            if (!ok || pad.state) {
                         	   printk("WP voltage: [%1.2fV], end charging\n", this->wp_voltage);
                     		   bool b = false;
-                    		   PublicData::set_value( switch_checksum, probecharger_checksum, state_checksum, &b );
+                    		   SwitchPool::set_state(probecharger_checksum, b);
                            }
                 	   }
             	   }

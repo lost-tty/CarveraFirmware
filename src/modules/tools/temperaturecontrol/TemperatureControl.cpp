@@ -13,9 +13,7 @@
 #include "TemperatureControlPool.h"
 #include "libs/Pin.h"
 #include "modules/robot/Conveyor.h"
-#include "PublicDataRequest.h"
 
-#include "PublicData.h"
 #include "Logging.h"
 #include "Config.h"
 #include "checksumm.h"
@@ -81,14 +79,12 @@ void TemperatureControl::on_module_loaded()
 
     // Register for events
     GcodeDispatch::add_handler(this);
-    this->register_for_event(ON_GET_PUBLIC_DATA);
     this->register_for_event(ON_IDLE);
     this->register_for_event(ON_SECOND_TICK);
 
     if(!this->readonly) {
         this->register_for_event(ON_MAIN_LOOP);
-        this->register_for_event(ON_SET_PUBLIC_DATA);
-        this->register_for_event(ON_HALT);
+            this->register_for_event(ON_HALT);
     }
 }
 
@@ -337,67 +333,15 @@ void TemperatureControl::on_gcode_received(Gcode *argument)
     }
 }
 
-void TemperatureControl::on_get_public_data(void *argument)
+void TemperatureControl::get_status(struct pad_temperature *t)
 {
-    PublicDataRequest *pdr = static_cast<PublicDataRequest *>(argument);
-
-    if(!pdr->starts_with(temperature_control_checksum)) return;
-
-    if(pdr->second_element_is(pool_index_checksum)) {
-        // asking for our instance pointer if we have this pool_index
-        if(pdr->third_element_is(this->pool_index)) {
-            static void *return_data;
-            return_data = this;
-            pdr->set_data_ptr(&return_data);
-            pdr->set_taken();
-        }
-
-    }else if(pdr->second_element_is(poll_controls_checksum)) {
-        // polling for all temperature controls
-        // add our data to the list which is passed in via the data_ptr
-
-        std::vector<struct pad_temperature> *v= static_cast<std::vector<pad_temperature>*>(pdr->get_data_ptr());
-
-        struct pad_temperature t;
-        // setup data
-        t.current_temperature = this->get_temperature();
-        t.target_temperature = (target_temperature <= 0) ? 0 : this->target_temperature;
-        t.pwm = this->o;
-        t.designator= this->designator;
-        t.id= this->name_checksum;
-        v->push_back(t);
-        pdr->set_taken();
-
-    }else if(pdr->second_element_is(current_temperature_checksum)) {
-        // if targeted at us
-        if(pdr->third_element_is(this->name_checksum)) {
-            // ok this is targeted at us, so set the requ3sted data in the pointer passed into us
-            struct pad_temperature *t= static_cast<pad_temperature*>(pdr->get_data_ptr());
-            t->current_temperature = this->get_temperature();
-            t->target_temperature = (target_temperature <= 0) ? 0 : this->target_temperature;
-            t->pwm = this->o;
-            t->designator= this->designator;
-            t->id= this->name_checksum;
-            pdr->set_taken();
-        }
-    }
-
+    t->current_temperature = this->get_temperature();
+    t->target_temperature = (target_temperature <= 0) ? 0 : this->target_temperature;
+    t->pwm = this->o;
+    t->designator = this->designator;
+    t->id = this->name_checksum;
 }
 
-void TemperatureControl::on_set_public_data(void *argument)
-{
-    PublicDataRequest *pdr = static_cast<PublicDataRequest *>(argument);
-
-    if(!pdr->starts_with(temperature_control_checksum)) return;
-
-    if(!pdr->second_element_is(this->name_checksum)) return;
-
-    // ok this is targeted at us, so set the temp
-    // NOTE unlike the M code this will set the temp now not when the queue is empty
-    float t = *static_cast<float *>(pdr->get_data_ptr());
-    this->set_desired_temperature(t);
-    pdr->set_taken();
-}
 
 void TemperatureControl::set_desired_temperature(float desired_temperature)
 {

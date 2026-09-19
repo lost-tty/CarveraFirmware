@@ -13,7 +13,6 @@
 #include "Switch.h"
 #include "libs/Pin.h"
 #include "modules/robot/Conveyor.h"
-#include "PublicDataRequest.h"
 #include "SwitchPublicAccess.h"
 #include "Config.h"
 #include "Gcode.h"
@@ -77,8 +76,6 @@ void Switch::on_module_loaded()
 
     GcodeDispatch::add_handler(this);
     this->register_for_event(ON_MAIN_LOOP);
-    this->register_for_event(ON_GET_PUBLIC_DATA);
-    this->register_for_event(ON_SET_PUBLIC_DATA);
     this->register_for_event(ON_HALT);
 
     // Settings
@@ -442,54 +439,27 @@ void Switch::on_gcode_received(Gcode *argument)
     }
 }
 
-void Switch::on_get_public_data(void *argument)
+void Switch::get_state(struct pad_switch *pad) const
 {
-    PublicDataRequest *pdr = static_cast<PublicDataRequest *>(argument);
-
-    if(!pdr->starts_with(switch_checksum)) return;
-
-    if(!pdr->second_element_is(this->name_checksum)) return; // likely fan, but could be anything
-
-    // ok this is targeted at us, so send back the requested data
-    // caller has provided the location to write the state to
-    struct pad_switch *pad = static_cast<struct pad_switch *>(pdr->get_data_ptr());
     pad->name = this->name_checksum;
     pad->state = this->switch_state;
     pad->value = this->switch_value;
-    pdr->set_taken();
 }
 
-void Switch::on_set_public_data(void *argument)
+void Switch::set_state(bool on)
 {
-    PublicDataRequest *pdr = static_cast<PublicDataRequest *>(argument);
+    if(on) turn_on_switch(-1);
+    else turn_off_switch();
 
-    if(!pdr->starts_with(switch_checksum)) return;
+    // with no gcode to send we can act now, so a temperature switch can still run a fan
+    // while the main loop is blocked in a heat-and-wait
+    if(this->output_on_command.empty() && this->output_off_command.empty()) on_main_loop(nullptr);
+}
 
-    if(!pdr->second_element_is(this->name_checksum)) return; // likely fan, but could be anything
-
-    // ok this is targeted at us, so set the value
-    if (pdr->third_element_is(state_checksum)) {
-        bool t = *static_cast<bool *>(pdr->get_data_ptr());
-        if (t) {
-        	this->turn_on_switch(-1);
-        } else {
-        	this->turn_off_switch();
-        }
-        pdr->set_taken();
-
-        // if there is no gcode to be sent then we can do this now (in on_idle)
-        // Allows temperature switch to turn on a fan even if main loop is blocked with heat and wait
-        if(this->output_on_command.empty() && this->output_off_command.empty()) on_main_loop(nullptr);
-
-    } else if (pdr->third_element_is(state_value_checksum)) {
-    	struct pad_switch *pad = static_cast<struct pad_switch *>(pdr->get_data_ptr());
-    	if (pad->state) {
-    		this->turn_on_switch(pad->value);
-    	} else {
-    		this->turn_off_switch();
-    	}
-        pdr->set_taken();
-    }
+void Switch::set_state(bool on, float value)
+{
+    if(on) turn_on_switch(value);
+    else turn_off_switch();
 }
 
 void Switch::on_main_loop(void *argument)

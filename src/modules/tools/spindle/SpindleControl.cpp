@@ -11,8 +11,8 @@
 #include "Conveyor.h"
 #include "SpindleControl.h"
 #include "libs/Logging.h"
-#include "libs/PublicData.h"
 #include "SwitchPublicAccess.h"
+#include "SwitchPool.h"
 #include "ATCHandlerPublicAccess.h"
 #include "ATCHandler.h"
 
@@ -66,7 +66,7 @@ void SpindleControl::on_gcode_received(Gcode *argument)
             	if (THEKERNEL->get_vacuum_mode()) {
             		// open vacuum
             		bool b = true;
-                    PublicData::set_value( switch_checksum, vacuum_checksum, state_checksum, &b );
+                    SwitchPool::set_state(vacuum_checksum, b);
             	}
 
                 // M3 with S value provided: set speed
@@ -89,7 +89,7 @@ void SpindleControl::on_gcode_received(Gcode *argument)
             	if (THEKERNEL->get_vacuum_mode()) {
             		// close vacuum
             		bool b = false;
-                    PublicData::set_value( switch_checksum, vacuum_checksum, state_checksum, &b );
+                    SwitchPool::set_state(vacuum_checksum, b);
             	}
 
                 // M5: spindle off

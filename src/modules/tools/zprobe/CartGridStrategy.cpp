@@ -94,8 +94,6 @@
 #include "GcodeDispatch.h"
 #include "checksumm.h"
 #include "ConfigValue.h"
-#include "PublicDataRequest.h"
-#include "PublicData.h"
 #include "Conveyor.h"
 #include "ZProbe.h"
 #include "nuts_bolts.h"

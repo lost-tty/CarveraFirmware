@@ -15,7 +15,6 @@
 #include "SlowTicker.h"
 #include "Conveyor.h"
 #include "system_LPC17xx.h"
-#include "PublicDataRequest.h"
 #include "SpindlePublicAccess.h"
 #include "utils.h"
 

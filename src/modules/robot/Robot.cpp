@@ -6,6 +6,7 @@
 */
 
 #include "libs/Module.h"
+#include "SwitchPool.h"
 #include "libs/Kernel.h"
 
 #include "Robot.h"
@@ -16,8 +17,6 @@
 #include "Pin.h"
 #include "StepperMotor.h"
 #include "Gcode.h"
-#include "PublicDataRequest.h"
-#include "PublicData.h"
 #include "arm_solutions/BaseSolution.h"
 #include "arm_solutions/CartesianSolution.h"
 #include "checksumm.h"
@@ -951,7 +950,7 @@ void Robot::on_gcode_received(Gcode *argument)
                         if (ss.state) {
                             // open vacuum
                             bool b = true;
-                            PublicData::set_value( switch_checksum, vacuum_checksum, state_checksum, &b );
+                            SwitchPool::set_state(vacuum_checksum, b);
 
                         }
                     }
@@ -970,7 +969,7 @@ void Robot::on_gcode_received(Gcode *argument)
                         if (ss.state) {
                             // close vacuum
                             bool b = false;
-                            PublicData::set_value(switch_checksum, vacuum_checksum, state_checksum, &b);
+                            SwitchPool::set_state(vacuum_checksum, b);
                         }
                     }
                     // turn off vacuum mode
@@ -1729,13 +1728,6 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s, flo
         We ask Extruder to do all the work but we need to pass in the relevant data.
         NOTE we need to do this before we segment the line (for deltas)
     */
-    /*
-    if(!isnan(delta_e) && gcode->has_g && gcode->g == 1) {
-        float data[2]= {delta_e, rate_mm_s / millimeters_of_travel};
-        if(PublicData::set_value(extruder_checksum, target_checksum, data)) {
-            rate_mm_s *= data[1]; // adjust the feedrate
-        }
-    }*/
 
     // We cut the line into smaller segments. This is only needed on a cartesian robot for zgrid, but always necessary for robots with rotational axes like Deltas.
     // In delta robots either mm_per_line_segment can be used OR delta_segments_per_second

@@ -3,8 +3,6 @@
 #include "checksumm.h"
 #include "utils.h"
 #include "Test_kernel.h"
-#include "PublicDataRequest.h"
-#include "PublicData.h"
 #include "TemperatureControlPublicAccess.h"
 #include "SwitchPublicAccess.h"
 #include "Gcode.h"

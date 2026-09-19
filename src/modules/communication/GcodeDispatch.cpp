@@ -14,7 +14,6 @@
 #include "libs/SerialMessage.h"
 #include "libs/StreamOutput.h"
 #include "checksumm.h"
-#include "PublicData.h"
 #include "Source.h"
 
 #include <cctype>

@@ -18,8 +18,6 @@ using std::string;
 #include "libs/StreamOutput.h"
 #include "libs/Logging.h"
 #include "ATCHandlerPublicAccess.h"
-#include "PublicDataRequest.h"
-#include "PublicData.h"
 
 // Serial reading module
 SerialConsole::SerialConsole( PinName rx_pin, PinName tx_pin, int baud_rate )

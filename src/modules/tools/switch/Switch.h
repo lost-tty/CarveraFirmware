@@ -32,12 +32,15 @@ class Switch : public Module {
             pwm_timer("PWMTimer", 1, true, this->sigmadelta_pin, &Pwm::on_tick)
         {}
 
+        uint16_t get_name() const { return name_checksum; }
+        void get_state(struct pad_switch *pad) const;
+        void set_state(bool on);
+        void set_state(bool on, float value);
+
         void on_module_loaded();
         void on_main_loop(void *argument);
         void on_config_reload(void* argument);
         void on_gcode_received(Gcode *argument);
-        void on_get_public_data(void* argument);
-        void on_set_public_data(void* argument);
         void on_halt(void *arg);
 
         void pinpoll_tick();

@@ -26,8 +26,6 @@
 #include "modules/robot/Conveyor.h"
 #include "DirHandle.h"
 #include "ATCHandlerPublicAccess.h"
-#include "PublicDataRequest.h"
-#include "PublicData.h"
 #include "PlayerPublicAccess.h"
 #include "ScriptsPublicAccess.h"
 #include "Scripts.h"
@@ -153,19 +151,6 @@ void Player::shell(void *self, const char *name, std::string args, StreamOutput 
 // Play a gcode file by considering each line as if it was received on the serial console
 void Player::play_command( string parameters, StreamOutput *stream )
 {
-//    // current tool number and tool offset
-//    struct tool_status tool;
-//    bool tool_ok = PublicData::get_value( atc_handler_checksum, get_tool_status_checksum, &tool );
-//    if (tool_ok) {
-//    	tool_ok = tool.active_tool > 0;
-//    }
-//	// check if is tool -1 or tool 0
-//	if (!tool_ok) {
-//		THEKERNEL->call_event(ON_HALT, nullptr);
-//		THEKERNEL->set_halt_reason(MANUAL);
-//		printk("ERROR: No tool or probe tool!\n");
-//		return;
-//	}
 
     // extract any options from the line and terminate the line there
     string options= extract_options(parameters);

@@ -31,7 +31,6 @@ class Conveyor;
 class SerialConsole;
 class GcodeDispatch;
 class Robot;
-class PublicData;
 class SimpleShell;
 
 enum STATE {

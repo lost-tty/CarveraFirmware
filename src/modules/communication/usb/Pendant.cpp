@@ -2,13 +2,13 @@
 #include "UsbHost.h"
 #include "libs/Kernel.h"
 #include "libs/Logging.h"
-#include "libs/PublicData.h"
 #include "Robot.h"
 #include "StepperMotor.h"
 #include "utils.h"
 #include "SpindlePublicAccess.h"
 #include "SpindleControl.h"
 #include "SwitchPublicAccess.h"
+#include "SwitchPool.h"
 #include "checksumm.h"
 #include "mbed.h"
 #include "tusb.h"
@@ -176,9 +176,9 @@ void Pendant::jog(char axis, int8_t dir)
 void Pendant::toggle_switch(const char* name)
 {
     struct pad_switch pad;
-    if (!PublicData::get_value(switch_checksum, get_checksum(name), 0, &pad)) return;
+    if (!SwitchPool::get_state(get_checksum(name), &pad)) return;
     bool on = !pad.state;
-    PublicData::set_value(switch_checksum, get_checksum(name), state_checksum, &on);
+    SwitchPool::set_state(get_checksum(name), on);
 }
 
 void Pendant::tick()

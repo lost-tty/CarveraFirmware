@@ -19,7 +19,6 @@
 #include "checksumm.h"
 #include "ConfigValue.h"
 #include "SerialMessage.h"
-#include "PublicDataRequest.h"
 #include "ZProbePublicAccess.h"
 #include "LevelingStrategy.h"
 #include "utils.h"

@@ -5,7 +5,6 @@
 #include "quicklz.h"
 #include "utils.h"
 #include "mbed.h"
-#include "PublicData.h"
 #include "ScriptsPublicAccess.h"
 #include "Scripts.h"
 #include "Source.h"

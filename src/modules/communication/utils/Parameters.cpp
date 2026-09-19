@@ -5,7 +5,6 @@
 #include "Conveyor.h"
 #include "StepperMotor.h"
 #include "checksumm.h"
-#include "PublicData.h"
 #include "SpindlePublicAccess.h"
 #include "SpindleControl.h"
 #include "ATCHandlerPublicAccess.h"

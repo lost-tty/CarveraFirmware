@@ -19,6 +19,9 @@ class TemperatureControl : public Module {
 
 
     public:
+        uint16_t get_name() const { return name_checksum; }
+        void get_status(struct pad_temperature *t);
+        void set_desired_temperature(float desired_temperature);
         TemperatureControl(uint16_t name, int index)
         : tempcontrol_timer("TempControl", 1, true, &heater_pin, &Pwm::on_tick),
         thermistor_timer("ThermistorReading", 100, true, this, &TemperatureControl::thermistor_read_tick),
@@ -37,12 +40,9 @@ class TemperatureControl : public Module {
         void on_main_loop(void* argument);
         void on_gcode_received(Gcode *argument);
         void on_second_tick(void* argument);
-        void on_get_public_data(void* argument);
-        void on_set_public_data(void* argument);
         void on_halt(void* argument);
         void on_idle(void* argument);
 
-        void set_desired_temperature(float desired_temperature);
 
         float get_temperature();
 

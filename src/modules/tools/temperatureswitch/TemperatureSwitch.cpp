@@ -18,6 +18,7 @@ Author: Michael Hackney, mhackney@eclecticangler.com
 #include "libs/Kernel.h"
 #include "modules/tools/temperaturecontrol/TemperatureControlPublicAccess.h"
 #include "SwitchPublicAccess.h"
+#include "SwitchPool.h"
 #include "LaserPublicAccess.h"
 
 #include "utils.h"
@@ -25,7 +26,6 @@ Author: Michael Hackney, mhackney@eclecticangler.com
 #include "Config.h"
 #include "ConfigValue.h"
 #include "checksumm.h"
-#include "PublicData.h"
 #include "Logging.h"
 #include "TemperatureControlPool.h"
 #include "mri.h"
@@ -98,7 +98,7 @@ void TemperatureSwitch::on_second_tick(void *argument)
     	struct pad_switch pad;
     	pad.state = true;
     	pad.value = temperatureswitch_cooldown_power_laser;
-	    ok = PublicData::set_value(switch_checksum, this->temperatureswitch_switch_cs, state_value_checksum, &pad);
+	    ok = SwitchPool::set_state(this->temperatureswitch_switch_cs, pad.state, pad.value);
 	    if (!ok) {
 	        printk("Error turn on spindle fan.\r\n");
 	    }
@@ -111,7 +111,7 @@ void TemperatureSwitch::on_second_tick(void *argument)
 	    	struct pad_switch pad;
 	    	pad.state = true;
 	    	pad.value = temperatureswitch_cooldown_power_init + (current_temp - temperatureswitch_threshold_temp) * temperatureswitch_cooldown_power_step;
-		    ok = PublicData::set_value(switch_checksum, this->temperatureswitch_switch_cs, state_value_checksum, &pad);
+		    ok = SwitchPool::set_state(this->temperatureswitch_switch_cs, pad.state, pad.value);
 		    if (!ok) {
 		        printk("Error turn on spindle fan.\r\n");
 		    }
@@ -125,7 +125,7 @@ void TemperatureSwitch::on_second_tick(void *argument)
 //	    			if (!THEKERNEL->is_uploading())
 //	    				printk("Spindle temp: [%.2f], Turn off spindle fan...\r\n", current_temp);
 	    			bool switch_state = false;
-	    		    ok = PublicData::set_value(switch_checksum, this->temperatureswitch_switch_cs, state_checksum, &switch_state);
+	    		    ok = SwitchPool::set_state(this->temperatureswitch_switch_cs, switch_state);
 	    		    if (!ok) {
 	    		        printk("Error turn off spindle fan.\r\n");
 	    		    }
@@ -142,14 +142,9 @@ float TemperatureSwitch::get_highest_temperature()
     float high_temp = 0.0;
 
     std::vector<struct pad_temperature> controllers;
-    bool ok = PublicData::get_value(temperature_control_checksum, poll_controls_checksum, &controllers);
-    if (ok) {
-        for (auto &c : controllers) {
-            // check if this controller's temp is the highest and save it if so
-            if (c.current_temperature > high_temp) {
-                high_temp = c.current_temperature;
-            }
-        }
+    TemperatureControlPool::poll(controllers);
+    for (auto &c : controllers) {
+        if (c.current_temperature > high_temp) high_temp = c.current_temperature;
     }
     return high_temp;
 }

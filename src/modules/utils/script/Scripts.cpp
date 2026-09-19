@@ -7,12 +7,10 @@
 #include "libs/Logging.h"
 #include "utils/Gcode.h"
 #include "checksumm.h"
-#include "PublicData.h"
 #include "ScriptsPublicAccess.h"
 #include "ATCHandlerPublicAccess.h"
 #include "utils/Parameters.h"
 #include "SimpleShell.h"
-#include "PublicDataRequest.h"
 #include "utils.h"
 
 #include <algorithm>

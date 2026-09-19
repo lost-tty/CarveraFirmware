@@ -20,7 +20,6 @@ This is aprt of the Smoothie test framework, it generates a Mockable Kernl so ke
 #include "ConfigValue.h"
 
 #include "libs/StepTicker.h"
-#include "libs/PublicData.h"
 #include "modules/communication/SerialConsole.h"
 #include "modules/communication/GcodeDispatch.h"
 #include "modules/robot/Planner.h"

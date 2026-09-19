@@ -8,9 +8,23 @@
 #ifndef SWITCHPOOL_H
 #define SWITCHPOOL_H
 
+#include <cstdint>
+#include <vector>
+
+class Switch;
+struct pad_switch;
+
 class SwitchPool{
     public:
         void load_tools();
+
+        static Switch *find(uint16_t name);
+        static bool get_state(uint16_t name, struct pad_switch *pad);
+        static bool set_state(uint16_t name, bool on);
+        static bool set_state(uint16_t name, bool on, float value);
+
+    private:
+        static std::vector<Switch *> switches;
 };
 
 #endif // SWITCHPOOL_H

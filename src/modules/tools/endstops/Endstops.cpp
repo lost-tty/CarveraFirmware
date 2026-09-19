@@ -22,8 +22,6 @@
 #include "utils.h"
 #include "ConfigValue.h"
 #include "libs/StreamOutput.h"
-#include "PublicDataRequest.h"
-#include "PublicData.h"
 #include "ScriptsPublicAccess.h"
 #include "Scripts.h"
 #include "EndstopsPublicAccess.h"

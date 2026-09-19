@@ -12,12 +12,48 @@ using namespace std;
 #include <vector>
 #include "SwitchPool.h"
 #include "Switch.h"
+#include "SwitchPublicAccess.h"
+#include "Switch.h"
 #include "Config.h"
 #include "checksumm.h"
 #include "ConfigValue.h"
 
 #define switch_checksum CHECKSUM("switch")
 #define enable_checksum CHECKSUM("enable")
+
+std::vector<Switch *> SwitchPool::switches;
+
+Switch *SwitchPool::find(uint16_t name)
+{
+    for(Switch *s : switches) {
+        if(s->get_name() == name) return s;
+    }
+    return nullptr;
+}
+
+bool SwitchPool::get_state(uint16_t name, struct pad_switch *pad)
+{
+    Switch *s = find(name);
+    if(s == nullptr) return false;
+    s->get_state(pad);
+    return true;
+}
+
+bool SwitchPool::set_state(uint16_t name, bool on)
+{
+    Switch *s = find(name);
+    if(s == nullptr) return false;
+    s->set_state(on);
+    return true;
+}
+
+bool SwitchPool::set_state(uint16_t name, bool on, float value)
+{
+    Switch *s = find(name);
+    if(s == nullptr) return false;
+    s->set_state(on, value);
+    return true;
+}
 
 void SwitchPool::load_tools()
 {
@@ -28,6 +64,7 @@ void SwitchPool::load_tools()
         // If module is enabled
         if( THEKERNEL->config->value(switch_checksum, modules[i], enable_checksum )->as_bool() == true ) {
             Switch *controller = new Switch(modules[i]);
+            switches.push_back(controller);
             THEKERNEL->add_module(controller);
         }
     }

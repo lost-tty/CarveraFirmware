@@ -20,11 +20,9 @@
 #include "DirHandle.h"
 #include "mri.h"
 #include "version.h"
-#include "PublicDataRequest.h"
 #include "AppendFileStream.h"
 #include "FileStream.h"
 #include "checksumm.h"
-#include "PublicData.h"
 #include "ScriptsPublicAccess.h"
 #include "Scripts.h"
 #include "Source.h"
@@ -39,12 +37,14 @@
 #include "ZProbePublicAccess.h"
 #include "LaserPublicAccess.h"
 #include "TemperatureControlPublicAccess.h"
+#include "TemperatureControlPool.h"
 #include "EndstopsPublicAccess.h"
 #include "Endstops.h"
 #include "ATCHandlerPublicAccess.h"
 #include "WirelessProbe.h"
 // #include "NetworkPublicAccess.h"
 #include "SwitchPublicAccess.h"
+#include "SwitchPool.h"
 #include "SDFAT.h"
 #include "Thermistor.h"
 #include "md5.h"
@@ -685,17 +685,6 @@ void SimpleShell::time_command( string parameters, StreamOutput *stream)
 // get network config
 void SimpleShell::net_command( string parameters, StreamOutput *stream)
 {
-	/*
-    void *returned_data;
-    bool ok = PublicData::get_value( network_checksum, get_ipconfig_checksum, &returned_data );
-    if(ok) {
-        char *str = (char *)returned_data;
-        stream->printf("%s\r\n", str);
-        free(str);
-
-    } else {
-        stream->printf("No network detected\n");
-    }*/
 }
 
 // get or set ap channel config
@@ -924,7 +913,7 @@ static bool get_switch_state(const char *sw)
 {
     // get sw switch state
     struct pad_switch pad;
-    bool ok = PublicData::get_value(switch_checksum, get_checksum(sw), 0, &pad);
+    bool ok = SwitchPool::get_state(get_checksum(sw), &pad);
     if (!ok) {
         return false;
     }
@@ -1002,18 +991,14 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
         if(type.empty()) {
             // scan all temperature controls
             std::vector<struct pad_temperature> controllers;
-            bool ok = PublicData::get_value(temperature_control_checksum, poll_controls_checksum, &controllers);
-            if (ok) {
-                for (auto &c : controllers) {
-                   stream->printf("%s (%d) temp: %f/%f @%d\r\n", c.designator.c_str(), c.id, c.current_temperature, c.target_temperature, c.pwm);
-                }
-
-            } else {
-                stream->printf("no heaters found\r\n");
+            TemperatureControlPool::poll(controllers);
+            if (controllers.empty()) stream->printf("no heaters found\r\n");
+            for (auto &c : controllers) {
+                stream->printf("%s (%d) temp: %f/%f @%d\r\n", c.designator.c_str(), c.id, c.current_temperature, c.target_temperature, c.pwm);
             }
 
         }else{
-            bool ok = PublicData::get_value( temperature_control_checksum, current_temperature_checksum, get_checksum(type), &temp );
+            bool ok = TemperatureControlPool::get_temperature(get_checksum(type), &temp);
 
             if (ok) {
                 stream->printf("%s temp: %f/%f @%d\r\n", type.c_str(), temp.current_temperature, temp.target_temperature, temp.pwm);
@@ -1119,7 +1104,7 @@ void SimpleShell::set_temp_command( string parameters, StreamOutput *stream)
     string type = shift_parameter( parameters );
     string temp = shift_parameter( parameters );
     float t = temp.empty() ? 0.0 : strtof(temp.c_str(), NULL);
-    bool ok = PublicData::set_value( temperature_control_checksum, get_checksum(type), &t );
+    bool ok = TemperatureControlPool::set_temperature(get_checksum(type), t);
 
     if (ok) {
         stream->printf("%s temp set to: %3.1f\r\n", type.c_str(), t);
@@ -1181,7 +1166,7 @@ void SimpleShell::switch_command( string parameters, StreamOutput *stream)
         type = shift_parameter( parameters );
         while(!type.empty()) {
             struct pad_switch pad;
-            bool ok = PublicData::get_value(switch_checksum, get_checksum(type), 0, &pad);
+            bool ok = SwitchPool::get_state(get_checksum(type), &pad);
             if(ok) {
                 stream->printf("switch %s is %d\n", type.c_str(), pad.state);
             }
@@ -1199,7 +1184,7 @@ void SimpleShell::switch_command( string parameters, StreamOutput *stream)
     if(value.empty()) {
         // get switch state
         struct pad_switch pad;
-        bool ok = PublicData::get_value(switch_checksum, get_checksum(type), 0, &pad);
+        bool ok = SwitchPool::get_state(get_checksum(type), &pad);
         if (!ok) {
             stream->printf("unknown switch %s.\n", type.c_str());
             return;
@@ -1210,7 +1195,7 @@ void SimpleShell::switch_command( string parameters, StreamOutput *stream)
         // set switch state
         if(value == "on" || value == "off") {
             bool b = value == "on";
-            ok = PublicData::set_value( switch_checksum, get_checksum(type), state_checksum, &b );
+            ok = SwitchPool::set_state(get_checksum(type), b);
         } else {
             stream->printf("must be either on or off\n");
             return;

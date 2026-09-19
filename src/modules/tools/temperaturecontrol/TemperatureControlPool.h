@@ -8,9 +8,23 @@
 #ifndef TEMPERATURECONTROLPOOL_H
 #define TEMPERATURECONTROLPOOL_H
 
+#include <cstdint>
+#include <vector>
+
+class TemperatureControl;
+struct pad_temperature;
+
 class TemperatureControlPool {
     public:
         void load_tools();
+
+        static TemperatureControl *find(uint16_t name);
+        static bool get_temperature(uint16_t name, struct pad_temperature *t);
+        static bool set_temperature(uint16_t name, float target);
+        static void poll(std::vector<struct pad_temperature> &v);
+
+    private:
+        static std::vector<TemperatureControl *> controls;
 };
 
 

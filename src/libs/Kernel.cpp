@@ -15,7 +15,6 @@
 #include "ConfigValue.h"
 
 #include "libs/StepTicker.h"
-#include "libs/PublicData.h"
 #include "modules/communication/SerialConsole.h"
 #include "modules/communication/WirelessProbe.h"
 #include "modules/robot/Planner.h"
@@ -33,11 +32,13 @@
 #include "EndstopsPublicAccess.h"
 #include "SimpleShell.h"
 #include "TemperatureControlPublicAccess.h"
+#include "TemperatureControlPool.h"
 #include "LaserPublicAccess.h"
 #include "ATCHandlerPublicAccess.h"
 #include "PlayerPublicAccess.h"
 #include "SpindlePublicAccess.h"
 #include "SwitchPublicAccess.h"
+#include "SwitchPool.h"
 #include "ZProbePublicAccess.h"
 #include "MainButtonPublicAccess.h"
 #include "mbed.h"
@@ -288,7 +289,7 @@ std::string Kernel::get_query_string()
 
     // get spindle temperature
     struct pad_temperature temp;
-    ok = PublicData::get_value( temperature_control_checksum, current_temperature_checksum, spindle_temperature_checksum, &temp );
+    ok = TemperatureControlPool::get_temperature(spindle_temperature_checksum, &temp);
 	if (ok) {
         n= snprintf(buf, sizeof(buf), ",%1.1f", temp.current_temperature);
         if(n > sizeof(buf)) n= sizeof(buf);
@@ -381,43 +382,43 @@ std::string Kernel::get_diagnose_string()
 
     // get switchs state
     struct pad_switch pad;
-    ok = PublicData::get_value(switch_checksum, get_checksum("vacuum"), 0, &pad);
+    ok = SwitchPool::get_state(get_checksum("vacuum"), &pad);
     if (ok) {
         n = snprintf(buf, sizeof(buf), "|V:%d,%d", (int)pad.state, (int)pad.value);
         if(n > sizeof(buf)) n = sizeof(buf);
         str.append(buf, n);
     }
-    ok = PublicData::get_value(switch_checksum, get_checksum("spindlefan"), 0, &pad);
+    ok = SwitchPool::get_state(get_checksum("spindlefan"), &pad);
     if (ok) {
         n = snprintf(buf, sizeof(buf), "|F:%d,%d", (int)pad.state, (int)pad.value);
         if(n > sizeof(buf)) n = sizeof(buf);
         str.append(buf, n);
     }
-    ok = PublicData::get_value(switch_checksum, get_checksum("light"), 0, &pad);
+    ok = SwitchPool::get_state(get_checksum("light"), &pad);
     if (ok) {
         n = snprintf(buf, sizeof(buf), "|G:%d", (int)pad.state);
         if(n > sizeof(buf)) n = sizeof(buf);
         str.append(buf, n);
     }
     // beep, extend in, extend out state, extend out value (Controller >= 0.9.13 layout)
-    ok = PublicData::get_value(switch_checksum, get_checksum("extend"), 0, &pad);
+    ok = SwitchPool::get_state(get_checksum("extend"), &pad);
     if (!ok) { pad.state = false; pad.value = 0; }
     n = snprintf(buf, sizeof(buf), ",0,0,%d,%d", (int)pad.state, (int)pad.value);
     if(n > sizeof(buf)) n = sizeof(buf);
     str.append(buf, n);
-    ok = PublicData::get_value(switch_checksum, get_checksum("toolsensor"), 0, &pad);
+    ok = SwitchPool::get_state(get_checksum("toolsensor"), &pad);
     if (ok) {
         n = snprintf(buf, sizeof(buf), "|T:%d", (int)pad.state);
         if(n > sizeof(buf)) n = sizeof(buf);
         str.append(buf, n);
     }
-    ok = PublicData::get_value(switch_checksum, get_checksum("air"), 0, &pad);
+    ok = SwitchPool::get_state(get_checksum("air"), &pad);
     if (ok) {
         n = snprintf(buf, sizeof(buf), "|R:%d", (int)pad.state);
         if(n > sizeof(buf)) n = sizeof(buf);
         str.append(buf, n);
     }
-    ok = PublicData::get_value(switch_checksum, get_checksum("probecharger"), 0, &pad);
+    ok = SwitchPool::get_state(get_checksum("probecharger"), &pad);
     if (ok) {
         n = snprintf(buf, sizeof(buf), "|C:%d", (int)pad.state);
         if(n > sizeof(buf)) n = sizeof(buf);
