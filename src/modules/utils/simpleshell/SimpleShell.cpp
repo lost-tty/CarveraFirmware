@@ -937,18 +937,16 @@ void SimpleShell::grblDP_command( string parameters, StreamOutput *stream)
 
     bool verbose = shift_parameter( parameters ).find_first_of("Vv") != string::npos;
 
-    std::vector<Robot::wcs_t> v= THEROBOT.get_wcs_state();
     if(verbose) {
-        char current_wcs= std::get<0>(v[0]);
-        stream->printf("[current WCS: %s]\n", wcs2gcode(current_wcs).c_str());
+        stream->printf("[current WCS: %s]\n", wcs2gcode(THEROBOT.get_current_wcs()).c_str());
     }
 
-    int n= std::get<1>(v[0]);
-    for (int i = 1; i <= n; ++i) {
-        stream->printf("[%s:%1.4f,%1.4f,%1.4f]\n", wcs2gcode(i-1).c_str(),
-            THEROBOT.from_millimeters(std::get<0>(v[i])),
-            THEROBOT.from_millimeters(std::get<1>(v[i])),
-            THEROBOT.from_millimeters(std::get<2>(v[i])));
+    for (int i = 0; i < (int)MAX_WCS; ++i) {
+        Robot::wcs_t o= THEROBOT.get_wcs_offset(i);
+        stream->printf("[%s:%1.4f,%1.4f,%1.4f]\n", wcs2gcode(i).c_str(),
+            THEROBOT.from_millimeters(std::get<0>(o)),
+            THEROBOT.from_millimeters(std::get<1>(o)),
+            THEROBOT.from_millimeters(std::get<2>(o)));
     }
 
     const float *rd = endstops.get_g28_position();
@@ -959,18 +957,20 @@ void SimpleShell::grblDP_command( string parameters, StreamOutput *stream)
 
     stream->printf("[G30:%1.4f,%1.4f,%1.4f]\n", 0.0, 0.0, 0.0); // not supported
 
+    Robot::wcs_t g92= THEROBOT.get_g92_offset();
     stream->printf("[G92:%1.4f,%1.4f,%1.4f]\n",
-        THEROBOT.from_millimeters(std::get<0>(v[n+1])),
-        THEROBOT.from_millimeters(std::get<1>(v[n+1])),
-        THEROBOT.from_millimeters(std::get<2>(v[n+1])));
+        THEROBOT.from_millimeters(std::get<0>(g92)),
+        THEROBOT.from_millimeters(std::get<1>(g92)),
+        THEROBOT.from_millimeters(std::get<2>(g92)));
 
+    Robot::wcs_t to= THEROBOT.get_tool_offset();
     if(verbose) {
         stream->printf("[Tool Offset:%1.4f,%1.4f,%1.4f]\n",
-            THEROBOT.from_millimeters(std::get<0>(v[n+2])),
-            THEROBOT.from_millimeters(std::get<1>(v[n+2])),
-            THEROBOT.from_millimeters(std::get<2>(v[n+2])));
+            THEROBOT.from_millimeters(std::get<0>(to)),
+            THEROBOT.from_millimeters(std::get<1>(to)),
+            THEROBOT.from_millimeters(std::get<2>(to)));
     }else{
-        stream->printf("[TL0:%1.4f]\n", THEROBOT.from_millimeters(std::get<2>(v[n+2])));
+        stream->printf("[TL0:%1.4f]\n", THEROBOT.from_millimeters(std::get<2>(to)));
     }
 
     // this is the last probe position, updated when a probe completes, also stores the number of steps moved after a homing cycle
@@ -1049,13 +1049,16 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
 
    } else if (what == "pos") {
         // convenience to call all the various M114 variants, shows ABC axis where relevant
-        std::string buf;
-        THEROBOT.print_position(0, buf); stream->printf("last %s\n", buf.c_str()); buf.clear();
-        THEROBOT.print_position(1, buf); stream->printf("realtime %s\n", buf.c_str()); buf.clear();
-        THEROBOT.print_position(2, buf); stream->printf("%s\n", buf.c_str()); buf.clear();
-        THEROBOT.print_position(3, buf); stream->printf("%s\n", buf.c_str()); buf.clear();
-        THEROBOT.print_position(4, buf); stream->printf("%s\n", buf.c_str()); buf.clear();
-        THEROBOT.print_position(5, buf); stream->printf("%s\n", buf.c_str()); buf.clear();
+        static const struct { Robot::position_source src; const char *tag, *prefix; } views[]{
+            {Robot::WCS_POS, "C", "last "}, {Robot::REALTIME_WCS, "WCS", "realtime "},
+            {Robot::REALTIME_MCS, "MCS", ""}, {Robot::ACTUATOR, "APOS", ""},
+            {Robot::LAST_MILESTONE, "MP", ""}, {Robot::COMPENSATED, "CMP", ""},
+        };
+        char buf[80];
+        for(auto &v : views) {
+            THEROBOT.format_position(v.src, v.tag, buf, sizeof(buf));
+            stream->printf("%s%s\n", v.prefix, buf);
+        }
 
     } else if (what == "wcs") {
         // print the wcs state

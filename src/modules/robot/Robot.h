@@ -69,12 +69,17 @@ class Robot : public Module {
         compensation_fn take_compensation();          // suspends it, put it back when done
         void put_compensation(compensation_fn fn) { compensationTransform= fn; }
         bool is_homed_all_axes() const { return is_homed(X_AXIS) && is_homed(Y_AXIS) && is_homed(Z_AXIS); }
-        void print_position(uint8_t subcode, std::string& buf, bool ignore_extruders=false) const;
+        // 0 and 1 come back in the active units, the rest always in mm
+        enum position_source { WCS_POS= 0, REALTIME_WCS= 1, REALTIME_MCS= 2, ACTUATOR= 3, LAST_MILESTONE= 4, COMPENSATED= 5 };
+        uint8_t get_position(position_source src, float *pos) const;   // fills n_motors values
+        void format_position(position_source src, const char *tag, char *buf, size_t len) const;
         uint8_t get_current_wcs() const { return current_wcs; }
         uint8_t get_plane_code() const;                                  // G17, G18 or G19
         uint8_t get_units_code() const { return inch_mode ? 20 : 21; }
         uint8_t get_distance_code() const { return absolute_mode ? 90 : 91; }
-        std::vector<wcs_t> get_wcs_state() const;
+        wcs_t get_wcs_offset(uint8_t wcs) const { return wcs_offsets[wcs < MAX_WCS ? wcs : 0]; }
+        wcs_t get_g92_offset() const { return g92_offset; }
+        wcs_t get_tool_offset() const { return tool_offset; }
         std::tuple<float, float, float, uint8_t> get_last_probe_position() const { return last_probe_position; }
         void set_last_probe_position(std::tuple<float, float, float, uint8_t> p) { last_probe_position = p; }
         bool delta_move(const float delta[], float rate_mm_s, uint8_t naxis);
@@ -100,10 +105,6 @@ class Robot : public Module {
         void clearLaserOffset();
 
         BaseSolution* arm_solution;                           // Selected Arm solution ( millimeters to step calculation )
-
-
-        // set by an active extruder, returns the amount to scale the E parameter by (to convert mm³ to mm)
-        std::function<float(void)> get_e_scale_fnc;
 
         // Workspace coordinate systems
         wcs_t mcs2wcs(const wcs_t &pos) const;
@@ -159,7 +160,7 @@ class Robot : public Module {
 
         void load_config();
         bool append_milestone(const float target[], float rate_mm_s, unsigned int line);
-        bool append_line( Gcode* gcode, const float target[], float rate_mm_s, float delta_e);
+        bool append_line( Gcode* gcode, const float target[], float rate_mm_s);
         bool append_arc( Gcode* gcode, const float target[], const float offset[], float radius, bool is_clockwise );
         bool arc_radius_to_offset(Gcode *gcode, const float target[], MOTION_MODE_T mode, float offset[3]);
         bool compute_arc(Gcode* gcode, const float offset[], const float target[], enum MOTION_MODE_T motion_mode);
@@ -170,7 +171,6 @@ class Robot : public Module {
         void select_plane(uint8_t axis_0, uint8_t axis_1, uint8_t axis_2);
         void clearToolOffset();
         void setLaserOffset();
-        int get_active_extruder() const;
 
         std::array<wcs_t, MAX_WCS> wcs_offsets; // these are persistent once saved with M500
         uint8_t current_wcs{0}; // 0 means G54 is enabled this is persistent once saved with M500
