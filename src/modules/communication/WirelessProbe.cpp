@@ -87,8 +87,7 @@ void WirelessProbe::on_main_loop(void * argument) {
                 		   struct pad_switch pad;
                            bool ok = PublicData::get_value(switch_checksum, probecharger_checksum, 0, &pad);
                            if (!ok || !pad.state) {
-                        	   if (!THEKERNEL->is_uploading())
-                        		   printk("WP voltage: [%1.2fV], start charging\n", this->wp_voltage);
+                        	   printk("WP voltage: [%1.2fV], start charging\n", this->wp_voltage);
                     		   bool b = true;
                     		   PublicData::set_value( switch_checksum, probecharger_checksum, state_checksum, &b );
                            }
@@ -96,8 +95,7 @@ void WirelessProbe::on_main_loop(void * argument) {
                 		   struct pad_switch pad;
                            bool ok = PublicData::get_value(switch_checksum, probecharger_checksum, 0, &pad);
                            if (!ok || pad.state) {
-                        	   if (!THEKERNEL->is_uploading())
-                        		   printk("WP voltage: [%1.2fV], end charging\n", this->wp_voltage);
+                        	   printk("WP voltage: [%1.2fV], end charging\n", this->wp_voltage);
                     		   bool b = false;
                     		   PublicData::set_value( switch_checksum, probecharger_checksum, state_checksum, &b );
                            }

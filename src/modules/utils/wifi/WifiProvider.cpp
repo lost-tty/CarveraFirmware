@@ -142,50 +142,6 @@ void WifiProvider::receive_wifi_data()
     }
 }
 
-void WifiProvider::on_frame()
-{
-    const uint8_t *p = decoder.payload();
-    uint16_t len = decoder.length();
-
-    switch (decoder.type()) {
-        case Frame::CTRL_SINGLE: {
-            if (len < 1) return;
-            std::string s;
-            switch (p[0]) {
-                case '?':
-                    s = THEKERNEL->get_query_string();
-                    send(Frame::STATUS, s.data(), s.size());
-                    break;
-                case '*':
-                    s = THEKERNEL->get_diagnose_string();
-                    send(Frame::DIAG, s.data(), s.size());
-                    break;
-                case 'X' - 'A' + 1: halt(); break; // ^X
-                case '!': if (THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(true); break;
-                case '~': if (THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(false); break;
-            }
-            break;
-        }
-
-        case Frame::CTRL_MULTI:
-        case Frame::FILE_START: {
-            if (len + 1 > buffer.capacity() - buffer.size()) return;
-            char last = '\n';
-            for (uint16_t i = 0; i < len; i++) {
-                char c = p[i] == '\r' ? '\n' : p[i];
-                if (c == '\n' && last == '\n') continue;
-                buffer.push_back(c);
-                last = c;
-            }
-            if (last != '\n') buffer.push_back('\n');
-            break;
-        }
-
-        default:
-            break;
-    }
-}
-
 bool WifiProvider::ready()
 {
     return M8266WIFI_SPI_Has_DataReceived();
@@ -226,7 +182,7 @@ void WifiProvider::on_second_tick(void*)
     u8 client_num = 0;
     ClientInfo RemoteClients[15];
 
-    if (!wifi_init_ok || THEKERNEL->is_uploading()) return;
+    if (!wifi_init_ok || is_transferring()) return;
 
     // List clients connected to TCP server
     M8266WIFI_SPI_List_Clients_On_A_TCP_Server(tcp_link_no, &client_num, RemoteClients, &status);
@@ -267,11 +223,7 @@ void WifiProvider::on_second_tick(void*)
 
 void WifiProvider::on_idle(void* argument)
 {
-    if (THEKERNEL->is_uploading()) {
-        // a file transfer reads the TCP data itself; whatever we had half decoded is stale
-        decoder.reset();
-        return;
-    }
+    if (is_transferring()) return; // the transfer reads the TCP data itself
 
     // Check for incoming data
     if (has_data_flag || M8266WIFI_SPI_Has_DataReceived()) {
@@ -280,29 +232,10 @@ void WifiProvider::on_idle(void* argument)
     }
 }
 
-void WifiProvider::halt(void) {
-    THEKERNEL->call_event(ON_HALT, nullptr);
-    THEKERNEL->set_halt_reason(MANUAL);
-    printf("ALARM: Abort during cycle\r\n");
-}
-
 void WifiProvider::on_main_loop(void* argument)
 {
-    // Process buffered input when a newline character is found
-    if (this->has_char('\n')) {
-        string received;
-        received.reserve(20);
-        while (1) {
-            char c;
-            this->buffer.pop_front(c);
-            if (c == '\n') {
-                SimpleShell::run(received, this);
-                break;
-            } else {
-                received += c;
-            }
-        }
-    }
+    string line;
+    if (next_line(line)) SimpleShell::run(line, this);
 }
 
 int WifiProvider::puts(const char* s, int size)
@@ -374,17 +307,6 @@ int WifiProvider::gets(char** buf, int size)
     return received;
 }
 
-bool WifiProvider::has_char(char letter)
-{
-    int index = this->buffer.tail;
-    while (index != this->buffer.head) {
-        if (this->buffer.buffer[index] == letter) {
-            return true;
-        }
-        index = this->buffer.next_block_index(index);
-    }
-    return false;
-}
 
 void WifiProvider::set_wifi_op_mode(u8 op_mode)
 {

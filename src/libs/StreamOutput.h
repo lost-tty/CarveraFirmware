@@ -34,6 +34,9 @@ class StreamOutput {
         virtual int puts(const char* buf, int size = 0) = 0;
         virtual bool ready() { return true; };
         virtual int type() {return 0; }; // 0: serial, 1: wifi
+        // set for the duration of a file transfer, which reads the stream's bytes itself
+        virtual void set_transferring(bool) {}
+        virtual bool is_transferring() const { return false; }
 
         static NullStreamOutput NullStream;
 };

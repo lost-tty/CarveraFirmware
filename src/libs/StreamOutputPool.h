@@ -24,6 +24,7 @@ public:
         int r = 0;
         for(set<StreamOutput*>::iterator i = this->streams.begin(); i != this->streams.end(); i++)
         {
+            if ((*i)->is_transferring()) continue; // text would corrupt the transfer
             int k = (*i)->puts(s, size);
             if (k > r)
                 r = k;

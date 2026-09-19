@@ -64,7 +64,6 @@ void Kernel::init()
     feed_hold = false;
     enable_feed_hold = false;
     bad_mcu= true;
-    uploading = false;
     laser_mode = false;
     vacuum_mode = false;
     optional_stop_mode = false;

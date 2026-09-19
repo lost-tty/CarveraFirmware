@@ -10,6 +10,18 @@
 
 class FileTransfer {
 public:
+    // clears on every exit path, including the early returns
+    class Claim {
+    public:
+        explicit Claim(StreamOutput *s) : stream(s) { stream->set_transferring(true); }
+        ~Claim() { release(); }
+        void release() { if(stream) { stream->set_transferring(false); stream= nullptr; } }
+        Claim(const Claim &)= delete;
+        Claim &operator=(const Claim &)= delete;
+    private:
+        StreamOutput *stream;
+    };
+
     bool upload(const std::string& filename, StreamOutput* stream);
     bool download(const std::string& filename, StreamOutput* stream);
 

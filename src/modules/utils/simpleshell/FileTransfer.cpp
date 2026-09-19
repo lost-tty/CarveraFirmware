@@ -126,7 +126,7 @@ bool FileTransfer::upload(const std::string& filename, StreamOutput* stream)
         return false;
     }
 
-    THEKERNEL->set_uploading(true);
+    Claim claim(stream);
 
     // .lz uploads land in the .lz shadow directory and are decompressed to filename afterwards
     bool is_lz = filename.find(".lz") != string::npos;
@@ -282,7 +282,7 @@ done:
     }
     if (!ok) remove(datafile.c_str());
 
-    THEKERNEL->set_uploading(false);
+    claim.release(); // decompression is slow and reads nothing from the stream
 
     if (ok && is_lz) {
         string dest = filename.substr(0, filename.find(".lz"));
@@ -310,7 +310,7 @@ bool FileTransfer::download(const std::string& filename, StreamOutput* stream)
         return false;
     }
 
-    THEKERNEL->set_uploading(true);
+    Claim claim(stream);
 
     FILE* fd = fopen(md5_filename.c_str(), "rb");
     if (fd != NULL) {
@@ -427,7 +427,6 @@ bool FileTransfer::download(const std::string& filename, StreamOutput* stream)
 
 done:
     if (fd != NULL) fclose(fd);
-    THEKERNEL->set_uploading(false);
     return ok;
 }
 

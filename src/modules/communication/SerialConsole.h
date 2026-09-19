@@ -15,20 +15,18 @@
 #include <string>
 using std::string;
 #include "libs/RingBuffer.h"
-#include "libs/StreamOutput.h"
-#include "libs/Frame.h"
+#include "FrameConsole.h"
 
 
 #define baud_rate_setting_checksum CHECKSUM("baud_rate")
 
-class SerialConsole : public Module, public StreamOutput {
+class SerialConsole : public Module, public FrameConsole {
     public:
         SerialConsole( PinName rx_pin, PinName tx_pin, int baud_rate );
 
         void on_module_loaded();
         void on_serial_char_received();
         void on_main_loop(void * argument);
-        void on_idle(void * argument);
 
         int putc(int c);
         int getc(void);
@@ -37,24 +35,9 @@ class SerialConsole : public Module, public StreamOutput {
         bool ready();
 
     private:
-        bool has_char(char letter);
-        void on_frame();
-        void decode_rx();
-
         mbed::Serial* serial;
-        struct {
-          bool query_flag:1;
-          bool halt_flag:1;
-          bool diagnose_flag:1;
-        };
-
-        static const int RX_LINE_BUF = 256;      // power of two, RingBuffer requires it
-        RingBuffer<char,RX_LINE_BUF> buffer;     // decoded command lines, '\n' terminated
         static const int RX_RAW_BUF = 256;       // power of two, RingBuffer requires it
         RingBuffer<char,RX_RAW_BUF> rx_raw;
-        static const size_t RX_FRAME_MAX = 256;  // largest accepted command frame payload; longer frames are dropped
-        uint8_t rx_frame[RX_FRAME_MAX];
-        Frame::Decoder decoder;
         char raw_chunk[32];                      // gets() hands out raw bytes from here
 };
 
