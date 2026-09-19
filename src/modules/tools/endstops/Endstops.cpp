@@ -82,8 +82,7 @@ enum DEFNS { MIN_PIN, MAX_PIN, MAX_TRAVEL, FAST_RATE, SLOW_RATE, RETRACT, DIRECT
 
 #define cover_endstop_checksum              CHECKSUM("cover_endstop")
 
-#define STEPPER THEROBOT.actuators
-#define STEPS_PER_MM(a) (STEPPER[a]->get_steps_per_mm())
+#define STEPS_PER_MM(a) (THEROBOT.motor_steps_per_mm(a))
 
 
 
@@ -443,11 +442,11 @@ void Endstops::on_idle(void *argument)
     if(THEKERNEL->is_halted()) return;
 
     for(auto& i : endstops) {
-        if(i->limit_enable && STEPPER[i->axis_index]->is_moving()) {
+        if(i->limit_enable && THEROBOT.motor_is_moving(i->axis_index)) {
             // check min and max endstops
             if(debounced_get(&i->pin)) {
                 // endstop triggered
-                printk("ALARM: Hard limit %c%c\n", STEPPER[i->axis_index]->which_direction() ? '-' : '+', i->axis);
+                printk("ALARM: Hard limit %c%c\n", THEROBOT.motor_direction(i->axis_index) ? '-' : '+', i->axis);
 
                 this->status = LIMIT_TRIGGERED;
                 i->debounce = 0;
@@ -518,7 +517,7 @@ void Endstops::read_endstops()
         if(e.pin_info == nullptr) continue; // ignore if not a homing endstop
         int m= e.axis_index;
 
-        if(STEPPER[m]->is_moving()) {
+        if(THEROBOT.motor_is_moving(m)) {
             // if it is moving then we check the associated endstop, and debounce it
             if(e.pin_info->pin.get()) {
                 if(e.pin_info->debounce < debounce_ms) {
@@ -526,7 +525,7 @@ void Endstops::read_endstops()
 
                 } else {
                     // we signal the motor to stop, which will preempt any moves on that axis
-                    STEPPER[m]->stop_moving();
+                    THEROBOT.stop_motor(m);
                     e.pin_info->triggered= true;
                 }
 

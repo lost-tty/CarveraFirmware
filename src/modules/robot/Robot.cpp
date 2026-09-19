@@ -352,6 +352,28 @@ bool Robot::step_motor(uint8_t axis, bool dir, unsigned steps, unsigned steps_pe
     return true;
 }
 
+bool  Robot::motor_is_moving(uint8_t i) const     { return i < n_motors && actuators[i]->is_moving(); }
+bool  Robot::any_motor_moving() const
+{
+    for (StepperMotor *m : actuators) if(m->is_moving()) return true;
+    return false;
+}
+
+bool  Robot::motor_direction(uint8_t i) const     { return i < n_motors && actuators[i]->which_direction(); }
+float Robot::motor_position(uint8_t i) const      { return i < n_motors ? actuators[i]->get_current_position() : 0.0F; }
+float Robot::motor_steps_per_mm(uint8_t i) const  { return i < n_motors ? actuators[i]->get_steps_per_mm() : 0.0F; }
+float Robot::motor_max_rate(uint8_t i) const      { return i < n_motors ? actuators[i]->get_max_rate() : 0.0F; }
+
+void Robot::stop_motor(uint8_t i)
+{
+    if(i < n_motors) actuators[i]->stop_moving();
+}
+
+void Robot::stop_motors()
+{
+    for (StepperMotor *m : actuators) m->stop_moving();
+}
+
 void Robot::enable_motors(bool on)
 {
     for (StepperMotor *m : actuators) m->enable(on);

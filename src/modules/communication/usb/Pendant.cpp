@@ -166,7 +166,7 @@ void Pendant::jog(char axis, int8_t dir)
     } else {
         int i = axis >= 'X' ? axis - 'X' : axis - 'A' + 3;
         if (i >= THEROBOT.get_number_registered_motors()) return;
-        distance = THEROBOT.actuators[i]->get_max_rate() * cont_scale[mode - 4] * SEGMENT_US / 1e6f;
+        distance = THEROBOT.motor_max_rate(i) * cont_scale[mode - 4] * SEGMENT_US / 1e6f;
         last_segment = us_ticker_read();
     }
     if (mode < 4) line("$J %c%.3f", axis, dir * distance);

@@ -60,7 +60,7 @@ bool Parameters::get(int n, float &v) const
             return true;
         }
 #if MAX_ROBOT_ACTUATORS > 3
-        case 5024: case 5044: v = THEROBOT.actuators[A_AXIS]->get_current_position(); return true;
+        case 5024: case 5044: v = THEROBOT.motor_position(A_AXIS); return true;
 #endif
     }
     return false;

@@ -28,8 +28,6 @@
 
 
 #define ATC_AXIS 4
-#define STEPPER THEROBOT.actuators
-// #define STEPS_PER_MM(a) (STEPPER[a]->get_steps_per_mm())
 
 #define atc_checksum            	CHECKSUM("atc")
 #define probe_checksum            	CHECKSUM("probe")
@@ -156,13 +154,13 @@ void ATCHandler::read_endstop()
 
 	if(!atc_homing || atc_home_info.triggered) return;
 
-    if(STEPPER[ATC_AXIS]->is_moving()) {
+    if(THEROBOT.motor_is_moving(ATC_AXIS)) {
         // if it is moving then we check the probe, and debounce it
         if(atc_home_info.pin.get()) {
             if(debounce < atc_home_info.debounce_ms) {
                 debounce++;
             } else {
-            	STEPPER[ATC_AXIS]->stop_moving();
+            	THEROBOT.stop_motor(ATC_AXIS);
             	atc_home_info.triggered = true;
                 debounce = 0;
             }

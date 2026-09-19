@@ -112,10 +112,7 @@ void Conveyor::on_idle(void*)
 bool Conveyor::is_idle() const
 {
     if(queue.is_empty()) {
-        for(auto &a : THEROBOT.actuators) {
-            if(a->is_moving()) return false;
-        }
-        return true;
+        return !THEROBOT.any_motor_moving();
     }
 
     return false;

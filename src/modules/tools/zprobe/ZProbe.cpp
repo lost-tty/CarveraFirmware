@@ -47,8 +47,7 @@
 #define Y_AXIS 1
 #define Z_AXIS 2
 
-#define STEPPER THEROBOT.actuators
-#define STEPS_PER_MM(a) (STEPPER[a]->get_steps_per_mm())
+#define STEPS_PER_MM(a) (THEROBOT.motor_steps_per_mm(a))
 #define Z_STEPS_PER_MM STEPS_PER_MM(Z_AXIS)
 
 void ZProbe::on_module_loaded()
@@ -138,9 +137,9 @@ void ZProbe::probe_pin_irq(bool status) {
     if (!probing || probe_detected) return;
 
     // we check all axis as it maybe a G38.2 X10 for instance, not just a probe in Z
-    if(STEPPER[X_AXIS]->is_moving() || STEPPER[Y_AXIS]->is_moving() || STEPPER[Z_AXIS]->is_moving()) {
+    if(THEROBOT.motor_is_moving(X_AXIS) || THEROBOT.motor_is_moving(Y_AXIS) || THEROBOT.motor_is_moving(Z_AXIS)) {
         if (status != invert_probe) {
-            for (auto &a : THEROBOT.actuators) a->stop_moving();
+            THEROBOT.stop_motors();
             probe_detected = true;
         }
     }
@@ -150,14 +149,14 @@ void ZProbe::calibrate_pin_irq() {
     if (!calibrating || calibrate_detected) return;
 
     // just check z Axis move
-    if (STEPPER[Z_AXIS]->is_moving()) {
+    if (THEROBOT.motor_is_moving(Z_AXIS)) {
     	if (this->probe_pin.get()) {
     		probe_detected = true;
     	}
 
         // we signal the motors to stop, which will preempt any moves on that axis
         // we do all motors as it may be a delta
-        for (auto &a : THEROBOT.actuators) a->stop_moving();
+        THEROBOT.stop_motors();
         calibrate_detected = true;
     }
 }
@@ -179,7 +178,7 @@ bool ZProbe::run_probe(float& mm, float feedrate, float max_dist, bool reverse)
     probe_detected = false;
 
     // save current actuator position so we can report how far we moved
-    float z_start_pos= THEROBOT.actuators[Z_AXIS]->get_current_position();
+    float z_start_pos= THEROBOT.motor_position(Z_AXIS);
 
     // move Z down
     bool dir= (!reverse_z != reverse); // xor
@@ -195,7 +194,7 @@ bool ZProbe::run_probe(float& mm, float feedrate, float max_dist, bool reverse)
 
     // now see how far we moved, get delta in z we moved
     // NOTE this works for deltas as well as all three actuators move the same amount in Z
-    mm = z_start_pos - THEROBOT.actuators[2]->get_current_position();
+    mm = z_start_pos - THEROBOT.motor_position(2);
 
     // set the last probe position to the actuator units moved during this home
     THEROBOT.set_last_probe_position(std::make_tuple(0, 0, mm, probe_detected ? 1:0));

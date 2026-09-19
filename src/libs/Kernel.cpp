@@ -262,7 +262,7 @@ std::string Kernel::get_query_string()
 #if MAX_ROBOT_ACTUATORS > 3
     // rotary axes have no WCS offset, so they are appended identically to MPos and WPos
     for (int i = A_AXIS; i < THEROBOT.get_number_registered_motors(); ++i) {
-        n = snprintf(buf, sizeof(buf), ",%1.4f", THEROBOT.actuators[i]->get_current_position());
+        n = snprintf(buf, sizeof(buf), ",%1.4f", THEROBOT.motor_position(i));
         if(n > sizeof(buf)) n= sizeof(buf);
         str.append(buf, n);
         wpos.append(buf, n);

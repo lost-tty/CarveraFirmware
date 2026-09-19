@@ -75,13 +75,20 @@ class Robot : public Module {
         void enable_motors(bool on);
         void disable_motors(uint32_t axis_mask); // bit per axis, X is bit 0
         uint8_t get_number_registered_motors() const {return n_motors; }
+
+        bool     motor_is_moving(uint8_t i) const;
+        bool     any_motor_moving() const;
+        bool     motor_direction(uint8_t i) const;
+        float    motor_position(uint8_t i) const;
+        float    motor_steps_per_mm(uint8_t i) const;
+        float    motor_max_rate(uint8_t i) const;
+        void     stop_motor(uint8_t i);
+        void     stop_motors();
         uint8_t get_current_motion_mode() const {return current_motion_mode; }
         void clearLaserOffset();
 
         BaseSolution* arm_solution;                           // Selected Arm solution ( millimeters to step calculation )
 
-        // gets accessed by Panel, Endstops, ZProbe
-        std::vector<StepperMotor*> actuators;
 
         // set by a leveling strategy to transform the target of a move according to the current plan
         std::function<void(float*, bool, bool)> compensationTransform;
@@ -114,6 +121,8 @@ class Robot : public Module {
         };
 
     private:
+        std::vector<StepperMotor*> actuators;
+
         enum MOTION_MODE_T {
             NONE,
             SEEK, // G0
