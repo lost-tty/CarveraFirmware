@@ -1075,10 +1075,8 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
         }
 
         if(move) {
-            float cur[3];
-            THEROBOT.get_axis_position(cur);
-            const float delta[3]{x - cur[X_AXIS], y - cur[Y_AXIS], z - cur[Z_AXIS]};
-            THEROBOT.delta_move_sync(delta, THEROBOT.get_seek_rate(), 3);
+            const float pos[3]{x, y, z};
+            THEROBOT.move_to_machine_position(pos);
         }
 
    } else if (what == "pos") {
@@ -1286,34 +1284,10 @@ void SimpleShell::test_command( string parameters, StreamOutput *stream)
         bool dir= steps >= 0;
         steps= std::abs(steps);
 
-        if(a > C_AXIS) {
-            stream->printf("error: axis must be x, y, z, a, b, c\n");
-            return;
+        std::string err;
+        if(!THEROBOT.step_motor(a, dir, steps, strtol(stepspersec.c_str(), NULL, 10), err)) {
+            stream->printf("error: %s\n", err.c_str());
         }
-
-        if(a >= THEROBOT.get_number_registered_motors()) {
-            stream->printf("error: axis is out of range\n");
-            return;
-        }
-
-        uint32_t sps= strtol(stepspersec.c_str(), NULL, 10);
-        sps= std::max(sps, 1UL);
-
-        uint32_t delayus = 1000000.0F / sps;
-        
-        vTaskSuspendAll();
-        for(int s= 0;s<steps;s++) {
-            if(THEKERNEL->is_halted()) break;
-            THEROBOT.actuators[a]->manual_step(dir);
-
-            wait_us(delayus);
-        }
-        xTaskResumeAll();
-
-        // reset the position based on current actuator position
-        THEROBOT.reset_position_from_current_actuator_position();
-
-        //stream->printf("done\n");
 
     }else {
         stream->printf("usage: test raw axis steps steps/sec\n");
@@ -1329,7 +1303,6 @@ void SimpleShell::jog(string parameters, StreamOutput *stream)
     // get axis to move and amount (X0.1)
     // may specify multiple axis
 
-    float rate_mm_s= NAN;
     float scale= 1.0F;
     float delta[n_motors];
     for (int i = 0; i < n_motors; ++i) {
@@ -1367,29 +1340,16 @@ void SimpleShell::jog(string parameters, StreamOutput *stream)
         delta[a]= strtof(p.substr(1).c_str(), NULL);
     }
 
-    // select slowest axis rate to use
     bool ok= false;
     for (int i = 0; i < n_motors; ++i) {
-        if(delta[i] != 0) {
-            ok= true;
-            if(isnan(rate_mm_s)) {
-                rate_mm_s= THEROBOT.actuators[i]->get_max_rate();
-            }else{
-                rate_mm_s = std::min(rate_mm_s, THEROBOT.actuators[i]->get_max_rate());
-            }
-            //hstream->printf("%d %f F%f\n", i, delta[i], rate_mm_s);
-        }
+        if(delta[i] != 0) { ok= true; break; }
     }
     if(!ok) {
         stream->printf("error:no delta jog specified\n");
         return;
     }
 
-    //stream->printf("F%f\n", rate_mm_s*scale);
-
-    THEROBOT.delta_move(delta, rate_mm_s*scale, n_motors);
-    // turn off queue delay and run it now
-    THECONVEYOR.force_queue();
+    THEROBOT.jog(delta, scale);
 }
 
 void SimpleShell::help_command(string parameters, StreamOutput *stream)

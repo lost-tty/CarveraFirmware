@@ -307,6 +307,49 @@ void Robot::home_on_startup()
     if(home_on_boot) gcode_dispatch.run_line("G28.2", &THEKERNEL->streams);
 }
 
+// $J: the slowest involved axis sets the rate, and the move runs now rather than waiting for the queue
+void Robot::jog(const float delta[], float scale)
+{
+    float rate_mm_s= NAN;
+    for (int i = 0; i < n_motors; ++i) {
+        if(delta[i] != 0) {
+            float r= actuators[i]->get_max_rate();
+            rate_mm_s= isnan(rate_mm_s) ? r : std::min(rate_mm_s, r);
+        }
+    }
+    if(isnan(rate_mm_s)) return;
+
+    delta_move(delta, rate_mm_s * scale, n_motors);
+    THECONVEYOR.force_queue();
+}
+
+bool Robot::move_to_machine_position(const float pos[3])
+{
+    float cur[3];
+    get_axis_position(cur);
+    const float delta[3]{pos[X_AXIS] - cur[X_AXIS], pos[Y_AXIS] - cur[Y_AXIS], pos[Z_AXIS] - cur[Z_AXIS]};
+    return delta_move_sync(delta, get_seek_rate(), 3);
+}
+
+// steps one motor past the planner, so the position has to be recovered from the actuator afterwards
+bool Robot::step_motor(uint8_t axis, bool dir, unsigned steps, unsigned steps_per_sec, std::string &err)
+{
+    if(axis > C_AXIS) { err= "axis must be x, y, z, a, b, c"; return false; }
+    if(axis >= n_motors) { err= "axis is out of range"; return false; }
+
+    uint32_t delayus= 1000000.0F / std::max(steps_per_sec, 1u);
+    vTaskSuspendAll();
+    for(unsigned s= 0; s < steps; s++) {
+        if(THEKERNEL->is_halted()) break;
+        actuators[axis]->manual_step(dir);
+        wait_us(delayus);
+    }
+    xTaskResumeAll();
+
+    reset_position_from_current_actuator_position();
+    return true;
+}
+
 void Robot::enable_motors(bool on)
 {
     for (StepperMotor *m : actuators) m->enable(on);
