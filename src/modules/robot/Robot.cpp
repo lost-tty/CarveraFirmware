@@ -353,6 +353,13 @@ bool Robot::step_motor(uint8_t axis, bool dir, unsigned steps, unsigned steps_pe
 }
 
 bool  Robot::motor_is_moving(uint8_t i) const     { return i < n_motors && actuators[i]->is_moving(); }
+uint8_t Robot::get_plane_code() const
+{
+    if(plane_axis_0 == X_AXIS && plane_axis_1 == Z_AXIS && plane_axis_2 == Y_AXIS) return 18;
+    if(plane_axis_0 == Y_AXIS && plane_axis_1 == Z_AXIS && plane_axis_2 == X_AXIS) return 19;
+    return 17;
+}
+
 void Robot::get_real_machine_position(float *pos, bool debug) const
 {
     get_current_machine_position(pos);

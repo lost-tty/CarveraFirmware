@@ -71,6 +71,9 @@ class Robot : public Module {
         bool is_homed_all_axes() const { return is_homed(X_AXIS) && is_homed(Y_AXIS) && is_homed(Z_AXIS); }
         void print_position(uint8_t subcode, std::string& buf, bool ignore_extruders=false) const;
         uint8_t get_current_wcs() const { return current_wcs; }
+        uint8_t get_plane_code() const;                                  // G17, G18 or G19
+        uint8_t get_units_code() const { return inch_mode ? 20 : 21; }
+        uint8_t get_distance_code() const { return absolute_mode ? 90 : 91; }
         std::vector<wcs_t> get_wcs_state() const;
         std::tuple<float, float, float, uint8_t> get_last_probe_position() const { return last_probe_position; }
         void set_last_probe_position(std::tuple<float, float, float, uint8_t> p) { last_probe_position = p; }
@@ -108,9 +111,9 @@ class Robot : public Module {
         wcs_t wcs2mcs(const wcs_t &pos) const;
         wcs_t wcs2mcs(const float *pos) const { return wcs2mcs(wcs_t(pos[X_AXIS], pos[Y_AXIS], pos[Z_AXIS])); }
 
+        void set_absolute_mode() { absolute_mode = true; }
+
         struct {
-            bool inch_mode:1;                                 // true for inch mode, false for millimeter mode ( default )
-            bool absolute_mode:1;                             // true for absolute mode ( default ), false for relative mode
             bool absolute_arc_centre:1;                       // G90.1: I/J/K are centre coordinates, not offsets
             bool next_command_is_MCS:1;                       // set by G53
             bool disable_segmentation:1;                      // set to disable segmentation
@@ -122,12 +125,17 @@ class Robot : public Module {
             bool soft_endstop_enabled:1;
             bool home_on_boot:1;
             bool soft_endstop_halt:1;
+        };
+
+    private:
+        struct {
+            bool inch_mode:1;                                 // true for inch mode, false for millimeter mode ( default )
+            bool absolute_mode:1;                             // true for absolute mode ( default ), false for relative mode
             uint8_t plane_axis_0:2;                           // Current plane ( XY, XZ, YZ )
             uint8_t plane_axis_1:2;
             uint8_t plane_axis_2:2;
         };
 
-    private:
         std::vector<StepperMotor*> actuators;
         compensation_fn compensationTransform;   // set by a levelling strategy
 

@@ -1067,11 +1067,9 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
         stream->printf("[G%d %s G%d G%d G%d G94 M0 M%c M%c T%d F%1.4f S%1.4f]\n",
             gcode_dispatch.get_modal_command(),
             wcs2gcode(THEROBOT.get_current_wcs()).c_str(),
-            THEROBOT.plane_axis_0 == X_AXIS && THEROBOT.plane_axis_1 == Y_AXIS && THEROBOT.plane_axis_2 == Z_AXIS ? 17 :
-              THEROBOT.plane_axis_0 == X_AXIS && THEROBOT.plane_axis_1 == Z_AXIS && THEROBOT.plane_axis_2 == Y_AXIS ? 18 :
-              THEROBOT.plane_axis_0 == Y_AXIS && THEROBOT.plane_axis_1 == Z_AXIS && THEROBOT.plane_axis_2 == X_AXIS ? 19 : 17,
-            THEROBOT.inch_mode ? 20 : 21,
-            THEROBOT.absolute_mode ? 90 : 91,
+            THEROBOT.get_plane_code(),
+            THEROBOT.get_units_code(),
+            THEROBOT.get_distance_code(),
             get_switch_state("spindle") ? '3' : '5',
             get_switch_state("mist") ? '7' : get_switch_state("flood") ? '8' : '9',
             THEKERNEL->eeprom_data.TOOL,
