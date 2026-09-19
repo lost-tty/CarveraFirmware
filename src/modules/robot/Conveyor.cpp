@@ -9,6 +9,7 @@
 #include "Gcode.h"
 #include "Module.h"
 #include "Kernel.h"
+#include "Watchdog.h"
 #include "Timer.h" // mbed.h lib
 #include "wait_api.h" // mbed.h lib
 #include "Block.h"
@@ -127,6 +128,7 @@ void Conveyor::wait_for_idle(bool wait_for_motors)
     // forcing them to be jobs
     running = false; // stops on_idle calling check_queue
     while (!queue.is_empty()) {
+        watchdog.alive();
         check_queue(true); // forces queue to be made available to stepticker
         THEKERNEL->call_event(ON_IDLE, this);
     }
@@ -134,6 +136,7 @@ void Conveyor::wait_for_idle(bool wait_for_motors)
     if(wait_for_motors) {
         // now we wait for all motors to stop moving
         while(!is_idle()) {
+            watchdog.alive();
             THEKERNEL->call_event(ON_IDLE, this);
         }
     }

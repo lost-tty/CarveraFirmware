@@ -26,15 +26,17 @@ void Watchdog::feed()
     WDT_Feed();
 }
 
-void Watchdog::on_module_loaded()
+void Watchdog::tick()
 {
-    register_for_event(ON_IDLE);
+    if(!main_loop_alive) return;
+    main_loop_alive = false;
     feed();
 }
 
-void Watchdog::on_idle(void*)
+void Watchdog::on_module_loaded()
 {
     feed();
+    feed_timer.start();
 }
 
 

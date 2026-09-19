@@ -266,6 +266,7 @@ void vTaskMainLoop(void *pvParameters) {
             leds[1]= (cnt++ & 0x1000) ? 1 : 0;
         }
 
+        watchdog.alive();
         THEKERNEL->call_event(ON_MAIN_LOOP);
         THEKERNEL->call_event(ON_IDLE);
 
