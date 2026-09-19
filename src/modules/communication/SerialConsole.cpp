@@ -35,42 +35,25 @@ void SerialConsole::on_module_loaded() {
     query_flag = false;
     halt_flag = false;
     diagnose_flag = false;
-    raw_mode = false;
-	this->attach_irq(true);
+    this->serial->attach(this, &SerialConsole::on_serial_char_received, mbed::Serial::RxIrq);
 
     // We only call the command dispatcher in the main loop, nowhere else
     this->register_for_event(ON_MAIN_LOOP);
     this->register_for_event(ON_IDLE);
-    this->register_for_event(ON_SET_PUBLIC_DATA);
 
     // Add to the pack of streams kernel can call to, for example for broadcasting
     THEKERNEL->streams.append_stream(this);
 }
 
-// enable_irq == false: raw mode for a file transfer. The ISR stays attached because the UART FIFO
-// is 16 bytes; it stores bytes in the ring buffer for gets().
-void SerialConsole::attach_irq(bool enable_irq) {
-	char leftover[RX_LINE_BUF];
-	int n = 0;
-	__disable_irq();
-	while (buffer.head != buffer.tail && n < (int)sizeof(leftover)) buffer.pop_front(leftover[n++]);
-	raw_mode = !enable_irq;
-	decoder.reset();
-	// frames that arrived while the transfer was finishing must not be lost
-	if (enable_irq) for (int i = 0; i < n; i++) if (decoder.feed(leftover[i])) on_frame();
-	__enable_irq();
-	this->serial->attach(this, &SerialConsole::on_serial_char_received, mbed::Serial::RxIrq);
-}
-
-void SerialConsole::on_set_public_data(void *argument) {
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
-
-    if(!pdr->starts_with(atc_handler_checksum)) return;
-
-    if(pdr->second_element_is(set_serial_rx_irq_checksum)) {
-        bool enable_irq = *static_cast<bool *>(pdr->get_data_ptr());
-        this->attach_irq(enable_irq);
-        pdr->set_taken();
+// one frame per call: its command may start a transfer, and the bytes behind it are then payload
+void SerialConsole::decode_rx() {
+    while (rx_raw.size() > 0) {
+        char c;
+        rx_raw.pop_front(c);
+        if (decoder.feed(c)) {
+            on_frame();
+            return;
+        }
     }
 }
 
@@ -79,13 +62,7 @@ void SerialConsole::on_set_public_data(void *argument) {
 void SerialConsole::on_serial_char_received() {
 	while (this->serial->readable()) {
 		char c = this->serial->getc();
-		if (raw_mode) {
-			if (buffer.capacity() - (buffer.head - buffer.tail + ((buffer.tail > buffer.head) ? RX_LINE_BUF : 0)) > 0) {
-				buffer.push_back(c);
-			}
-		} else if (decoder.feed(c)) {
-			on_frame();
-		}
+		if (rx_raw.size() < rx_raw.capacity()) rx_raw.push_back(c);
     }
 }
 
@@ -107,8 +84,7 @@ void SerialConsole::on_frame() {
 
         case Frame::CTRL_MULTI:
         case Frame::FILE_START: {
-            int room = buffer.capacity() - (buffer.head - buffer.tail + ((buffer.tail > buffer.head) ? RX_LINE_BUF : 0));
-            if (len + 1 > room) return;
+            if ((int)len + 1 > buffer.capacity() - buffer.size()) return;
             char last = '\n';
             for (uint16_t i = 0; i < len; i++) {
                 char c = p[i] == '\r' ? '\n' : p[i];
@@ -149,9 +125,8 @@ void SerialConsole::on_idle(void * argument)
     }
 }
 
-// Actual event calling must happen in the main loop because if it happens in the interrupt we will loose data
 void SerialConsole::on_main_loop(void * argument){
-    if (raw_mode) return; // the ring holds transfer data, not command lines
+    decode_rx();
     if ( this->has_char('\n') ){
         string received;
         received.reserve(20);
@@ -179,17 +154,12 @@ int SerialConsole::puts(const char* s, int size)
 
 int SerialConsole::gets(char** buf, int size)
 {
-	if (raw_mode) {
-		int n = 0;
-		while (n < (int)sizeof(raw_chunk) && buffer.size() > 0) {
-			buffer.pop_front(raw_chunk[n++]);
-		}
-		*buf = raw_chunk;
-		return n;
+	int n = 0;
+	while (n < (int)sizeof(raw_chunk) && rx_raw.size() > 0) {
+		rx_raw.pop_front(raw_chunk[n++]);
 	}
-	getc_result = this->getc();
-	*buf = &getc_result;
-	return 1;
+	*buf = raw_chunk;
+	return n;
 }
 
 int SerialConsole::putc(int c)
@@ -199,22 +169,17 @@ int SerialConsole::putc(int c)
 
 int SerialConsole::getc()
 {
-    if (raw_mode) {
-        char c = 0;
-        if (buffer.size() == 0) return -1;
-        buffer.pop_front(c);
-        return (uint8_t)c;
-    }
-    return this->serial->getc();
+    char c = 0;
+    if (rx_raw.size() == 0) return -1;
+    rx_raw.pop_front(c);
+    return (uint8_t)c;
 }
 
 bool SerialConsole::ready()
 {
-    if (raw_mode) return buffer.size() > 0;
-    return this->serial->readable();
+    return rx_raw.size() > 0;
 }
 
-// Does the queue have a given char ?
 bool SerialConsole::has_char(char letter){
     int index = this->buffer.tail;
     while( index != this->buffer.head ){

@@ -23,7 +23,6 @@ private:
     bool read_trailer(StreamOutput* stream, uint16_t crc);
 
     void send_seq(StreamOutput* stream, uint8_t type, uint32_t seq);
-    void set_serial_rx_irq(bool enable);
     bool decompress(const std::string& sfilename, const std::string& dfilename, uint32_t sfilesize, StreamOutput* stream);
 
     // whole incoming packet during a transfer; compressed block + output during decompression

@@ -101,12 +101,6 @@ void FileTransfer::send_seq(StreamOutput* stream, uint8_t type, uint32_t seq)
     stream->send(type, p, sizeof(p));
 }
 
-void FileTransfer::set_serial_rx_irq(bool enable)
-{
-    bool enable_irq = enable;
-    PublicData::set_value(atc_handler_checksum, set_serial_rx_irq_checksum, &enable_irq);
-}
-
 bool FileTransfer::upload(const std::string& filename, StreamOutput* stream)
 {
     if (sources.active()) {
@@ -125,12 +119,10 @@ bool FileTransfer::upload(const std::string& filename, StreamOutput* stream)
     check_and_make_path(md5_filename);
     check_and_make_path(lzfilename);
 
-    if (stream->type() == 0) set_serial_rx_irq(false);
     pend_len = 0;
 
     if (!THECONVEYOR.is_idle()) {
         stream->send(Frame::FILE_CAN, "ok\r\n", 4);
-        if (stream->type() == 0) set_serial_rx_irq(true);
         return false;
     }
 
@@ -290,7 +282,6 @@ done:
     }
     if (!ok) remove(datafile.c_str());
 
-    if (stream->type() == 0) set_serial_rx_irq(true);
     THEKERNEL->set_uploading(false);
 
     if (ok && is_lz) {
@@ -312,12 +303,10 @@ bool FileTransfer::download(const std::string& filename, StreamOutput* stream)
     string md5_filename = change_to_md5_path(filename);
     string lz_filename = change_to_lz_path(filename);
 
-    if (stream->type() == 0) set_serial_rx_irq(false);
     pend_len = 0;
 
     if (!THECONVEYOR.is_idle()) {
         stream->send(Frame::FILE_CAN, "ok\r\n", 4);
-        if (stream->type() == 0) set_serial_rx_irq(true);
         return false;
     }
 
@@ -438,7 +427,6 @@ bool FileTransfer::download(const std::string& filename, StreamOutput* stream)
 
 done:
     if (fd != NULL) fclose(fd);
-    if (stream->type() == 0) set_serial_rx_irq(true);
     THEKERNEL->set_uploading(false);
     return ok;
 }
