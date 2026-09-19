@@ -22,6 +22,11 @@ class Pin;
 class Endstops : public Module{
 
     public:
+        bool is_homing() const;
+        bool is_homed(uint8_t axis) const { return homing_axis[axis].homed; }
+        bool cover_closed() const { return cover_endstop_pin.get(); }
+        void get_endstop_states(char *data) const;
+        const float *get_g28_position() const { return g28_position; }
         Endstops()
         : read_endstops_timer("Endstops", 1, true, this, &Endstops::read_endstops)
         {}
@@ -38,8 +43,6 @@ class Endstops : public Module{
         void home_xy();
         void back_off_home(axis_bitmap_t axis);
         void after_home(axis_bitmap_t axis);
-        void on_get_public_data(void* argument);
-        void on_set_public_data(void* argument);
         void on_idle(void *argument);
         bool debounced_get(Pin *pin);
         void process_home_command(Gcode* gcode);
@@ -113,3 +116,5 @@ class Endstops : public Module{
             bool home_z_first:1;
         };
 };
+
+extern Endstops endstops;

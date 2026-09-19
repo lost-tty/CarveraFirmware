@@ -17,8 +17,16 @@
 #include "libs/StepTicker.h"
 #include "libs/PublicData.h"
 #include "modules/communication/SerialConsole.h"
+#include "modules/communication/WirelessProbe.h"
 #include "modules/robot/Planner.h"
 #include "modules/robot/Conveyor.h"
+#include "modules/tools/zprobe/ZProbe.h"
+#include "modules/tools/laser/Laser.h"
+#include "modules/tools/spindle/SpindleControl.h"
+#include "modules/utils/player/Player.h"
+#include "modules/utils/mainbutton/MainButton.h"
+#include "modules/tools/endstops/Endstops.h"
+#include "modules/tools/atc/ATCHandler.h"
 #include "modules/robot/Robot.h"
 #include "StepperMotor.h"
 #include "BaseSolution.h"
@@ -175,9 +183,7 @@ void Kernel::vprintk(const char* format, va_list args) {
 // get current state
 uint8_t Kernel::get_state()
 {
-    bool homing;
-    bool ok = PublicData::get_value(endstops_checksum, get_homing_status_checksum, 0, &homing);
-    if(!ok) homing = false;
+    bool homing = endstops.is_homing();
     if (sleeping) {
     	return SLEEP;
     } else if (suspending) {
@@ -273,8 +279,8 @@ std::string Kernel::get_query_string()
 
     // current spindle rpm and request rpm and override
     struct spindle_status ss;
-    ok = PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss);
-    if (ok) {
+    if (spindle_control != nullptr) {
+        spindle_control->get_status(&ss);
         n= snprintf(buf, sizeof(buf), "|S:%1.1f,%1.1f,%1.1f,%d", ss.current_rpm, ss.target_rpm, ss.factor, int(this->get_vacuum_mode()));
         if(n > sizeof(buf)) n= sizeof(buf);
         str.append(buf, n);
@@ -291,8 +297,7 @@ std::string Kernel::get_query_string()
 
     // current tool number and tool offset
     struct tool_status tool;
-    ok = PublicData::get_value( atc_handler_checksum, get_tool_status_checksum, &tool );
-    if (ok) {
+    if (atc_handler.get_tool_status(&tool)) {
         n= snprintf(buf, sizeof(buf), "|T:%d,%1.3f", tool.active_tool, tool.tool_offset);
         if(n > sizeof(buf)) n= sizeof(buf);
         str.append(buf, n);
@@ -300,7 +305,7 @@ std::string Kernel::get_query_string()
 
     // wireless probe current voltage
     float wp_voltage;
-    ok = PublicData::get_value( atc_handler_checksum, get_wp_voltage_checksum, &wp_voltage );
+    wp_voltage = wireless_probe.get_voltage();
     if (ok) {
         n= snprintf(buf, sizeof(buf), "|W:%1.2f", wp_voltage);
         if(n > sizeof(buf)) n= sizeof(buf);
@@ -309,17 +314,14 @@ std::string Kernel::get_query_string()
 
     // current Laser power and override
     struct laser_status ls;
-	if(PublicData::get_value(laser_checksum, get_laser_status_checksum, &ls)) {
-		n = snprintf(buf, sizeof(buf), "|L:%d, %d, %d, %1.1f,%1.1f", int(ls.mode), int(ls.state), int(ls.testing), ls.power, ls.scale);
-		if(n > sizeof(buf)) n= sizeof(buf);
-		str.append(buf, n);
-	}
+	laser.get_status(&ls);
+	n = snprintf(buf, sizeof(buf), "|L:%d, %d, %d, %1.1f,%1.1f", int(ls.mode), int(ls.state), int(ls.testing), ls.power, ls.scale);
+	if(n > sizeof(buf)) n= sizeof(buf);
+	str.append(buf, n);
 
     // current running file info
-	void *returned_data;
-	ok = PublicData::get_value( player_checksum, get_progress_checksum, &returned_data );
-	if (ok) {
-		struct pad_progress p =  *static_cast<struct pad_progress *>(returned_data);
+	struct pad_progress p;
+	if (player.get_progress(p)) {
 		n= snprintf(buf, sizeof(buf), "|P:%lu,%d,%lu", p.played_lines, p.percent_complete, p.elapsed_secs);
 		if(n > sizeof(buf)) n= sizeof(buf);
 		str.append(buf, n);
@@ -363,8 +365,8 @@ std::string Kernel::get_diagnose_string()
 
     // get spindle state
     struct spindle_status ss;
-    ok = PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss);
-    if (ok) {
+    if (spindle_control != nullptr) {
+        spindle_control->get_status(&ss);
         n = snprintf(buf, sizeof(buf), "S:%d,%d", (int)ss.state, (int)ss.target_rpm);
         if(n > sizeof(buf)) n= sizeof(buf);
         str.append(buf, n);
@@ -372,12 +374,10 @@ std::string Kernel::get_diagnose_string()
 
     // get laser state
     struct laser_status ls;
-    ok = PublicData::get_value(laser_checksum, get_laser_status_checksum, &ls);
-    if (ok) {
-        n = snprintf(buf, sizeof(buf), "|L:%d,%d", (int)ls.state, (int)ls.power);
-        if(n > sizeof(buf)) n= sizeof(buf);
-        str.append(buf, n);
-    }
+    laser.get_status(&ls);
+    n = snprintf(buf, sizeof(buf), "|L:%d,%d", (int)ls.state, (int)ls.power);
+    if(n > sizeof(buf)) n= sizeof(buf);
+    str.append(buf, n);
 
     // get switchs state
     struct pad_switch pad;
@@ -427,36 +427,29 @@ std::string Kernel::get_diagnose_string()
 
     // get states
     char data[11];
-    ok = PublicData::get_value(endstops_checksum, get_endstop_states_checksum, 0, data);
-    if (ok) {
-        n = snprintf(buf, sizeof(buf), "|E:%d,%d,%d,%d,%d,%d", data[0], data[1], data[2], data[3], data[4], data[5]);
-        if(n > sizeof(buf)) n = sizeof(buf);
-        str.append(buf, n);
-    }
+    endstops.get_endstop_states(data);
+    n = snprintf(buf, sizeof(buf), "|E:%d,%d,%d,%d,%d,%d", data[0], data[1], data[2], data[3], data[4], data[5]);
+    if(n > sizeof(buf)) n = sizeof(buf);
+    str.append(buf, n);
 
     // get probe and calibrate states
-    ok = PublicData::get_value(zprobe_checksum, get_zprobe_pin_states_checksum, 0, &data[6]);
-    if (ok) {
-        n = snprintf(buf, sizeof(buf), "|P:%d,%d", data[6], data[7]);
-        if(n > sizeof(buf)) n = sizeof(buf);
-        str.append(buf, n);
-    }
+    data[6] = (char)zprobe.getProbeStatus();
+    data[7] = (char)zprobe.getCalibrateStatus();
+    n = snprintf(buf, sizeof(buf), "|P:%d,%d", data[6], data[7]);
+    if(n > sizeof(buf)) n = sizeof(buf);
+    str.append(buf, n);
 
     // get atc endstop and tool senser states
-    ok = PublicData::get_value(atc_handler_checksum, get_atc_pin_status_checksum, 0, &data[8]);
-    if (ok) {
-        n = snprintf(buf, sizeof(buf), "|A:%d,%d", data[8], data[9]);
-        if(n > sizeof(buf)) n = sizeof(buf);
-        str.append(buf, n);
-    }
+    atc_handler.get_pin_status(&data[8]);
+    n = snprintf(buf, sizeof(buf), "|A:%d,%d", data[8], data[9]);
+    if(n > sizeof(buf)) n = sizeof(buf);
+    str.append(buf, n);
 
     // get e-stop states
-    ok = PublicData::get_value(main_button_checksum, get_e_stop_state_checksum, 0, &data[10]);
-    if (ok) {
-        n = snprintf(buf, sizeof(buf), "|I:%d", data[10]);
-        if(n > sizeof(buf)) n = sizeof(buf);
-        str.append(buf, n);
-    }
+    data[10] = (char)mainbutton.e_stop_state();
+    n = snprintf(buf, sizeof(buf), "|I:%d", data[10]);
+    if(n > sizeof(buf)) n = sizeof(buf);
+    str.append(buf, n);
 
     str.append("}\n");
     return str;

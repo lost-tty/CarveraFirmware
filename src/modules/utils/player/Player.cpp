@@ -30,6 +30,7 @@
 #include "PublicData.h"
 #include "PlayerPublicAccess.h"
 #include "ScriptsPublicAccess.h"
+#include "Scripts.h"
 #include "TemperatureControlPublicAccess.h"
 #include "TemperatureControlPool.h"
 #include "Block.h"
@@ -50,8 +51,7 @@ extern SDFAT mounter;
 // runs a machine script sub if it exists; false when nothing ran
 static bool run_script(const char *sub, const float *args, unsigned nargs)
 {
-    struct script_call call{sub, args, nargs};
-    return PublicData::set_value(scripts_checksum, run_script_checksum, &call);
+    return scripts.run_sub(sub, args, nargs);
 }
 
 void Player::on_module_loaded()
@@ -63,8 +63,6 @@ void Player::on_module_loaded()
     this->slope = 0.0;
 
     for (unsigned i= 0; COMMANDS[i].name != nullptr; i++) SimpleShell::add_command(shell_slots[i], COMMANDS[i].name, &Player::shell, this, COMMANDS[i].help);
-    this->register_for_event(ON_GET_PUBLIC_DATA);
-    this->register_for_event(ON_SET_PUBLIC_DATA);
     GcodeDispatch::add_handler(this);
     this->register_for_event(ON_HALT);
 
@@ -416,47 +414,21 @@ bool Player::check_cluster(const char *gcode_str, float *x_value, float *y_value
 }
 */
 
-void Player::on_get_public_data(void *argument)
+bool Player::get_progress(struct pad_progress &p)
 {
-    PublicDataRequest *pdr = static_cast<PublicDataRequest *>(argument);
-
-    if(!pdr->starts_with(player_checksum)) return;
-
-    if(pdr->second_element_is(is_playing_checksum) || pdr->second_element_is(is_suspended_checksum)) {
-        static bool bool_data;
-        bool_data = pdr->second_element_is(is_playing_checksum) ? this->playing_file : THEKERNEL->is_suspending();
-        pdr->set_data_ptr(&bool_data);
-        pdr->set_taken();
-
-    } else if(pdr->second_element_is(get_progress_checksum)) {
-        static struct pad_progress p;
-        if(file.size() > 0 && playing_file) {
-            p.played_lines = this->playing_lines = current_line();
-            p.elapsed_secs = this->calculate_elapsed_secs();
-            float pcnt = file.bytes() * 100.0F / file.size();
-            p.percent_complete = roundf(pcnt);
-            p.filename = this->filename;
-            pdr->set_data_ptr(&p);
-            pdr->set_taken();
-        }
-    }
+    if(file.size() == 0 || !playing_file) return false;
+    p.played_lines = this->playing_lines = current_line();
+    p.elapsed_secs = this->calculate_elapsed_secs();
+    p.percent_complete = roundf(file.bytes() * 100.0F / file.size());
+    p.filename = this->filename;
+    return true;
 }
 
-void Player::on_set_public_data(void *argument)
+void Player::restart_job()
 {
-    PublicDataRequest *pdr = static_cast<PublicDataRequest *>(argument);
-
-    if(!pdr->starts_with(player_checksum)) return;
-
-    if(pdr->second_element_is(abort_play_checksum)) {
-        abort_command("", &(StreamOutput::NullStream));
-        pdr->set_taken();
-    } else if (pdr->second_element_is(restart_job_checksum)) {
-    	if (!this->last_filename.empty()) {
-    		printk("Job restarted: %s.\r\n", this->last_filename.c_str());
-        	this->play_command(this->last_filename, &(StreamOutput::NullStream));
-    	}
-    }
+    if(this->last_filename.empty()) return;
+    printk("Job restarted: %s.\r\n", this->last_filename.c_str());
+    this->play_command(this->last_filename, &(StreamOutput::NullStream));
 }
 
 /**

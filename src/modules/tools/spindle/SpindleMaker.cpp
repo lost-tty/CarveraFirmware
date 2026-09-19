@@ -58,6 +58,7 @@ void SpindleMaker::load_spindle(){
     // Add the spindle if we successfully initialized one
     if( spindle != NULL) {
 
+        spindle_control = spindle;
         GcodeDispatch::add_handler(spindle);
         spindle->register_for_event(ON_GET_PUBLIC_DATA);
         spindle->register_for_event(ON_SET_PUBLIC_DATA);

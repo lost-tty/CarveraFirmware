@@ -95,8 +95,6 @@ void WifiProvider::on_module_loaded()
     this->register_for_event(ON_IDLE);
     this->register_for_event(ON_MAIN_LOOP);
     this->register_for_event(ON_SECOND_TICK);
-    this->register_for_event(ON_GET_PUBLIC_DATA);
-    this->register_for_event(ON_SET_PUBLIC_DATA);
 }
 
 void WifiProvider::on_pin_rise()
@@ -320,11 +318,8 @@ void WifiProvider::set_wifi_op_mode(u8 op_mode)
     }
 }
 
-void WifiProvider::on_get_public_data(void* argument)
+std::string WifiProvider::scan_wlans()
 {
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
-    if (!pdr->starts_with(wlan_checksum)) return;
-    if (!pdr->second_element_is(get_wlan_checksum)) return;
 
     u8 signals = 0;
     u16 status = 0;
@@ -350,7 +345,7 @@ void WifiProvider::on_get_public_data(void* argument)
                 continue;
             } else {
                 // Scan failed
-                return;
+                return std::string();
             }
         } else {
             // Prepare data for public request
@@ -381,124 +376,109 @@ void WifiProvider::on_get_public_data(void* argument)
                     str.append("0\n");
                 }
             }
-            // Return data to requester
-            char* temp_buf = (char*)malloc(str.length() + 1);
-            memcpy(temp_buf, str.c_str(), str.length());
-            temp_buf[str.length()] = '\0';
-            pdr->set_data_ptr(temp_buf);
-            pdr->set_taken();
-            return;
+            return str;
+        }
+    }
+    return std::string();
+}
+
+void WifiProvider::connect_ap(struct ap_conn_info *s)
+{
+    u16 status = 0;
+    u8 connection_status;
+
+    s->has_error = false;
+    if (s->disconnect) {
+        // Disconnect from AP
+        if (M8266WIFI_SPI_STA_DisConnect_Ap(&status) == 0) {
+            s->has_error = true;
+            snprintf(s->error_info, sizeof(s->error_info), "Disconnect error!");
+        }
+    } else {
+        // Connect to AP
+        M8266WIFI_SPI_STA_Connect_Ap((u8*)s->ssid, (u8*)s->password, 1, 0, &status);
+        // Wait for connection
+        while (true) {
+            M8266WIFI_SPI_Get_STA_Connection_Status(&connection_status, &status);
+            if (connection_status == 1) {
+                // Connecting; wait
+                THEKERNEL->call_event(ON_IDLE, this);
+                safe_delay_ms(1);
+                continue;
+            } else if (connection_status == 5) {
+                // Connection successful
+                s->has_error = false;
+                break;
+            } else {
+                // Connection failed
+                s->has_error = true;
+                if (connection_status == 0) {
+                    snprintf(s->error_info, sizeof(s->error_info), "No connection started!");
+                } else if (connection_status == 2) {
+                    snprintf(s->error_info, sizeof(s->error_info), "WiFi password incorrect!");
+                } else if (connection_status == 3) {
+                    snprintf(s->error_info, sizeof(s->error_info), "WiFi SSID not found: %s!", s->ssid);
+                } else if (connection_status == 4) {
+                    snprintf(s->error_info, sizeof(s->error_info), "Other error!");
+                }
+                break;
+            }
+        }
+        // Get IP address if connected
+        if (!s->has_error) {
+            M8266WIFI_SPI_Get_STA_IP_Addr(s->ip_address, &status);
         }
     }
 }
 
-void WifiProvider::on_set_public_data(void* argument)
+void WifiProvider::set_ap_channel(uint8_t channel)
 {
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
-    if (!pdr->starts_with(wlan_checksum)) return;
-    if (!pdr->second_element_is(set_wlan_checksum)
-        && !pdr->second_element_is(ap_set_channel_checksum)
-        && !pdr->second_element_is(ap_set_ssid_checksum)
-        && !pdr->second_element_is(ap_set_password_checksum)
-        && !pdr->second_element_is(ap_enable_checksum)) return;
+    u16 status = 0;
+    u8 ap_channel = channel;
+    if (M8266WIFI_SPI_Config_AP_Param(AP_PARAM_TYPE_CHANNEL, &ap_channel, 1, 1, &status) == 0) {
+        printk("WiFi set AP Channel ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
+    } else {
+        printk("WiFi AP Channel changed to %d\n", ap_channel);
+    }
+}
 
-    if (pdr->second_element_is(set_wlan_checksum)) {
-        // Set WLAN connection
-        ap_conn_info* s = static_cast<ap_conn_info*>(pdr->get_data_ptr());
-        u16 status = 0;
-        u8 connection_status;
+void WifiProvider::set_ap_ssid(const char *ssid)
+{
+    u16 status = 0;
+    if (M8266WIFI_SPI_Config_AP_Param(AP_PARAM_TYPE_SSID, (u8*)ssid, strlen(ssid), 1, &status) == 0) {
+        printk("WiFi set AP SSID ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
+    } else {
+        printk("WiFi AP SSID changed to %s\n", ssid);
+    }
+}
 
-        s->has_error = false;
-        if (s->disconnect) {
-            // Disconnect from AP
-            if (M8266WIFI_SPI_STA_DisConnect_Ap(&status) == 0) {
-                s->has_error = true;
-                snprintf(s->error_info, sizeof(s->error_info), "Disconnect error!");
+void WifiProvider::set_ap_password(const char *password)
+{
+    u16 status = 0;
+    u8 op_mode;
+    // Ensure module is in AP mode
+    if (M8266WIFI_SPI_Get_Opmode(&op_mode, &status) == 0) {
+        printk("WiFi get OP mode ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
+    } else {
+        if (op_mode != 3) {
+            printk("WiFi cannot set password when not in AP mode!\n");
+        } else {
+            u8 authmode = strlen(password) == 0 ? 0 : 4;
+            if (M8266WIFI_SPI_Config_AP_Param(AP_PARAM_TYPE_PASSWORD, (u8*)password, strlen(password), 1, &status) > 0) {
+                printk("WiFi AP Password changed to %s\n", password);
             }
-        } else {
-            // Connect to AP
-            M8266WIFI_SPI_STA_Connect_Ap((u8*)s->ssid, (u8*)s->password, 1, 0, &status);
-            // Wait for connection
-            while (true) {
-                M8266WIFI_SPI_Get_STA_Connection_Status(&connection_status, &status);
-                if (connection_status == 1) {
-                    // Connecting; wait
-                    THEKERNEL->call_event(ON_IDLE, this);
-                    safe_delay_ms(1);
-                    continue;
-                } else if (connection_status == 5) {
-                    // Connection successful
-                    s->has_error = false;
-                    break;
-                } else {
-                    // Connection failed
-                    s->has_error = true;
-                    if (connection_status == 0) {
-                        snprintf(s->error_info, sizeof(s->error_info), "No connection started!");
-                    } else if (connection_status == 2) {
-                        snprintf(s->error_info, sizeof(s->error_info), "WiFi password incorrect!");
-                    } else if (connection_status == 3) {
-                        snprintf(s->error_info, sizeof(s->error_info), "WiFi SSID not found: %s!", s->ssid);
-                    } else if (connection_status == 4) {
-                        snprintf(s->error_info, sizeof(s->error_info), "Other error!");
-                    }
-                    break;
-                }
-            }
-            // Get IP address if connected
-            if (!s->has_error) {
-                M8266WIFI_SPI_Get_STA_IP_Addr(s->ip_address, &status);
-            }
-        }
-    } else if (pdr->second_element_is(ap_set_channel_checksum)) {
-        // Set AP channel
-        u16 status = 0;
-        u8 ap_channel = *static_cast<u8*>(pdr->get_data_ptr());
-        if (M8266WIFI_SPI_Config_AP_Param(AP_PARAM_TYPE_CHANNEL, &ap_channel, 1, 1, &status) == 0) {
-            printk("WiFi set AP Channel ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
-        } else {
-            printk("WiFi AP Channel changed to %d\n", ap_channel);
-        }
-    } else if (pdr->second_element_is(ap_set_ssid_checksum)) {
-        // Set AP SSID
-        u16 status = 0;
-        char* ssid = static_cast<char*>(pdr->get_data_ptr());
-        if (M8266WIFI_SPI_Config_AP_Param(AP_PARAM_TYPE_SSID, (u8*)ssid, strlen(ssid), 1, &status) == 0) {
-            printk("WiFi set AP SSID ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
-        } else {
-            printk("WiFi AP SSID changed to %s\n", ssid);
-        }
-    } else if (pdr->second_element_is(ap_set_password_checksum)) {
-        // Set AP password
-        u16 status = 0;
-        u8 op_mode;
-        // Ensure module is in AP mode
-        if (M8266WIFI_SPI_Get_Opmode(&op_mode, &status) == 0) {
-            printk("WiFi get OP mode ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
-        } else {
-            if (op_mode != 3) {
-                printk("WiFi cannot set password when not in AP mode!\n");
-            } else {
-                char* password = static_cast<char*>(pdr->get_data_ptr());
-                u8 authmode = strlen(password) == 0 ? 0 : 4;
-                if (M8266WIFI_SPI_Config_AP_Param(AP_PARAM_TYPE_PASSWORD, (u8*)password, strlen(password), 1, &status) > 0) {
-                    printk("WiFi AP Password changed to %s\n", password);
-                }
-                if (M8266WIFI_SPI_Config_AP_Param(AP_PARAM_TYPE_AUTHMODE, &authmode, 1, 1, &status) == 0) {
-                    // Do nothing
-                }
-            }
-        }
-    } else if (pdr->second_element_is(ap_enable_checksum)) {
-        // Enable or disable AP mode
-        bool* enable_op = static_cast<bool*>(pdr->get_data_ptr());
-        if (*enable_op) {
-            set_wifi_op_mode(3);
-        } else {
-            set_wifi_op_mode(1);
+            M8266WIFI_SPI_Config_AP_Param(AP_PARAM_TYPE_AUTHMODE, &authmode, 1, 1, &status);
         }
     }
-    pdr->set_taken();
+}
+
+void WifiProvider::set_ap_enabled(bool on)
+{
+    if (on) {
+        set_wifi_op_mode(3);
+    } else {
+        set_wifi_op_mode(1);
+    }
 }
 
 void WifiProvider::query_wifi_status()

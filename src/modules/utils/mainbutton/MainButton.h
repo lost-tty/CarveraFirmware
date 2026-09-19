@@ -7,6 +7,9 @@
 
 class MainButton : public Module {
     public:
+        bool e_stop_state() const { return e_stop.get(); }
+        void set_power_12(bool on) { switch_power_12(on); }
+        void set_power_24(bool on) { switch_power_24(on); }
         MainButton()
         : timer("MainButtonTimer", 1000, true, this, &MainButton::button_tick)
         {}
@@ -15,8 +18,6 @@ class MainButton : public Module {
         void on_idle(void *argument);
         void button_tick();
         void on_second_tick(void *);
-        void on_get_public_data(void* argument);
-        void on_set_public_data(void* argument);
 
     private:
         SoftTimer timer;
@@ -69,3 +70,5 @@ class MainButton : public Module {
 };
 
 #endif
+
+extern MainButton mainbutton;

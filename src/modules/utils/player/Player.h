@@ -32,8 +32,9 @@ class Player : public Module, public Source {
     public:
         void on_module_loaded();
         static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
-        void on_get_public_data(void* argument);
-        void on_set_public_data(void* argument);
+        bool is_playing() const { return playing_file; }
+        bool get_progress(struct pad_progress &p);
+        void restart_job();
         void on_gcode_received(Gcode *argument);
         void on_halt(void *argument);
         Source::Result next(SerialMessage &msg) override;
@@ -82,3 +83,5 @@ class Player : public Module, public Source {
             bool laser_clustering:1;
         };
 };
+
+extern Player player;

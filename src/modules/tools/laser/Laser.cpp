@@ -106,7 +106,6 @@ void Laser::on_module_loaded()
     //register for events
     this->register_for_event(ON_HALT);
     GcodeDispatch::add_handler(this);
-    this->register_for_event(ON_GET_PUBLIC_DATA);
     SimpleShell::add_command(shell_slot, "laser", &Laser::shell, this, "laser on|off|status|test - laser mode");
 
     // no point in updating the power more than the PWM frequency, but not faster than 1KHz
@@ -160,22 +159,14 @@ void Laser::sub_test(std::string, StreamOutput *stream)
 }
 
 // returns instance
-void Laser::on_get_public_data(void* argument)
+void Laser::get_status(struct laser_status *t)
 {
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
-    if(!pdr->starts_with(laser_checksum)) return;
-    if(pdr->second_element_is(get_laser_status_checksum)) {
-		// ok this is targeted at us, so set the requ3sted data in the pointer passed into us
-		struct laser_status *t= static_cast<laser_status*>(pdr->get_data_ptr());
-		t->mode = THEKERNEL->get_laser_mode();
-		t->state = this->laser_on;
-		t->testing = this->testing;
-	    float p = pwm_pin->read();
-	    t->power = (this->pwm_inverting ? 1 - p : p) * 100;
-		t->scale = this->scale * 100;
-		pdr->set_taken();
-    }
-
+    t->mode = THEKERNEL->get_laser_mode();
+    t->state = this->laser_on;
+    t->testing = this->testing;
+    float p = pwm_pin->read();
+    t->power = (this->pwm_inverting ? 1 - p : p) * 100;
+    t->scale = this->scale * 100;
 }
 
 

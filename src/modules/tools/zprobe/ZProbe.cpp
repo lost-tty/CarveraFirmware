@@ -66,7 +66,6 @@ void ZProbe::on_module_loaded()
     this->config_load();
     // register event-handlers
     GcodeDispatch::add_handler(this);
-    register_for_event(ON_GET_PUBLIC_DATA);
 
     // we read the probe in this timer
     probing = false;
@@ -554,20 +553,3 @@ void ZProbe::home()
     gcode_dispatch.run_line("G28.2", &StreamOutput::NullStream);
 }
 
-void ZProbe::on_get_public_data(void* argument)
-{
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
-
-    if(!pdr->starts_with(zprobe_checksum)) return;
-    if (pdr->second_element_is(get_zprobe_pin_states_checksum)) {
-        char *data = static_cast<char *>(pdr->get_data_ptr());
-        // cover endstop
-        data[0] = (char)this->probe_pin.get();
-        data[1] = (char)this->calibrate_pin.get();
-        pdr->set_taken();
-    } else if (pdr->second_element_is(get_zprobe_time_checksum)) {
-    	uint32_t *probe_time = static_cast<uint32_t *>(pdr->get_data_ptr());
-    	*probe_time = this->probe_trigger_time;
-    	pdr->set_taken();
-    }
-}

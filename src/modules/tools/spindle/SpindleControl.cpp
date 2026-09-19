@@ -14,6 +14,9 @@
 #include "libs/PublicData.h"
 #include "SwitchPublicAccess.h"
 #include "ATCHandlerPublicAccess.h"
+#include "ATCHandler.h"
+
+SpindleControl *spindle_control = nullptr;
 
 void SpindleControl::on_gcode_received(Gcode *argument) 
 {
@@ -46,7 +49,7 @@ void SpindleControl::on_gcode_received(Gcode *argument)
         	if (!THEKERNEL->get_laser_mode()) {
                 // current tool number and tool offset
                 struct tool_status tool;
-                bool tool_ok = PublicData::get_value( atc_handler_checksum, get_tool_status_checksum, &tool );
+                bool tool_ok = atc_handler.get_tool_status(&tool);
                 if (tool_ok) {
                 	tool_ok = tool.active_tool > 0;
                 }

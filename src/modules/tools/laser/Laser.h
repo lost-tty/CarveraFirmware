@@ -42,8 +42,8 @@ class Laser : public Module{
         void sub_status(std::string args, StreamOutput *stream);
         void sub_test(std::string args, StreamOutput *stream);
         SimpleShell::Registered shell_slot;
-        void on_get_public_data(void* argument);
 
+        void get_status(struct laser_status *t);
         void set_scale(float s) { scale= s/100; }
         float get_scale() const { return scale*100; }
         bool set_laser_power(float p);
@@ -74,3 +74,5 @@ class Laser : public Module{
             bool testing:1;     // set when manually firing
         };
 };
+
+extern Laser laser;

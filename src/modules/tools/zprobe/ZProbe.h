@@ -37,7 +37,9 @@ public:
     void coordinated_move(float x, float y, float z, float feedrate, bool relative=false);
     void home();
 
-    bool getProbeStatus() { return this->probe_pin.get(); }
+    bool getProbeStatus() const { return this->probe_pin.get(); }
+    bool getCalibrateStatus() const { return this->calibrate_pin.get(); }
+    uint32_t getProbeTriggerTime() const { return probe_trigger_time; }
     float getSlowFeedrate() const { return slow_feedrate; }
     float getFastFeedrate() const { return fast_feedrate; }
     float getProbeHeight() const { return probe_height; }
@@ -47,7 +49,6 @@ private:
     void config_load();
     void probe_XYZ(Gcode *gc);
     void calibrate_Z(Gcode *gc);
-    void on_get_public_data(void* argument);
     void probe_pin_irq_rise();
     void probe_pin_irq_fall();
     void probe_pin_irq(bool);
@@ -77,5 +78,7 @@ private:
         bool invert_probe:1;
     };
 };
+
+extern ZProbe zprobe;
 
 #endif /* ZPROBE_H_ */

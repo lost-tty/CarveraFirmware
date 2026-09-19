@@ -10,7 +10,9 @@
 #include "Logging.h"
 #include "us_ticker_api.h"
 #include "EndstopsPublicAccess.h"
+#include "Endstops.h"
 #include "PlayerPublicAccess.h"
+#include "Player.h"
 #include "SwitchPublicAccess.h"
 #include "libs/PublicData.h"
 #include "PublicDataRequest.h"
@@ -88,8 +90,6 @@ void MainButton::on_module_loaded()
 
     this->register_for_event(ON_IDLE);
     this->register_for_event(ON_SECOND_TICK);
-    this->register_for_event(ON_GET_PUBLIC_DATA);
-    this->register_for_event(ON_SET_PUBLIC_DATA);
 
     // turn on power
     this->switch_power_12(1);
@@ -163,21 +163,8 @@ void MainButton::on_idle(void *argument)
     	// get current status
     	uint8_t state = THEKERNEL->get_state();
 
-		if (this->stop_on_cover_open && !THEKERNEL->is_halted()) {
-            void *return_value;
-			bool cover_endstop_state;
-            bool ok = PublicData::get_value( player_checksum, is_playing_checksum, &return_value );
-            if (ok) {
-                bool playing = *static_cast<bool *>(return_value);
-                if (playing) {
-                	ok = PublicData::get_value(endstops_checksum, get_cover_endstop_state_checksum, 0, &cover_endstop_state);
-					if (ok) {
-						if (!cover_endstop_state) {
-							cover_open_stop = true;
-						}
-					}
-                }
-            }
+		if (this->stop_on_cover_open && !THEKERNEL->is_halted() && player.is_playing()) {
+			if (!endstops.cover_closed()) cover_open_stop = true;
 		}
 		// turn on/off power fan with delay
 		if ((state == IDLE || state == SLEEP) && !using_12v) {
@@ -248,7 +235,7 @@ void MainButton::on_idle(void *argument)
     			case IDLE:
     				if (this->long_press_enable == "Repeat" ) {
 	    				// restart last job (if there is)
-	    			    PublicData::set_value( player_checksum, restart_job_checksum, NULL);
+	    			    player.restart_job();
 	    			}
 	    			else if(this->long_press_enable == "Sleep" ) {
 	    				// turn off 12V/24V power supply
@@ -378,33 +365,5 @@ void MainButton::button_tick()
 	}
 }
 
-void MainButton::on_get_public_data(void* argument)
-{
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
 
-    if (pdr->starts_with(main_button_checksum)) {
-    	if (pdr->second_element_is(get_e_stop_state_checksum)) {
-			char *data = static_cast<char *>(pdr->get_data_ptr());
-			// e-stop status
-			data[0] = (char)this->e_stop.get();
-			pdr->set_taken();
-    	}
-    }
-}
-
-void MainButton::on_set_public_data(void* argument)
-{
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
-
-    if (pdr->starts_with(main_button_checksum)) {
-    	if (pdr->second_element_is(switch_power_12_checksum)) {
-			char *state = static_cast<char *>(pdr->get_data_ptr());
-    		this->switch_power_12(*state);
-    	}
-    	if (pdr->second_element_is(switch_power_24_checksum)) {
-			char *state = static_cast<char *>(pdr->get_data_ptr());
-    		this->switch_power_24(*state);
-    	}
-    }
-}
 

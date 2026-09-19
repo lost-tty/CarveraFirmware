@@ -11,9 +11,12 @@
 #include "libs/Module.h"
 class Gcode;
 
+struct spindle_status;
+
 class SpindleControl: public Module {
     public:
         SpindleControl() {};
+        virtual void get_status(struct spindle_status *t) {};
         virtual ~SpindleControl() {};
         virtual void on_module_loaded() {};
 
@@ -37,3 +40,6 @@ class SpindleControl: public Module {
 };
 
 #endif
+
+// the one spindle SpindleMaker built, or nullptr if none is configured
+extern SpindleControl *spindle_control;

@@ -7,8 +7,10 @@
 #include "checksumm.h"
 #include "PublicData.h"
 #include "SpindlePublicAccess.h"
+#include "SpindleControl.h"
 #include "ATCHandlerPublicAccess.h"
 #include "PlayerPublicAccess.h"
+#include "Player.h"
 
 #include <cstring>
 
@@ -39,7 +41,11 @@ bool Parameters::get(int n, float &v) const
         case 3026: v = THEKERNEL->eeprom_data.TOOL; return true;
         case 3027: {
             struct spindle_status ss;
-            v = PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss) ? ss.current_rpm : 0;
+            v = 0;
+            if(spindle_control != nullptr) {
+                spindle_control->get_status(&ss);
+                v = ss.current_rpm;
+            }
             return true;
         }
         case 3033: v = THEKERNEL->get_optional_stop_mode(); return true;
@@ -64,13 +70,14 @@ bool Parameters::get(int n, float &v) const
 static bool spindle_on()
 {
     struct spindle_status ss;
-    return PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss) && ss.state;
+    if(spindle_control == nullptr) return false;
+    spindle_control->get_status(&ss);
+    return ss.state;
 }
 
 static bool player_playing()
 {
-    void *p= nullptr;
-    return PublicData::get_value(player_checksum, is_playing_checksum, &p) && *static_cast<bool *>(p);
+    return player.is_playing();
 }
 
 Parameters::Named *Parameters::named = nullptr;

@@ -7,6 +7,7 @@
 #include "mbed.h"
 #include "PublicData.h"
 #include "ScriptsPublicAccess.h"
+#include "Scripts.h"
 #include "Source.h"
 #include "ATCHandlerPublicAccess.h"
 #include "md5.h"
@@ -288,7 +289,7 @@ done:
         string dest = filename.substr(0, filename.find(".lz"));
         ok = decompress(datafile, dest, file_size, stream);
     }
-    if (ok) PublicData::set_value(scripts_checksum, file_changed_checksum, (void *)filename.c_str());
+    if (ok) scripts.file_changed(filename.c_str());
     return ok;
 }
 

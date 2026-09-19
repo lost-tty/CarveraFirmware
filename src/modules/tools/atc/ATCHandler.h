@@ -13,6 +13,10 @@ class ATCHandler : public Module
 {
 
 public:
+    bool get_tool_status(struct tool_status *t) const;
+    void get_pin_status(char *data) const;
+    void set_ref_tool_mz();
+
     ATCHandler()
     : probe_laser_timer("ProbeLaserCountdown", 1000, true, this, &ATCHandler::countdown_probe_laser),
 	read_endstop_timer("AtcReadEndstop", 1, true, this, &ATCHandler::read_endstop), // 1kHz
@@ -21,8 +25,6 @@ public:
 
     void on_module_loaded();
     void on_gcode_received(Gcode *argument);
-    void on_get_public_data(void *argument);
-    void on_set_public_data(void *argument);
     void on_halt(void *argument);
     void on_config_reload(void *argument);
 
@@ -146,3 +148,5 @@ private:
 };
 
 #endif /* _ATCHANDLER_H */
+
+extern ATCHandler atc_handler;

@@ -41,7 +41,6 @@ static const Trigger TRIGGERS[]= {
 
 void Scripts::on_module_loaded()
 {
-    register_for_event(ON_SET_PUBLIC_DATA);
     gcode_dispatch.set_script_hook(this);
     SimpleShell::add_command(shell_slot, "macro", &Scripts::shell, this,
                              "macro list | params | check | run <sub> [args] | trace on|off");
@@ -203,26 +202,21 @@ void Scripts::abort()
 }
 
 // hooks from other modules: run a sub if the machine script has it
-void Scripts::on_set_public_data(void *argument)
+// a macro file changed on disk, so the loaded program is stale
+void Scripts::file_changed(const char *path)
 {
-    PublicDataRequest *pdr= static_cast<PublicDataRequest *>(argument);
-    if(!pdr->starts_with(scripts_checksum)) return;
+    if(path == nullptr || strncmp(path, SD_DIR, sizeof(SD_DIR) - 1) != 0) return;
+    loaded= false;
+    load(&THEKERNEL->streams);
+}
 
-    if(pdr->second_element_is(file_changed_checksum)) {
-        const char *path= static_cast<const char *>(pdr->get_data_ptr());
-        if(path == nullptr || strncmp(path, SD_DIR, sizeof(SD_DIR) - 1) != 0) return;
-        loaded= false;
-        load(&THEKERNEL->streams);
-        pdr->set_taken();
-        return;
-    }
-
-    if(!pdr->second_element_is(run_script_checksum)) return;
-    const script_call *c= static_cast<const script_call *>(pdr->get_data_ptr());
-    if(!loaded || macros.program().find_sub(c->sub) < 0) return;
+bool Scripts::run_sub(const char *sub, const float *args, unsigned nargs)
+{
+    if(!loaded || macros.program().find_sub(sub) < 0) return false;
     std::string err;
-    if(run(c->sub, c->args, c->nargs, nullptr, err)) pdr->set_taken();
-    else printk("error:script %s %s\n", c->sub, err.c_str());
+    if(run(sub, args, nargs, nullptr, err)) return true;
+    printk("error:script %s %s\n", sub, err.c_str());
+    return false;
 }
 
 // only queues the sub, the source stack runs it once the main loop is going

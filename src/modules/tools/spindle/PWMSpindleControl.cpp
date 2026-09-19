@@ -258,32 +258,15 @@ void PWMSpindleControl::set_factor(float new_factor) {
 }
 
 // returns spindle status
-void PWMSpindleControl::on_get_public_data(void* argument)
+void PWMSpindleControl::get_status(struct spindle_status *t)
 {
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
-    if(!pdr->starts_with(pwm_spindle_control_checksum)) return;
-    if(pdr->second_element_is(get_spindle_status_checksum)) {
-		// ok this is targeted at us, so set the requ3sted data in the pointer passed into us
-		struct spindle_status *t= static_cast<spindle_status*>(pdr->get_data_ptr());
-		t->state = this->spindle_on;
-		t->current_rpm = this->current_rpm;
-		t->target_rpm = this->target_rpm;
-		t->current_pwm_value = this->current_pwm_value;
-		t->factor= this->factor;
-		pdr->set_taken();
-    }
+    t->state = this->spindle_on;
+    t->current_rpm = this->current_rpm;
+    t->target_rpm = this->target_rpm;
+    t->current_pwm_value = this->current_pwm_value;
+    t->factor = this->factor;
 }
 
-void PWMSpindleControl::on_set_public_data(void* argument)
-{
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
-
-    if(!pdr->starts_with(pwm_spindle_control_checksum)) return;
-    if(pdr->second_element_is(turn_off_spindle_checksum)) {
-        this->turn_off();
-        pdr->set_taken();
-    }
-}
 
 
 // returns spindle status

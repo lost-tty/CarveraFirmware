@@ -7,6 +7,7 @@
 #include "StepperMotor.h"
 #include "utils.h"
 #include "SpindlePublicAccess.h"
+#include "SpindleControl.h"
 #include "SwitchPublicAccess.h"
 #include "checksumm.h"
 #include "mbed.h"
@@ -138,7 +139,8 @@ void Pendant::key_down(uint8_t key, bool shifted)
             case LIGHT:   toggle_switch("light"); break;
             case SPINDLE: {
                 struct spindle_status ss;
-                if (!PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss)) break;
+                if (spindle_control == nullptr) break;
+                spindle_control->get_status(&ss);
                 if (ss.state) line("M5");
                 else if (ss.target_rpm > 0) line("M3 S%d", (int)ss.target_rpm);
                 break;

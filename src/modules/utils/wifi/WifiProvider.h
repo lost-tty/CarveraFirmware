@@ -30,12 +30,16 @@ using namespace std;
 class WifiProvider : public Module, public FrameConsole
 {
 public:
+    std::string scan_wlans();
+    void connect_ap(struct ap_conn_info *s);
+    void set_ap_channel(uint8_t channel);
+    void set_ap_ssid(const char *ssid);
+    void set_ap_password(const char *password);
+    void set_ap_enabled(bool on);
     void on_module_loaded();
     void on_main_loop( void* argument );
     void on_second_tick(void* argument);
     void on_idle(void* argument);
-    void on_get_public_data(void* argument);
-    void on_set_public_data(void* argument);
 
     uint8_t initializeTcpServer(uint16_t local_port, uint8_t max_clients);
     void removeTcpServer(uint8_t link_no);
@@ -103,3 +107,5 @@ private:
 };
 
 #endif /* WIFIPROVIDER_H_ */
+
+extern WifiProvider wifi_provider;

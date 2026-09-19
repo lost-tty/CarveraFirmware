@@ -15,6 +15,8 @@
 #include "Robot.h"
 #include "ConfigValue.h"
 #include "Conveyor.h"
+#include "ZProbe.h"
+#include "WirelessProbe.h"
 #include "PublicData.h"
 #include "Gcode.h"
 #include "libs/Logging.h"
@@ -82,8 +84,6 @@ void ATCHandler::on_module_loaded()
 
 
     GcodeDispatch::add_handler(this);
-    this->register_for_event(ON_GET_PUBLIC_DATA);
-    this->register_for_event(ON_SET_PUBLIC_DATA);
     this->register_for_event(ON_HALT);
 
     this->on_config_reload(this);
@@ -193,7 +193,7 @@ void ATCHandler::countdown_probe_laser()
 {
 	if (this->probe_laser_countdown > 0) {
 		this->probe_laser_countdown--;
-		PublicData::set_value(atc_handler_checksum, set_wp_laser_checksum, nullptr);
+		wireless_probe.fire_laser();
 	} else {
 		probe_laser_timer.stop();
 	}
@@ -244,16 +244,7 @@ bool ATCHandler::probe_detect() {
     // First wait for the queue to be empty
     THECONVEYOR.wait_for_idle();
 
-    // get probe and calibrate states
-    uint32_t probe_time;
-    bool ok = PublicData::get_value(zprobe_checksum, get_zprobe_time_checksum, 0, &probe_time);
-    if (ok) {
-    	if (us_ticker_read() - probe_time < 5 * 1000 * 1000) {
-    		return true;
-    	}
-    }
-
-    return false;
+    return us_ticker_read() - zprobe.getProbeTriggerTime() < 5 * 1000 * 1000;
 }
 
 void ATCHandler::home_clamp()
@@ -496,43 +487,27 @@ void ATCHandler::register_params()
     for (unsigned i = 0; i < sizeof(PARAMS) / sizeof(*PARAMS); i++) Parameters::add(slots[i], PARAMS[i].name, PARAMS[i].get, this);
 }
 
-void ATCHandler::on_get_public_data(void* argument)
+bool ATCHandler::get_tool_status(struct tool_status *t) const
 {
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
-
-    if(!pdr->starts_with(atc_handler_checksum)) return;
-
-    if(pdr->second_element_is(get_tool_status_checksum)) {
-    	if (THEKERNEL->eeprom_data.TOOL >= 0) {
-            struct tool_status *t= static_cast<tool_status*>(pdr->get_data_ptr());
-            t->active_tool = THEKERNEL->eeprom_data.TOOL;
-            t->ref_tool_mz = THEKERNEL->eeprom_data.REFMZ;
-            t->cur_tool_mz = THEKERNEL->eeprom_data.TOOLMZ;
-            t->tool_offset = THEKERNEL->eeprom_data.TLO;
-            pdr->set_taken();
-    	}
-    } else if (pdr->second_element_is(get_atc_pin_status_checksum)) {
-        char *data = static_cast<char *>(pdr->get_data_ptr());
-        // cover endstop
-        data[0] = (char)this->atc_home_info.pin.get();
-        data[1] = (char)this->detector_info.detect_pin.get();
-        pdr->set_taken();
-    }
+    if(THEKERNEL->eeprom_data.TOOL < 0) return false;
+    t->active_tool = THEKERNEL->eeprom_data.TOOL;
+    t->ref_tool_mz = THEKERNEL->eeprom_data.REFMZ;
+    t->cur_tool_mz = THEKERNEL->eeprom_data.TOOLMZ;
+    t->tool_offset = THEKERNEL->eeprom_data.TLO;
+    return true;
 }
 
-void ATCHandler::on_set_public_data(void* argument)
+void ATCHandler::get_pin_status(char *data) const
 {
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
+    data[0] = (char)this->atc_home_info.pin.get();
+    data[1] = (char)this->detector_info.detect_pin.get();
+}
 
-    if(!pdr->starts_with(atc_handler_checksum)) return;
-
-    if(pdr->second_element_is(set_ref_tool_mz_checksum)) {
-        // the current tool becomes the reference, so its offset is zero
-        if (THEKERNEL->eeprom_data.REFMZ != THEKERNEL->eeprom_data.TOOLMZ || THEKERNEL->eeprom_data.TLO != 0) {
-        	THEKERNEL->eeprom_data.REFMZ = THEKERNEL->eeprom_data.TOOLMZ;
-        	THEKERNEL->eeprom_data.TLO = 0;
-		    THEKERNEL->write_eeprom_data();
-        }
-        pdr->set_taken();
-    }
+// the current tool becomes the reference, so its offset is zero
+void ATCHandler::set_ref_tool_mz()
+{
+    if(THEKERNEL->eeprom_data.REFMZ == THEKERNEL->eeprom_data.TOOLMZ && THEKERNEL->eeprom_data.TLO == 0) return;
+    THEKERNEL->eeprom_data.REFMZ = THEKERNEL->eeprom_data.TOOLMZ;
+    THEKERNEL->eeprom_data.TLO = 0;
+    THEKERNEL->write_eeprom_data();
 }

@@ -10,6 +10,9 @@
 
 #include "Robot.h"
 #include "Conveyor.h"
+#include "Endstops.h"
+#include "ATCHandler.h"
+#include "SpindleControl.h"
 #include "Pin.h"
 #include "StepperMotor.h"
 #include "Gcode.h"
@@ -552,7 +555,7 @@ void Robot::on_gcode_received(Gcode *argument)
                         std::tie(x, y, z) = wcs_offsets[n];
                         // notify atc module to change ref tool mcs if Z wcs offset is chaned
                         if (gcode->has_letter('Z')) {
-                        	PublicData::set_value(atc_handler_checksum, set_ref_tool_mz_checksum, nullptr);
+                        	atc_handler.set_ref_tool_mz();
                         	this->clearToolOffset();
                         }
                         if(gcode->get_int('L') == 20) {
@@ -943,8 +946,8 @@ void Robot::on_gcode_received(Gcode *argument)
                     THEKERNEL->set_vacuum_mode(true);
                     // get spindle state
                     struct spindle_status ss;
-                    bool ok = PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss);
-                    if (ok) {
+                    if (spindle_control != nullptr) {
+                        spindle_control->get_status(&ss);
                         if (ss.state) {
                             // open vacuum
                             bool b = true;
@@ -962,8 +965,8 @@ void Robot::on_gcode_received(Gcode *argument)
                     THEKERNEL->set_vacuum_mode(false);
                     // get spindle state
                     struct spindle_status ss;
-                    bool ok = PublicData::get_value(pwm_spindle_control_checksum, get_spindle_status_checksum, &ss);
-                    if (ok) {
+                    if (spindle_control != nullptr) {
+                        spindle_control->get_status(&ss);
                         if (ss.state) {
                             // close vacuum
                             bool b = false;
@@ -2028,13 +2031,7 @@ bool Robot::is_homed(uint8_t i) const
     if(i >= 3) return false; // safety
 
     // if we are homing we ignore soft endstops so return false
-    bool homing;
-    bool ok = PublicData::get_value(endstops_checksum, get_homing_status_checksum, 0, &homing);
-    if(!ok || homing) return false;
+    if(endstops.is_homing()) return false;
 
-    // check individual axis homing status
-    bool homed[3];
-    ok = PublicData::get_value(endstops_checksum, get_homed_status_checksum, 0, homed);
-    if(!ok) return false;
-    return homed[i];
+    return endstops.is_homed(i);
 }

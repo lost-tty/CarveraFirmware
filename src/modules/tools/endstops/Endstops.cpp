@@ -25,6 +25,7 @@
 #include "PublicDataRequest.h"
 #include "PublicData.h"
 #include "ScriptsPublicAccess.h"
+#include "Scripts.h"
 #include "EndstopsPublicAccess.h"
 #include "Logging.h"
 #include "BaseSolution.h"
@@ -116,8 +117,6 @@ void Endstops::on_module_loaded()
     }
 
     GcodeDispatch::add_handler(this);
-    register_for_event(ON_GET_PUBLIC_DATA);
-    register_for_event(ON_SET_PUBLIC_DATA);
 
 	read_endstops_timer.start();
 
@@ -508,8 +507,7 @@ void Endstops::back_off_home(axis_bitmap_t axis)
 void Endstops::after_home(axis_bitmap_t axis)
 {
     if(!axis[X_AXIS] || !axis[Y_AXIS]) return;
-    struct script_call call{"after_home", nullptr, 0};
-    PublicData::set_value(scripts_checksum, run_script_checksum, &call);
+    scripts.run_sub("after_home", nullptr, 0);
 }
 
 // Called every millisecond in an ISR
@@ -950,65 +948,18 @@ void Endstops::on_gcode_received(Gcode *argument)
     }
 }
 
-void Endstops::on_get_public_data(void* argument)
+bool Endstops::is_homing() const
 {
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
-
-    if(!pdr->starts_with(endstops_checksum)) return;
-
-    if(pdr->second_element_is(home_offset_checksum)) {
-        // provided by caller
-        float *data = static_cast<float *>(pdr->get_data_ptr());
-        for (int i = 0; i < 3; ++i) {
-            data[i]= homing_axis[i].home_offset;
-        }
-        pdr->set_taken();
-
-    } else if(pdr->second_element_is(g28_position_checksum)) {
-        pdr->set_data_ptr(&this->g28_position);
-        pdr->set_taken();
-    } else if(pdr->second_element_is(get_homing_status_checksum)) {
-        bool *homing = static_cast<bool *>(pdr->get_data_ptr());
-        *homing = this->status != NOT_HOMING;
-        pdr->set_taken();
-
-    } else if(pdr->second_element_is(get_homed_status_checksum)) {
-        bool *homed = static_cast<bool *>(pdr->get_data_ptr());
-        for (int i = 0; i < 3; ++i) {
-            homed[i]= homing_axis[i].homed;
-        }
-        pdr->set_taken();
-    } else if (pdr->second_element_is(get_endstop_states_checksum)) {
-    	int index = 0;
-        char *data = static_cast<char *>(pdr->get_data_ptr());
-        for(auto& i : endstops) {
-        	if (index < 6) {
-                if(i->limit_enable) {
-                	data[index] = (char)i->pin.get();
-                	index ++;
-                }
-        	}
-        }
-        // cover endstop
-        data[5] = (char)this->cover_endstop_pin.get();
-        pdr->set_taken();
-    } else if (pdr->second_element_is(get_cover_endstop_state_checksum)) {
-        bool *cover_state = static_cast<bool *>(pdr->get_data_ptr());
-        *cover_state = this->cover_endstop_pin.get();
-        pdr->set_taken();
-    }
+    return status != NOT_HOMING;
 }
 
-void Endstops::on_set_public_data(void* argument)
+// six limit-enabled endstops then the cover, as the status report expects them
+void Endstops::get_endstop_states(char *data) const
 {
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
-
-    if(!pdr->starts_with(endstops_checksum)) return;
-
-    if(pdr->second_element_is(home_offset_checksum)) {
-        float *t = static_cast<float*>(pdr->get_data_ptr());
-        if(!isnan(t[0])) homing_axis[0].home_offset= t[0];
-        if(!isnan(t[1])) homing_axis[1].home_offset= t[1];
-        if(!isnan(t[2])) homing_axis[2].home_offset= t[2];
+    int index = 0;
+    for(auto& i : endstops) {
+        if(index < 6 && i->limit_enable) data[index++] = (char)i->pin.get();
     }
+    data[5] = (char)this->cover_endstop_pin.get();
 }
+

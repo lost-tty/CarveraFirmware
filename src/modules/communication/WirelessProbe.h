@@ -5,8 +5,8 @@
       You should have received a copy of the GNU General Public License along with Smoothie. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef SERIALCONSOLE_H
-#define SERIALCONSOLE_H
+#ifndef WIRELESSPROBE_H
+#define WIRELESSPROBE_H
 
 #include "libs/Module.h"
 class Gcode;
@@ -28,9 +28,11 @@ class WirelessProbe : public Module {
         void on_module_loaded();
         void on_serial_char_received();
         void on_main_loop(void * argument);
-        void on_get_public_data(void *argument);
-        void on_set_public_data(void *argument);
         void on_gcode_received(Gcode *argument);
+
+        float get_voltage() const { return wp_voltage; }
+        void request_state() { putc('Q'); }
+        void fire_laser() { putc('L'); }
 
         float wp_voltage;
         float min_voltage;
@@ -48,5 +50,7 @@ class WirelessProbe : public Module {
         RingBuffer<char,256> buffer;             // Receive buffer
         mbed::Serial* serial;
 };
+
+extern WirelessProbe wireless_probe;
 
 #endif

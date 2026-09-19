@@ -24,12 +24,13 @@ public:
     void sub_run(std::string args, StreamOutput *stream);
     void sub_trace(std::string args, StreamOutput *stream);
     SimpleShell::Registered shell_slot;
-    void on_set_public_data(void *) override;
     bool trigger(const Gcode &gcode, StreamOutput *stream, std::string &err) override;
     Source::Result next(SerialMessage &msg) override;
     void abort() override;
     void list(StreamOutput *stream, unsigned around) override;
     void boot();
+    void file_changed(const char *path);
+    bool run_sub(const char *sub, const float *args, unsigned nargs);
 
 private:
     bool load(StreamOutput *stream);

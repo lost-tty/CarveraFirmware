@@ -51,8 +51,6 @@ void WirelessProbe::on_module_loaded() {
 
     // We only call the command dispatcher in the main loop, nowhere else
     this->register_for_event(ON_MAIN_LOOP);
-    this->register_for_event(ON_GET_PUBLIC_DATA);
-    this->register_for_event(ON_SET_PUBLIC_DATA);
     GcodeDispatch::add_handler(this);
 }
 
@@ -155,33 +153,7 @@ bool WirelessProbe::has_char(char letter){
     return false;
 }
 
-void WirelessProbe::on_get_public_data(void *argument) {
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
 
-    if(!pdr->starts_with(atc_handler_checksum)) return;
-
-    if(pdr->second_element_is(get_wp_voltage_checksum)) {
-        float *t = static_cast<float*>(pdr->get_data_ptr());
-        *t = this->wp_voltage;
-        pdr->set_taken();
-    } else if(pdr->second_element_is(show_wp_state_checksum)) {
-    	this->putc('Q');
-        pdr->set_taken();
-    }
-
-
-}
-
-void WirelessProbe::on_set_public_data(void *argument) {
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
-
-    if(!pdr->starts_with(atc_handler_checksum)) return;
-
-    if(pdr->second_element_is(set_wp_laser_checksum)) {
-    	this->putc('L');
-        pdr->set_taken();
-    }
-}
 
 void WirelessProbe::on_gcode_received(Gcode *argument)
 {

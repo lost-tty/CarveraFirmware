@@ -26,6 +26,7 @@
 #include "checksumm.h"
 #include "PublicData.h"
 #include "ScriptsPublicAccess.h"
+#include "Scripts.h"
 #include "Source.h"
 #include "Gcode.h"
 #include "Robot.h"
@@ -39,7 +40,9 @@
 #include "LaserPublicAccess.h"
 #include "TemperatureControlPublicAccess.h"
 #include "EndstopsPublicAccess.h"
+#include "Endstops.h"
 #include "ATCHandlerPublicAccess.h"
+#include "WirelessProbe.h"
 // #include "NetworkPublicAccess.h"
 #include "SwitchPublicAccess.h"
 #include "SDFAT.h"
@@ -48,9 +51,11 @@
 #include "utils.h"
 #include "AutoPushPop.h"
 #include "MainButtonPublicAccess.h"
+#include "MainButton.h"
 #include "system_LPC17xx.h"
 #include "LPC17xx.h"
 #include "WifiPublicAccess.h"
+#include "WifiProvider.h"
 #include "FileTransfer.h"
 #include "Frame.h"
 #include "utils.h"
@@ -359,7 +364,7 @@ void SimpleShell::rm_command( string parameters, StreamOutput *stream )
     } else {
     	remove(absolute_from_relative(md5_path).c_str());
     	remove(absolute_from_relative(lz_path).c_str());
-    	PublicData::set_value(scripts_checksum, file_changed_checksum, (void *)toRemove.c_str());
+    	scripts.file_changed(toRemove.c_str());
     	stream->send(Frame::LOAD_FINISH, "ok\r\n", 4);
     }
 }
@@ -385,8 +390,8 @@ void SimpleShell::mv_command( string parameters, StreamOutput *stream )
     } else  {
     	rename(md5_from.c_str(), md5_to.c_str());
         rename(lz_from.c_str(), lz_to.c_str());
-        PublicData::set_value(scripts_checksum, file_changed_checksum, (void *)from.c_str());
-        PublicData::set_value(scripts_checksum, file_changed_checksum, (void *)to.c_str());
+        scripts.file_changed(from.c_str());
+        scripts.file_changed(to.c_str());
         stream->send(Frame::LOAD_FINISH, "ok\r\n", 4);
 		stream->printf("renamed %s to %s\r\n", from.c_str(), to.c_str());
     }
@@ -707,7 +712,7 @@ void SimpleShell::ap_command( string parameters, StreamOutput *stream)
     	    	if (channel < 1 || channel > 14) {
     	    		stream->printf("WiFi AP Channel should between 1 to 14\n");
     	    	} else {
-    	            PublicData::set_value( wlan_checksum, ap_set_channel_checksum, &channel );
+    	            wifi_provider.set_ap_channel(channel);
     	    	}
     		}
     	} else if (s == "ssid") {
@@ -716,7 +721,7 @@ void SimpleShell::ap_command( string parameters, StreamOutput *stream)
     	    		stream->printf("WiFi AP SSID length should between 1 to 27\n");
     	    	} else {
     	    		strcpy(buff, parameters.c_str());
-    	            PublicData::set_value( wlan_checksum, ap_set_ssid_checksum, buff );
+    	            wifi_provider.set_ap_ssid(buff);
     	    	}
     		}
     	} else if (s == "password") {
@@ -728,13 +733,13 @@ void SimpleShell::ap_command( string parameters, StreamOutput *stream)
     	    		strcpy(buff, parameters.c_str());
     	    	}
     		}
-	        PublicData::set_value( wlan_checksum, ap_set_password_checksum, buff );
+	        wifi_provider.set_ap_password(buff);
     	} else if (s == "enable") {
     		bool b = true;
-	        PublicData::set_value( wlan_checksum, ap_enable_checksum, &b );
+	        wifi_provider.set_ap_enabled(b);
     	} else if (s == "disable") {
     		bool b = false;
-	        PublicData::set_value( wlan_checksum, ap_enable_checksum, &b );
+	        wifi_provider.set_ap_enabled(b);
     	} else {
     		stream->printf("ERROR: Invalid AP Command!\n");
     	}
@@ -762,13 +767,10 @@ void SimpleShell::wlan_command( string parameters, StreamOutput *stream)
         }
     }
 
-    void *returned_data;
     if (ssid.empty()) {
-        bool ok = PublicData::get_value( wlan_checksum, get_wlan_checksum, &returned_data );
-        if (ok) {
-            char *str = (char *)returned_data;
-            stream->send(Frame::LOAD_INFO, str, strlen(str));
-            free(str);
+        std::string str = wifi_provider.scan_wlans();
+        if (!str.empty()) {
+            stream->send(Frame::LOAD_INFO, str.data(), str.size());
             stream->send(Frame::LOAD_FINISH, "ok\r\n", 4);
         } else {
         	stream->send(Frame::LOAD_ERROR, "No wlan detected\r\n", 18);
@@ -780,25 +782,21 @@ void SimpleShell::wlan_command( string parameters, StreamOutput *stream)
         	snprintf(t.ssid, sizeof(t.ssid), "%s", ssid.c_str());
         	snprintf(t.password, sizeof(t.password), "%s", password.c_str());
     	}
-        bool ok = PublicData::set_value( wlan_checksum, set_wlan_checksum, &t );
-        if (ok) {
-        	if (t.has_error) {
-        		char msg[80];
-        		int n = snprintf(msg, sizeof(msg), "Error: %s\n", t.error_info);
-        		stream->send(Frame::LOAD_INFO, msg, n);
-        		stream->send(Frame::LOAD_ERROR, "Connect or Disconnect error.\r\n", 30);
-        	} else {
-        		if (t.disconnect) {
-            		stream->send(Frame::LOAD_INFO, "Wifi Disconnected!\n", 19);
-        		} else {
-        			char msg[80];
-        			int n = snprintf(msg, sizeof(msg), "Wifi connected, ip: %s\n", t.ip_address);
-            		stream->send(Frame::LOAD_INFO, msg, n);
-        		}
-        		stream->send(Frame::LOAD_FINISH, "ok\r\n", 4);
-        	}
+        wifi_provider.connect_ap(&t);
+        if (t.has_error) {
+        	char msg[80];
+        	int n = snprintf(msg, sizeof(msg), "Error: %s\n", t.error_info);
+        	stream->send(Frame::LOAD_INFO, msg, n);
+        	stream->send(Frame::LOAD_ERROR, "Connect or Disconnect error.\r\n", 30);
         } else {
-        	stream->send(Frame::LOAD_ERROR, "Parameter error when setting wlan!\r\n", 36);
+        	if (t.disconnect) {
+        		stream->send(Frame::LOAD_INFO, "Wifi Disconnected!\n", 19);
+        	} else {
+        		char msg[80];
+        		int n = snprintf(msg, sizeof(msg), "Wifi connected, ip: %s\n", t.ip_address);
+        		stream->send(Frame::LOAD_INFO, msg, n);
+        	}
+        	stream->send(Frame::LOAD_FINISH, "ok\r\n", 4);
         }
     }
 }
@@ -815,8 +813,8 @@ void SimpleShell::sleep_command(string parameters, StreamOutput *stream)
 {
 	char power_off = 0;
 	// turn off 12V/24V power supply
-	PublicData::set_value( main_button_checksum, switch_power_12_checksum, &power_off );
-	PublicData::set_value( main_button_checksum, switch_power_24_checksum, &power_off );
+	mainbutton.set_power_12(false);
+	mainbutton.set_power_24(false);
 	THEKERNEL->set_sleeping(true);
 	THEKERNEL->call_event(ON_HALT, nullptr);
 }
@@ -834,15 +832,15 @@ void SimpleShell::power_command(string parameters, StreamOutput *stream)
 		}
 		if (s1 == "on" ) {
 			if (s2 == "12") {
-				PublicData::set_value( main_button_checksum, switch_power_12_checksum, &power_on );
+				mainbutton.set_power_12(true);
 			} else if (s2 == "24") {
-				PublicData::set_value( main_button_checksum, switch_power_24_checksum, &power_on );
+				mainbutton.set_power_24(true);
 			}
 		} else if (s1 == "off") {
 			if (s2 == "12") {
-				PublicData::set_value( main_button_checksum, switch_power_12_checksum, &power_off );
+				mainbutton.set_power_12(false);
 			} else if (s2 == "24") {
-				PublicData::set_value( main_button_checksum, switch_power_24_checksum, &power_off );
+				mainbutton.set_power_24(false);
 			}
 		}
 	}
@@ -965,8 +963,7 @@ void SimpleShell::grblDP_command( string parameters, StreamOutput *stream)
             THEROBOT.from_millimeters(std::get<2>(v[i])));
     }
 
-    float *rd;
-    PublicData::get_value( endstops_checksum, g28_position_checksum, &rd );
+    const float *rd = endstops.get_g28_position();
     stream->printf("[G28:%1.4f,%1.4f,%1.4f]\n",
         THEROBOT.from_millimeters(rd[0]),
         THEROBOT.from_millimeters(rd[1]),
@@ -1110,7 +1107,7 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
 		if(THEROBOT.compensationTransform) THEROBOT.compensationTransform(mpos, true, true); // get inverse compensation transform
 		stream->printf("Curr: %1.3f,%1.3f,%1.3f, Comp: %1.3f,%1.3f,%1.3f\n", old_mpos[0], old_mpos[1], old_mpos[2], mpos[0], mpos[1], mpos[2]);
     } else if (what == "wp" || what == "wp_state") {
-    	PublicData::get_value(atc_handler_checksum, show_wp_state_checksum, NULL);
+    	wireless_probe.request_state();
     } else {
         stream->printf("error: unknown option %s\n", what.c_str());
     }
