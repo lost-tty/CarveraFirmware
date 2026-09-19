@@ -16,7 +16,6 @@
 #include "PublicDataRequest.h"
 
 #include "PublicData.h"
-#include "ToolManagerPublicAccess.h"
 #include "Logging.h"
 #include "Config.h"
 #include "checksumm.h"
@@ -302,48 +301,36 @@ void TemperatureControl::on_gcode_received(Gcode *argument)
             }
 
         } else if( ( gcode->m == this->set_m_code || gcode->m == this->set_and_wait_m_code ) && gcode->has_letter('S')) {
-            // this only gets handled if it is not controlled by the tool manager or is active in the toolmanager
             this->active = true;
 
-            // this is safe as old configs as well as single extruder configs the toolmanager will not be running so will return false
-            // this will also ignore anything that the tool manager is not controlling and return false, otherwise it returns the active tool
-            void *returned_data;
-            bool ok = PublicData::get_value( tool_manager_checksum, is_active_tool_checksum, this->name_checksum, &returned_data );
-            if (ok) {
-                uint16_t active_tool_name =  *static_cast<uint16_t *>(returned_data);
-                this->active = (active_tool_name == this->name_checksum);
-            }
+            // required so temp change happens in order
+            THECONVEYOR.wait_for_idle();
 
-            if(this->active) {
-                // required so temp change happens in order
-                THECONVEYOR.wait_for_idle();
+            float v = gcode->get_value('S');
 
-                float v = gcode->get_value('S');
-
-                if (v == 0.0) {
-                    this->target_temperature = UNDEFINED;
-                    this->heater_pin.set((this->o = 0));
-                } else {
-                    this->set_desired_temperature(v);
-                    // wait for temp to be reached, no more gcodes will be fetched until this is complete
-                    if( gcode->m == this->set_and_wait_m_code) {
-                        if(isinf(get_temperature()) && isinf(sensor->get_temperature())) {
-                            printk("Temperature reading is unreliable on %s HALT asserted - reset or M999 required\n", designator.c_str());
-                            THEKERNEL->call_event(ON_HALT, nullptr);
-                            return;
-                        }
-
-                        this->waiting = true; // on_second_tick will announce temps
-                        while ( get_temperature() < target_temperature ) {
-                            THEKERNEL->call_event(ON_IDLE, this);
-                            // check if ON_HALT was called (usually by kill button)
-                            if(THEKERNEL->is_halted() || this->target_temperature == UNDEFINED) {
-                                printk("Wait on temperature aborted by kill\n");
-                                break;
-                            }
-                        }
-                        this->waiting = false;
+            if (v == 0.0) {
+                this->target_temperature = UNDEFINED;
+                this->heater_pin.set((this->o = 0));
+            } else {
+                this->set_desired_temperature(v);
+                // wait for temp to be reached, no more gcodes will be fetched until this is complete
+                if( gcode->m == this->set_and_wait_m_code) {
+                    if(isinf(get_temperature()) && isinf(sensor->get_temperature())) {
+                        printk("Temperature reading is unreliable on %s HALT asserted - reset or M999 required\n", designator.c_str());
+                        THEKERNEL->call_event(ON_HALT, nullptr);
+                        return;
                     }
+
+                    this->waiting = true; // on_second_tick will announce temps
+                    while ( get_temperature() < target_temperature ) {
+                        THEKERNEL->call_event(ON_IDLE, this);
+                        // check if ON_HALT was called (usually by kill button)
+                        if(THEKERNEL->is_halted() || this->target_temperature == UNDEFINED) {
+                            printk("Wait on temperature aborted by kill\n");
+                            break;
+                        }
+                    }
+                    this->waiting = false;
                 }
             }
         }

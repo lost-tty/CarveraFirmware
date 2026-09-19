@@ -29,7 +29,6 @@
 #include "Source.h"
 #include "Gcode.h"
 #include "Robot.h"
-#include "ToolManagerPublicAccess.h"
 #include "GcodeDispatch.h"
 #include "BaseSolution.h"
 #include "StepperMotor.h"
@@ -923,18 +922,6 @@ void SimpleShell::break_command( string parameters, StreamOutput *stream)
     __debugbreak();
 }
 
-static int get_active_tool()
-{
-    void *returned_data;
-    bool ok = PublicData::get_value(tool_manager_checksum, get_active_tool_checksum, &returned_data);
-    if (ok) {
-         int active_tool=  *static_cast<int *>(returned_data);
-        return active_tool;
-    } else {
-        return 0;
-    }
-}
-
 static bool get_switch_state(const char *sw)
 {
     // get sw switch state
@@ -1106,7 +1093,7 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
             THEROBOT.absolute_mode ? 90 : 91,
             get_switch_state("spindle") ? '3' : '5',
             get_switch_state("mist") ? '7' : get_switch_state("flood") ? '8' : '9',
-            get_active_tool(),
+            THEKERNEL->eeprom_data.TOOL,
             THEROBOT.from_millimeters(THEROBOT.get_feed_rate()),
             THEROBOT.get_s_value());
 
