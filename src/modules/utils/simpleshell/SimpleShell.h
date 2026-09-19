@@ -84,7 +84,6 @@ private:
     void dfu_command(string parameters, StreamOutput *stream );
     void help_command(string parameters, StreamOutput *stream );
     void get_command(string parameters, StreamOutput *stream );
-    void set_temp_command(string parameters, StreamOutput *stream );
     void calc_thermistor_command( string parameters, StreamOutput *stream);
     void print_thermistors_command( string parameters, StreamOutput *stream);
     void md5sum_command( string parameters, StreamOutput *stream);

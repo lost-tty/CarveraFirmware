@@ -17,19 +17,15 @@ class Gcode;
 
 class TemperatureControl : public Module {
 
-
     public:
         uint16_t get_name() const { return name_checksum; }
         void get_status(struct pad_temperature *t);
-        void set_desired_temperature(float desired_temperature);
         TemperatureControl(uint16_t name, int index)
-        : tempcontrol_timer("TempControl", 1, true, &heater_pin, &Pwm::on_tick),
-        thermistor_timer("ThermistorReading", 100, true, this, &TemperatureControl::thermistor_read_tick),
+        : thermistor_timer("ThermistorReading", 100, true, this, &TemperatureControl::thermistor_read_tick),
         name_checksum(name),
         pool_index(index),
         temp_violated(false),
-        sensor(nullptr),
-        readonly(false)
+        sensor(nullptr)
         {}
 
         ~TemperatureControl();
@@ -38,23 +34,14 @@ class TemperatureControl : public Module {
         void on_main_loop(void* argument);
         void on_gcode_received(Gcode *argument);
         void on_second_tick(void* argument);
-        void on_halt(void* argument);
         void on_idle(void* argument);
 
-
         float get_temperature();
-
-
 
     private:
         void load_config();
         void thermistor_read_tick();
-        void pid_process(float);
-        void setPIDp(float p);
-        void setPIDi(float i);
-        void setPIDd(float d);
 
-        SoftTimer tempcontrol_timer;
         SoftTimer thermistor_timer;
 
         int pool_index;
@@ -62,40 +49,18 @@ class TemperatureControl : public Module {
         float target_temperature;
         float max_temp, min_temp;
 
-        float preset1;
-        float preset2;
-
         TempSensor *sensor;
-        float i_max;
         int o;
         float last_reading;
         float readings_per_second;
-        Pwm  heater_pin;
 
         std::string designator;
-
-
-        float hysteresis;
-        float iTerm;
-        float lastInput;
-        // PID settings
-        float p_factor;
-        float i_factor;
-        float d_factor;
-        float PIDdt;
-
 
         // pack these to save memory
         struct {
             uint16_t name_checksum;
-            uint16_t set_m_code:10;
-            uint16_t set_and_wait_m_code:10;
             uint16_t get_m_code:10;
-            bool use_bangbang:1;
             bool temp_violated:1;
-            bool active:1;
-            bool readonly:1;
-            bool windup:1;
             bool sensor_settings:1;
         };
 };

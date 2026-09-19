@@ -181,7 +181,6 @@ switch.air.input_off_command				M9				# Command that will turn this switch off
 # spindle temperature configuration
 temperature_control.spindle.enable			true			# Whether to activate this ( "hotend" ) module at all.
 temperature_control.spindle.thermistor_pin	1.31			# Pin for the thermistor to read
-temperature_control.spindle.heater_pin		nc				# Pin that controls the heater, set to nc if a readonly thermistor is being defined
 temperature_control.spindle.beta			3950			# Or set the beta value
 temperature_control.spindle.get_m_code		105				# M-code to set the temperature for this module
 temperature_control.spindle.designator		M				# designator

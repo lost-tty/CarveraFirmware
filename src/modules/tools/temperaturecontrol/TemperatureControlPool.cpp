@@ -37,14 +37,6 @@ bool TemperatureControlPool::get_temperature(uint16_t name, struct pad_temperatu
     return true;
 }
 
-bool TemperatureControlPool::set_temperature(uint16_t name, float target)
-{
-    TemperatureControl *c = find(name);
-    if(c == nullptr) return false;
-    c->set_desired_temperature(target);
-    return true;
-}
-
 void TemperatureControlPool::poll(std::vector<struct pad_temperature> &v)
 {
     for(TemperatureControl *c : controls) {

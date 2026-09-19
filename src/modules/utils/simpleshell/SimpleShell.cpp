@@ -108,7 +108,6 @@ const SimpleShell::ptentry_t SimpleShell::commands_table[] = {
     {"mem",       &SimpleShell::mem_command,       "mem [-v] - display memory usage"},
     {"task",      &SimpleShell::task_command,      "task - display task information"},
     {"get",       &SimpleShell::get_command,       "get [pos|wcs|state|status|fk|ik] - get system info"},
-    {"set_temp",  &SimpleShell::set_temp_command,  "set_temp bed|hotend temp - set temperature"},
     {"switch",    &SimpleShell::switch_command,    "switch name [value] - control a switch"},
     {"net",       &SimpleShell::net_command,       "net - display network status"},
     {"ap",        &SimpleShell::ap_command,        "ap [channel] - configure access point"},
@@ -1099,20 +1098,6 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
 }
 
 // used to test out the get public data events
-void SimpleShell::set_temp_command( string parameters, StreamOutput *stream)
-{
-    string type = shift_parameter( parameters );
-    string temp = shift_parameter( parameters );
-    float t = temp.empty() ? 0.0 : strtof(temp.c_str(), NULL);
-    bool ok = TemperatureControlPool::set_temperature(get_checksum(type), t);
-
-    if (ok) {
-        stream->printf("%s temp set to: %3.1f\r\n", type.c_str(), t);
-    } else {
-        stream->printf("%s is not a known temperature device\r\n", type.c_str());
-    }
-}
-
 void SimpleShell::print_thermistors_command( string parameters, StreamOutput *stream)
 {
     // #ifndef NO_TOOLS_TEMPERATURECONTROL
