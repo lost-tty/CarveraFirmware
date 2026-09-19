@@ -27,9 +27,7 @@
 #include "StreamOutput.h"
 
 // strategies we know about
-#include "DeltaCalibrationStrategy.h"
 #include "ThreePointStrategy.h"
-#include "DeltaGridStrategy.h"
 #include "CartGridStrategy.h"
 
 #define enable_checksum          CHECKSUM("enable")
@@ -45,8 +43,6 @@
 #define dwell_before_probing_checksum CHECKSUM("dwell_before_probing")
 
 // from endstop section
-#define delta_homing_checksum    CHECKSUM("delta_homing")
-#define rdelta_homing_checksum    CHECKSUM("rdelta_homing")
 
 #define X_AXIS 0
 #define Y_AXIS 1
@@ -99,19 +95,8 @@ void ZProbe::config_load()
 
             // check with each known strategy and load it if it matches
             switch(cs) {
-                case delta_calibration_strategy_checksum:
-                    ls= new DeltaCalibrationStrategy(this);
-                    found= true;
-                    break;
-
                 case three_point_leveling_strategy_checksum:
-                    // NOTE this strategy is mutually exclusive with the delta calibration strategy
                     ls= new ThreePointStrategy(this);
-                    found= true;
-                    break;
-
-                case delta_grid_leveling_strategy_checksum:
-                    ls= new DeltaGridStrategy(this);
                     found= true;
                     break;
 
@@ -127,19 +112,6 @@ void ZProbe::config_load()
                     delete ls;
                 }
             }
-        }
-    }
-
-    // need to know if we need to use delta kinematics for homing
-    this->is_delta = THEKERNEL->config->value(delta_homing_checksum)->by_default(false)->as_bool();
-    this->is_rdelta = THEKERNEL->config->value(rdelta_homing_checksum)->by_default(false)->as_bool();
-
-    // default for backwards compatibility add DeltaCalibrationStrategy if a delta
-    // may be deprecated
-    if(this->strategies.empty()) {
-        if(this->is_delta) {
-            this->strategies.push_back(new DeltaCalibrationStrategy(this));
-            this->strategies.back()->handleConfig();
         }
     }
 
@@ -291,7 +263,7 @@ void ZProbe::on_gcode_received(Gcode *argument)
         }
 
         if( gcode->g == 30 ) { // simple Z probe
-            bool set_z= (gcode->has_letter('Z') && !is_rdelta);
+            bool set_z= gcode->has_letter('Z');
             bool probe_result;
             bool reverse= (gcode->has_letter('R') && gcode->get_value('R') != 0); // specify to probe in reverse direction
             float rate= gcode->has_letter('F') ? gcode->get_value('F') / 60 : this->slow_feedrate;

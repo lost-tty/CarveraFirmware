@@ -72,8 +72,6 @@ private:
     volatile bool calibrate_detected;
 
     struct {
-        bool is_delta:1;
-        bool is_rdelta:1;
         bool reverse_z:1;
         bool invert_override:1;
         bool invert_probe:1;

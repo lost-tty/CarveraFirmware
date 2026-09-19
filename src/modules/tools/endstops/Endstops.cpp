@@ -54,10 +54,6 @@
 enum DEFNS { MIN_PIN, MAX_PIN, MAX_TRAVEL, FAST_RATE, SLOW_RATE, RETRACT, DIRECTION, MIN, MAX, LIMIT, ALARM_PIN, NDEFNS };
 
 // global config settings
-#define corexy_homing_checksum           CHECKSUM("corexy_homing")
-#define delta_homing_checksum            CHECKSUM("delta_homing")
-#define rdelta_homing_checksum           CHECKSUM("rdelta_homing")
-#define scara_homing_checksum            CHECKSUM("scara_homing")
 
 #define endstop_debounce_count_checksum  CHECKSUM("endstop_debounce_count")
 #define endstop_debounce_ms_checksum     CHECKSUM("endstop_debounce_ms")
@@ -65,9 +61,6 @@ enum DEFNS { MIN_PIN, MAX_PIN, MAX_TRAVEL, FAST_RATE, SLOW_RATE, RETRACT, DIRECT
 #define home_z_first_checksum            CHECKSUM("home_z_first")
 #define homing_order_checksum            CHECKSUM("homing_order")
 
-#define alpha_trim_checksum              CHECKSUM("alpha_trim_mm")
-#define beta_trim_checksum               CHECKSUM("beta_trim_mm")
-#define gamma_trim_checksum              CHECKSUM("gamma_trim_mm")
 
 // new config syntax
 // endstop.xmin.enable true
@@ -222,19 +215,6 @@ bool Endstops::load_old_config()
     if(limit_enabled) {
         register_for_event(ON_IDLE);
     }
-
-    // sanity check for deltas
-    /*
-    if(this->is_delta || this->is_rdelta) {
-        // some things must be the same or they will die, so force it here to avoid config errors
-        this->fast_rates[1] = this->fast_rates[2] = this->fast_rates[0];
-        this->slow_rates[1] = this->slow_rates[2] = this->slow_rates[0];
-        this->retract_mm[1] = this->retract_mm[2] = this->retract_mm[0];
-        this->home_direction[1] = this->home_direction[2] = this->home_direction[0];
-        // NOTE homing_position for rdelta is the angle of the actuator not the cartesian position
-        if(!this->is_rdelta) this->homing_position[0] = this->homing_position[1] = 0;
-    }
-    */
 
     return true;
 }
@@ -397,23 +377,16 @@ void Endstops::get_global_configs()
     this->debounce_ms= THEKERNEL->config->value(endstop_debounce_ms_checksum)->by_default(10)->as_number();
     this->debounce_count= THEKERNEL->config->value(endstop_debounce_count_checksum)->by_default(100)->as_number();
 
-    this->is_corexy= THEKERNEL->config->value(corexy_homing_checksum)->by_default(false)->as_bool();
-    this->is_delta=  THEKERNEL->config->value(delta_homing_checksum)->by_default(false)->as_bool();
-    this->is_rdelta= THEKERNEL->config->value(rdelta_homing_checksum)->by_default(false)->as_bool();
-    this->is_scara=  THEKERNEL->config->value(scara_homing_checksum)->by_default(false)->as_bool();
 
     this->home_z_first= THEKERNEL->config->value(home_z_first_checksum)->by_default(true)->as_bool();
 
-    this->trim_mm[0] = THEKERNEL->config->value(alpha_trim_checksum)->by_default(0)->as_number();
-    this->trim_mm[1] = THEKERNEL->config->value(beta_trim_checksum)->by_default(0)->as_number();
-    this->trim_mm[2] = THEKERNEL->config->value(gamma_trim_checksum)->by_default(0)->as_number();
 
 	this->cover_endstop_pin.from_string( THEKERNEL->config->value(cover_endstop_checksum)->by_default("1.9^" )->as_string())->as_input();
 
     // see if an order has been specified, must be three or more characters, XYZABC or ABYXZ etc
     string order = THEKERNEL->config->value(homing_order_checksum)->by_default("")->as_string();
     this->homing_order = 0;
-    if(order.size() >= 3 && order.size() <= homing_axis.size() && !(this->is_delta || this->is_rdelta)) {
+    if(order.size() >= 3 && order.size() <= homing_axis.size()) {
         int shift = 0;
         for(auto c : order) {
             char n= toupper(c);
@@ -514,14 +487,7 @@ void Endstops::back_off_home(axis_bitmap_t axis)
 
     this->status = BACK_OFF_HOME;
 
-    // these are handled differently
-    if(is_delta) {
-        // Move off of the endstop using a regular relative move in Z only
-        delta[Z_AXIS]= homing_axis[Z_AXIS].retract * (homing_axis[Z_AXIS].home_direction ? 1 : -1);
-        slow_rate= homing_axis[Z_AXIS].slow_rate;
-        moving= true;
-
-    } else {
+    {
         // cartesians move every triggered axis off its endstop at once
         for( auto& e : homing_axis) {
             if(!axis[e.axis_index]) continue; // only for axes we asked to move
@@ -556,9 +522,6 @@ void Endstops::read_endstops()
         if(e.pin_info == nullptr) continue; // ignore if not a homing endstop
         int m= e.axis_index;
 
-        // for corexy homing in X or Y we must only check the associated endstop, works as we only home one axis at a time for corexy
-        if(is_corexy && (m == X_AXIS || m == Y_AXIS) && !axis_to_home[m]) continue;
-
         if(STEPPER[m]->is_moving()) {
             // if it is moving then we check the associated endstop, and debounce it
             if(e.pin_info->pin.get()) {
@@ -566,15 +529,8 @@ void Endstops::read_endstops()
                     e.pin_info->debounce++;
 
                 } else {
-                    if(is_corexy && (m == X_AXIS || m == Y_AXIS)) {
-                        // corexy when moving in X or Y we need to stop both the X and Y motors
-                        STEPPER[X_AXIS]->stop_moving();
-                        STEPPER[Y_AXIS]->stop_moving();
-
-                    }else{
-                        // we signal the motor to stop, which will preempt any moves on that axis
-                        STEPPER[m]->stop_moving();
-                    }
+                    // we signal the motor to stop, which will preempt any moves on that axis
+                    STEPPER[m]->stop_moving();
                     e.pin_info->triggered= true;
                 }
 
@@ -623,10 +579,6 @@ void Endstops::home(axis_bitmap_t a)
        e->triggered= false;
     }
 
-    if (is_scara) {
-        THEROBOT.disable_arm_solution = true;  // Polar bots has to home in the actuator space.  Arm solution disabled.
-    }
-
     this->axis_to_home= a;
 
     // Start moving the axes to the origin
@@ -668,7 +620,7 @@ void Endstops::home(axis_bitmap_t a)
     // with deltas we check all three axis were triggered, but at least one of XYZ must be set to home
     if(axis_to_home[X_AXIS] || axis_to_home[Y_AXIS] || axis_to_home[Z_AXIS]) {
         for (size_t i = X_AXIS; i <= Z_AXIS; ++i) {
-            if((axis_to_home[i] || this->is_delta || this->is_rdelta) && !homing_axis[i].pin_info->triggered) {
+            if(axis_to_home[i] && !homing_axis[i].pin_info->triggered) {
                 this->status = NOT_HOMING;
                 THEKERNEL->call_event(ON_HALT, nullptr);
                 THEKERNEL->set_halt_reason(HOME_FAIL);
@@ -691,12 +643,9 @@ void Endstops::home(axis_bitmap_t a)
         }
     }
 
-    if (!is_scara) {
-        // Only for non polar bots
-        // we did not complete movement the full distance if we hit the endstops
-        // TODO Maybe only reset axis involved in the homing cycle
-        THEROBOT.reset_position_from_current_actuator_position();
-    }
+    // we did not complete movement the full distance if we hit the endstops
+    // TODO Maybe only reset axis involved in the homing cycle
+    THEROBOT.reset_position_from_current_actuator_position();
 
     // Move back a small distance for all homing axis
     this->status = MOVING_BACK;
@@ -738,9 +687,6 @@ void Endstops::home(axis_bitmap_t a)
     THEROBOT.reset_position_from_current_actuator_position();
 
     THEROBOT.disable_segmentation= false;
-    if (is_scara) {
-        THEROBOT.disable_arm_solution = false;  // Arm solution enabled again.
-    }
 
     this->status = NOT_HOMING;
 }
@@ -754,9 +700,6 @@ void Endstops::process_home_command(Gcode* gcode)
     auto savect= THEROBOT.compensationTransform;
     THEROBOT.compensationTransform= nullptr;
 
-    // deltas always home Z axis only, which moves all three actuators
-    bool home_in_z_only = this->is_delta || this->is_rdelta;
-
     // figure out which axis to home
     axis_bitmap_t haxis;
     haxis.reset();
@@ -764,37 +707,13 @@ void Endstops::process_home_command(Gcode* gcode)
     bool axis_speced = (gcode->has_letter('X') || gcode->has_letter('Y') || gcode->has_letter('Z') ||
                         gcode->has_letter('A') || gcode->has_letter('B') || gcode->has_letter('C'));
 
-    if(!home_in_z_only) { // ie not a delta
-        for (auto &p : homing_axis) {
-            // only enable homing if the endstop is defined,
-            if(p.pin_info == nullptr) continue;
-            if(!axis_speced || gcode->has_letter(p.axis)) {
-                haxis.set(p.axis_index);
-                // now reset axis to 0 as we do not know what state we are in
-                if (!is_scara) {
-                    THEROBOT.reset_axis_position(0, p.axis_index);
-                } else {
-                    // SCARA resets arms to plausable minimum angles
-                    THEROBOT.reset_axis_position(-30,30,0); // angles set into axis space for homing.
-                }
-            }
-        }
-
-    } else {
-        bool home_z= !axis_speced || gcode->has_letter('X') || gcode->has_letter('Y') || gcode->has_letter('Z');
-
-        // if we specified an axis we check ABC
-        for (size_t i = A_AXIS; i < homing_axis.size(); ++i) {
-            auto &p= homing_axis[i];
-            if(p.pin_info == nullptr) continue;
-            if(!axis_speced || gcode->has_letter(p.axis)) haxis.set(p.axis_index);
-        }
-
-        if(home_z){
-            // Only Z axis homes (even though all actuators move this is handled by arm solution)
-            haxis.set(Z_AXIS);
-            // we also set the kinematics to a known good position, this is necessary for a rotary delta, but doesn't hurt for linear delta
-            THEROBOT.reset_axis_position(0, 0, 0);
+    for (auto &p : homing_axis) {
+        // only enable homing if the endstop is defined,
+        if(p.pin_info == nullptr) continue;
+        if(!axis_speced || gcode->has_letter(p.axis)) {
+            haxis.set(p.axis_index);
+            // now reset axis to 0 as we do not know what state we are in
+            THEROBOT.reset_axis_position(0, p.axis_index);
         }
     }
 
@@ -804,7 +723,7 @@ void Endstops::process_home_command(Gcode* gcode)
     }
 
     // do the actual homing
-    if(homing_order != 0 && !is_scara) {
+    if(homing_order != 0) {
         // if an order has been specified do it in the specified order
         // homing order is 0bfffeeedddcccbbbaaa where aaa is 1,2,3,4,5,6 to specify the first axis (XYZABC), bbb is the second and ccc is the third etc
         // eg 0b0101011001010 would be Y X Z A, 011 010 001 100 101 would be  B A X Y Z
@@ -813,18 +732,6 @@ void Endstops::process_home_command(Gcode* gcode)
             if(a < homing_axis.size() && haxis[a]) { // if axis is selected to home
                 axis_bitmap_t bs;
                 bs.set(a);
-                home(bs);
-            }
-            // check if on_halt (eg kill)
-            if(THEKERNEL->is_halted()) break;
-        }
-
-    } else if(is_corexy) {
-        // corexy must home each axis individually
-        for (auto &p : homing_axis) {
-            if(haxis[p.axis_index]) {
-                axis_bitmap_t bs;
-                bs.set(p.axis_index);
                 home(bs);
             }
             // check if on_halt (eg kill)
@@ -847,79 +754,21 @@ void Endstops::process_home_command(Gcode* gcode)
         return;
     }
 
-    if(home_in_z_only || is_scara) { // deltas and scaras only
-        // Here's where we would have been if the endstops were perfectly trimmed
-        // NOTE on a rotary delta home_offset is actuator position in degrees when homed and
-        // home_offset is the theta offset for each actuator, so M206 is used to set theta offset for each actuator in degrees
-        // FIXME not sure this will work with compensation transforms on.
-        float ideal_position[3] = {
-            homing_axis[X_AXIS].homing_position + homing_axis[X_AXIS].home_offset,
-            homing_axis[Y_AXIS].homing_position + homing_axis[Y_AXIS].home_offset,
-            homing_axis[Z_AXIS].homing_position + homing_axis[Z_AXIS].home_offset
-        };
-
-        bool has_endstop_trim = this->is_delta || is_scara;
-        if (has_endstop_trim) {
-            ActuatorCoordinates ideal_actuator_position;
-            THEROBOT.arm_solution->cartesian_to_actuator(ideal_position, ideal_actuator_position);
-
-            // We are actually not at the ideal position, but a trim away
-            ActuatorCoordinates real_actuator_position = {
-                ideal_actuator_position[X_AXIS] - this->trim_mm[X_AXIS],
-                ideal_actuator_position[Y_AXIS] - this->trim_mm[Y_AXIS],
-                ideal_actuator_position[Z_AXIS] - this->trim_mm[Z_AXIS]
-            };
-
-            float real_position[3];
-            THEROBOT.arm_solution->actuator_to_cartesian(real_actuator_position, real_position);
-            // Reset the actuator positions to correspond to our real position
-            THEROBOT.reset_axis_position(real_position[0], real_position[1], real_position[2]);
-
-        } else {
-            // without endstop trim, real_position == ideal_position
-            if(is_rdelta) {
-                // with a rotary delta we set the actuators angle then use the FK to calculate the resulting cartesian coordinates
-                ActuatorCoordinates real_actuator_position = {ideal_position[0], ideal_position[1], ideal_position[2]};
-                THEROBOT.reset_actuator_position(real_actuator_position);
-
-            } else {
-                // Reset the actuator positions to correspond to our real position
-                THEROBOT.reset_axis_position(ideal_position[0], ideal_position[1], ideal_position[2]);
-            }
-        }
-
-        // for deltas we say all 3 axis are homed even though it was only Z
-        homing_axis[X_AXIS].homed= true;
-        homing_axis[Y_AXIS].homed= true;
-        homing_axis[Z_AXIS].homed= true;
-
-        // if we also homed ABC then we need to reset them
-        for (size_t i = A_AXIS; i < homing_axis.size(); ++i) {
-            auto &p= homing_axis[i];
-            if (haxis[p.axis_index]) { // if we requested this axis to home
-                THEROBOT.reset_axis_position(p.homing_position + p.home_offset, p.axis_index);
-                // set flag indicating axis was homed, it stays set once set until H/W reset or unhomed
-                p.homed= true;
-            }
-        }
-
-    } else {
-        // Zero the ax(i/e)s position, add in the home offset
-        // NOTE that if compensation is active the Z will be set based on where XY are, so make sure XY are homed first then Z
-        // so XY are at a known consistent position.  (especially true if using a proximity probe)
-        for (auto &p : homing_axis) {
-            if (haxis[p.axis_index]) { // if we requested this axis to home
-                THEROBOT.reset_axis_position(p.homing_position + p.home_offset, p.axis_index);
-                // set flag indicating axis was homed, it stays set once set until H/W reset or unhomed
-                p.homed= true;
-            }
+    // Zero the ax(i/e)s position, add in the home offset
+    // NOTE that if compensation is active the Z will be set based on where XY are, so make sure XY are homed first then Z
+    // so XY are at a known consistent position.  (especially true if using a proximity probe)
+    for (auto &p : homing_axis) {
+        if (haxis[p.axis_index]) { // if we requested this axis to home
+            THEROBOT.reset_axis_position(p.homing_position + p.home_offset, p.axis_index);
+            // set flag indicating axis was homed, it stays set once set until H/W reset or unhomed
+            p.homed= true;
         }
     }
 
     // on some systems where 0,0 is bed center it is nice to have home goto 0,0 after homing
     // default is off for cartesian and on for deltas
     // if limit switches are enabled we must back off endstop after setting home
-    if(!is_delta || (haxis[Z_AXIS] && homing_axis[X_AXIS].pin_info->limit_enable)) back_off_home(haxis);
+    back_off_home(haxis);
     after_home(haxis);
 }
 
@@ -1065,7 +914,6 @@ void Endstops::on_gcode_received(Gcode *argument)
             break;
 
             case 206: // M206 - set homing offset
-                if(is_rdelta) return; // RotaryDeltaCalibration module will handle this
                 for (auto &p : homing_axis) {
                     if(p.pin_info == nullptr) continue; // ignore if not a homing endstop
                     if (gcode->has_letter(p.axis)) p.home_offset= gcode->get_value(p.axis);
@@ -1080,55 +928,21 @@ void Endstops::on_gcode_received(Gcode *argument)
                 break;
 
             case 306: // set homing offset based on current position
-                if(is_rdelta) return; // RotaryDeltaCalibration module will handle this
 
                 set_homing_offset(gcode);
                 break;
 
             case 500: // save settings
             case 503: // print settings
-                if(!is_rdelta) {
-                    gcode->stream->printf(";Home offset (mm):\nM206 ");
-                    for (auto &p : homing_axis) {
-                        if(p.pin_info == nullptr) continue; // ignore if not a homing endstop
-                        gcode->stream->printf("%c%1.2f ", p.axis, p.home_offset);
-                    }
-                    gcode->stream->printf("\n");
-
-                }else{
-                    gcode->stream->printf(";Theta offset (degrees):\nM206 A%1.5f B%1.5f C%1.5f\n",
-                        homing_axis[X_AXIS].home_offset, homing_axis[Y_AXIS].home_offset, homing_axis[Z_AXIS].home_offset);
+                gcode->stream->printf(";Home offset (mm):\nM206 ");
+                for (auto &p : homing_axis) {
+                    if(p.pin_info == nullptr) continue; // ignore if not a homing endstop
+                    gcode->stream->printf("%c%1.2f ", p.axis, p.home_offset);
                 }
+                gcode->stream->printf("\n");
 
-                if (this->is_delta || this->is_scara) {
-                    gcode->stream->printf(";Trim (mm):\nM666 X%1.3f Y%1.3f Z%1.3f\n", trim_mm[0], trim_mm[1], trim_mm[2]);
-                    gcode->stream->printf(";Max Z\nM665 Z%1.3f\n", homing_axis[Z_AXIS].homing_position);
-                }
                 if(g28_position[X_AXIS] != 0 || g28_position[Y_AXIS] != 0) {
                     gcode->stream->printf(";predefined position:\nG28.1 X%1.4f Y%1.4f\n", g28_position[X_AXIS], g28_position[Y_AXIS]);
-                }
-                break;
-
-            case 665:
-                if (this->is_delta || this->is_scara) { // M665 - set max gamma/z height
-                    float gamma_max = homing_axis[Z_AXIS].homing_position;
-                    if (gcode->has_letter('Z')) {
-                        homing_axis[Z_AXIS].homing_position= gamma_max = gcode->get_value('Z');
-                    }
-                    gcode->stream->printf("Max Z %8.3f ", gamma_max);
-                    gcode->add_nl = true;
-                }
-                break;
-
-            case 666:
-                if(this->is_delta || this->is_scara) { // M666 - set trim for each axis in mm, NB negative mm trim is down
-                    if (gcode->has_letter('X')) trim_mm[0] = gcode->get_value('X');
-                    if (gcode->has_letter('Y')) trim_mm[1] = gcode->get_value('Y');
-                    if (gcode->has_letter('Z')) trim_mm[2] = gcode->get_value('Z');
-
-                    // print the current trim values in mm
-                    gcode->stream->printf("X: %5.3f Y: %5.3f Z: %5.3f\n", trim_mm[0], trim_mm[1], trim_mm[2]);
-
                 }
                 break;
 
@@ -1142,11 +956,7 @@ void Endstops::on_get_public_data(void* argument)
 
     if(!pdr->starts_with(endstops_checksum)) return;
 
-    if(pdr->second_element_is(trim_checksum)) {
-        pdr->set_data_ptr(&this->trim_mm);
-        pdr->set_taken();
-
-    } else if(pdr->second_element_is(home_offset_checksum)) {
+    if(pdr->second_element_is(home_offset_checksum)) {
         // provided by caller
         float *data = static_cast<float *>(pdr->get_data_ptr());
         for (int i = 0; i < 3; ++i) {
@@ -1195,14 +1005,7 @@ void Endstops::on_set_public_data(void* argument)
 
     if(!pdr->starts_with(endstops_checksum)) return;
 
-    if(pdr->second_element_is(trim_checksum)) {
-        float *t = static_cast<float*>(pdr->get_data_ptr());
-        this->trim_mm[0] = t[0];
-        this->trim_mm[1] = t[1];
-        this->trim_mm[2] = t[2];
-        pdr->set_taken();
-
-    } else if(pdr->second_element_is(home_offset_checksum)) {
+    if(pdr->second_element_is(home_offset_checksum)) {
         float *t = static_cast<float*>(pdr->get_data_ptr());
         if(!isnan(t[0])) homing_axis[0].home_offset= t[0];
         if(!isnan(t[1])) homing_axis[1].home_offset= t[1];

@@ -12,8 +12,6 @@
 #include "modules/tools/temperaturecontrol/TemperatureControlPool.h"
 #include "modules/tools/endstops/Endstops.h"
 #include "modules/tools/zprobe/ZProbe.h"
-#include "modules/tools/scaracal/SCARAcal.h"
-#include "RotaryDeltaCalibration.h"
 #include "modules/tools/switch/SwitchPool.h"
 #include "modules/tools/temperatureswitch/TemperatureSwitch.h"
 #include "modules/tools/atc/ATCHandler.h"
@@ -136,7 +134,6 @@ Scripts scripts;
 Endstops endstops;
 Laser laser;
 ZProbe zprobe;
-RotaryDeltaCalibration rotary_delta_calibration;
 TemperatureSwitch temperature_switch;
 UsbHost usb_host;
 
@@ -213,12 +210,6 @@ void init() {
     #endif
     #ifndef NO_TOOLS_ZPROBE
     THEKERNEL->add_module(&zprobe);
-    #endif
-    #ifndef NO_TOOLS_SCARACAL
-    THEKERNEL->add_module( new SCARAcal() );
-    #endif
-    #ifndef NO_TOOLS_ROTARYDELTACALIBRATION
-    THEKERNEL->add_module(&rotary_delta_calibration);
     #endif
     #ifndef NO_TOOLS_TEMPERATURESWITCH
     // Must be loaded after TemperatureControl

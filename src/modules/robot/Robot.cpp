@@ -17,12 +17,6 @@
 #include "PublicData.h"
 #include "arm_solutions/BaseSolution.h"
 #include "arm_solutions/CartesianSolution.h"
-#include "arm_solutions/RotatableCartesianSolution.h"
-#include "arm_solutions/LinearDeltaSolution.h"
-#include "arm_solutions/RotaryDeltaSolution.h"
-#include "arm_solutions/HBotSolution.h"
-#include "arm_solutions/CoreXZSolution.h"
-#include "arm_solutions/MorganSCARASolution.h"
 #include "checksumm.h"
 #include "utils.h"
 #include "ConfigValue.h"
@@ -58,18 +52,6 @@
 #define  set_g92_checksum                    CHECKSUM("set_g92")
 
 // arm solutions
-#define  arm_solution_checksum               CHECKSUM("arm_solution")
-#define  cartesian_checksum                  CHECKSUM("cartesian")
-#define  rotatable_cartesian_checksum        CHECKSUM("rotatable_cartesian")
-#define  rostock_checksum                    CHECKSUM("rostock")
-#define  linear_delta_checksum               CHECKSUM("linear_delta")
-#define  rotary_delta_checksum               CHECKSUM("rotary_delta")
-#define  delta_checksum                      CHECKSUM("delta")
-#define  hbot_checksum                       CHECKSUM("hbot")
-#define  corexy_checksum                     CHECKSUM("corexy")
-#define  corexz_checksum                     CHECKSUM("corexz")
-#define  kossel_checksum                     CHECKSUM("kossel")
-#define  morgan_checksum                     CHECKSUM("morgan")
 
 // new-style actuator stuff
 #define  actuator_checksum                   CHEKCSUM("actuator")
@@ -172,34 +154,8 @@ void Robot::load_config()
     // Arm solutions are used to convert positions in millimeters into position in steps for each stepper motor.
     // While for a cartesian arm solution, this is a simple multiplication, in other, less simple cases, there is some serious math to be done.
     // To make adding those solution easier, they have their own, separate object.
-    // Here we read the config to find out which arm solution to use
     if (this->arm_solution) delete this->arm_solution;
-    int solution_checksum = get_checksum(THEKERNEL->config->value(arm_solution_checksum)->by_default("cartesian")->as_string());
-    // Note checksums are not const expressions when in debug mode, so don't use switch
-    if(solution_checksum == hbot_checksum || solution_checksum == corexy_checksum) {
-        this->arm_solution = new HBotSolution(THEKERNEL->config);
-
-    } else if(solution_checksum == corexz_checksum) {
-        this->arm_solution = new CoreXZSolution(THEKERNEL->config);
-
-    } else if(solution_checksum == rostock_checksum || solution_checksum == kossel_checksum || solution_checksum == delta_checksum || solution_checksum ==  linear_delta_checksum) {
-        this->arm_solution = new LinearDeltaSolution(THEKERNEL->config);
-
-    } else if(solution_checksum == rotatable_cartesian_checksum) {
-        this->arm_solution = new RotatableCartesianSolution(THEKERNEL->config);
-
-    } else if(solution_checksum == rotary_delta_checksum) {
-        this->arm_solution = new RotaryDeltaSolution(THEKERNEL->config);
-
-    } else if(solution_checksum == morgan_checksum) {
-        this->arm_solution = new MorganSCARASolution(THEKERNEL->config);
-
-    } else if(solution_checksum == cartesian_checksum) {
-        this->arm_solution = new CartesianSolution(THEKERNEL->config);
-
-    } else {
-        this->arm_solution = new CartesianSolution(THEKERNEL->config);
-    }
+    this->arm_solution = new CartesianSolution(THEKERNEL->config);
 
     this->feed_rate           = THEKERNEL->config->value(default_feed_rate_checksum   )->by_default(  100.0F)->as_number();
     this->seek_rate           = THEKERNEL->config->value(default_seek_rate_checksum   )->by_default(  100.0F)->as_number();
@@ -1365,7 +1321,7 @@ void Robot::reset_axis_position(float position, int axis)
 }
 
 // similar to reset_axis_position but directly sets the actuator positions in actuators units (eg mm for cartesian, degrees for rotary delta)
-// then sets the axis positions to match. currently only called from Endstops.cpp and RotaryDeltaCalibration.cpp
+// then sets the axis positions to match. currently only called from Endstops.cpp
 void Robot::reset_actuator_position(const ActuatorCoordinates &ac)
 {
     for (size_t i = X_AXIS; i <= Z_AXIS; i++) {

@@ -54,7 +54,6 @@ class Endstops : public Module{
         uint32_t  debounce_ms;
         axis_bitmap_t axis_to_home;
 
-        float trim_mm[3];
 
         Pin cover_endstop_pin;
 
@@ -111,10 +110,6 @@ class Endstops : public Module{
         struct {
             uint32_t homing_order:18;
             volatile char status:3;
-            bool is_corexy:1;
-            bool is_delta:1;
-            bool is_rdelta:1;
-            bool is_scara:1;
             bool home_z_first:1;
         };
 };
