@@ -42,12 +42,10 @@ using namespace std;
 #define turn_off_min_checksum						CHECKSUM("turn_off_min")
 #define stop_on_cover_open_checksum					CHECKSUM("stop_on_cover_open")
 
-#define sd_ok_checksum								CHECKSUM("sd_ok")
 
 
 void MainButton::on_module_loaded()
 {
-	this->sd_ok = false;
 	this->using_12v = false;
 	this->led_update_timer = 0;
 	this->hold_toggle = 0;
@@ -85,8 +83,6 @@ void MainButton::on_module_loaded()
 
     this->stop_on_cover_open = THEKERNEL->config->value( stop_on_cover_open_checksum )->by_default(false)->as_bool(); // @deprecated
 
-    this->sd_ok = THEKERNEL->config->value( sd_ok_checksum )->by_default(false)->as_bool(); // @deprecated
-
     this->register_for_event(ON_IDLE);
     this->register_for_event(ON_SECOND_TICK);
 
@@ -119,12 +115,6 @@ void MainButton::switch_power_24(int state)
 
 void MainButton::on_second_tick(void *)
 {
-    // check if sd card is ok
-	if (!this->sd_ok && !THEKERNEL->is_halted()) {
-        THEKERNEL->call_event(ON_HALT, nullptr);
-        THEKERNEL->set_halt_reason(SD_ERROR);
-	}
-
 	bool vacuum_on = false;
 	bool toolsensor_on = false;
     // get switchs state

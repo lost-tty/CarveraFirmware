@@ -61,7 +61,6 @@ class MainButton : public Module {
 
         uint32_t poll_frequency;
 
-        bool sd_ok;
         bool using_12v;
 
         void e_stop_irq();

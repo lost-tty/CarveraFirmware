@@ -10,8 +10,6 @@
 ### Carvera settings which are fixed ###
 new_status_format							true
 
-#sd_ok										false
-
 #dfu_enable									false
 #msd_disable								true			# Disable the MSD (USB SDCARD)
 
@@ -342,9 +340,6 @@ spindle.alarm_pin							0.19^			# spindle alarm trigger pin
 ### Carvera settings which can be changed by user ###
 
 user_setting_start true				# Indicate user settings start
-
-## fixed Settings ##
-sd_ok false								# Indicate SD card is corrected read
 
 ## Basic Settings ##
 # Vacuum
