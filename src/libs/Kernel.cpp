@@ -239,9 +239,7 @@ std::string Kernel::get_query_string()
     char buf[128];
     float mpos[3];
     if(running) {
-        THEROBOT.get_current_machine_position(mpos);
-        // current_position/mpos includes the compensation transform so we need to get the inverse to get actual position
-        if(THEROBOT.compensationTransform) THEROBOT.compensationTransform(mpos, true, false); // get inverse compensation transform
+        THEROBOT.get_real_machine_position(mpos);
     } else {
         // return the last milestone if idle
         Robot::wcs_t m = THEROBOT.get_axis_position();
@@ -336,7 +334,7 @@ std::string Kernel::get_query_string()
     }
 
     // if auto leveling is active
-    if (THEROBOT.compensationTransform != nullptr) {
+    if (THEROBOT.is_compensating()) {
         n = snprintf(buf, sizeof(buf), "|O:%1.3f", THEROBOT.get_max_delta());
         if(n > sizeof(buf)) n = sizeof(buf);
         str.append(buf, n);

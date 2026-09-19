@@ -59,6 +59,15 @@ class Robot : public Module {
         void get_axis_position(float position[], size_t n= 3) const { memcpy(position, this->machine_position, n*sizeof(float)); }
         wcs_t get_axis_position() const { return wcs_t(machine_position[X_AXIS], machine_position[Y_AXIS], machine_position[Z_AXIS]); }
         void get_current_machine_position(float *pos) const;
+        // the same position with the levelling compensation undone
+        void get_real_machine_position(float *pos, bool debug= false) const;
+
+        using compensation_fn = std::function<void(float*, bool, bool)>;
+        void set_compensation(compensation_fn fn) { compensationTransform= fn; }
+        void clear_compensation() { compensationTransform= nullptr; }
+        bool is_compensating() const { return compensationTransform != nullptr; }
+        compensation_fn take_compensation();          // suspends it, put it back when done
+        void put_compensation(compensation_fn fn) { compensationTransform= fn; }
         bool is_homed_all_axes() const { return is_homed(X_AXIS) && is_homed(Y_AXIS) && is_homed(Z_AXIS); }
         void print_position(uint8_t subcode, std::string& buf, bool ignore_extruders=false) const;
         uint8_t get_current_wcs() const { return current_wcs; }
@@ -90,8 +99,6 @@ class Robot : public Module {
         BaseSolution* arm_solution;                           // Selected Arm solution ( millimeters to step calculation )
 
 
-        // set by a leveling strategy to transform the target of a move according to the current plan
-        std::function<void(float*, bool, bool)> compensationTransform;
         // set by an active extruder, returns the amount to scale the E parameter by (to convert mm³ to mm)
         std::function<float(void)> get_e_scale_fnc;
 
@@ -122,6 +129,7 @@ class Robot : public Module {
 
     private:
         std::vector<StepperMotor*> actuators;
+        compensation_fn compensationTransform;   // set by a levelling strategy
 
         enum MOTION_MODE_T {
             NONE,

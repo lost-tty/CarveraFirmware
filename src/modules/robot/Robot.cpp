@@ -353,6 +353,19 @@ bool Robot::step_motor(uint8_t axis, bool dir, unsigned steps, unsigned steps_pe
 }
 
 bool  Robot::motor_is_moving(uint8_t i) const     { return i < n_motors && actuators[i]->is_moving(); }
+void Robot::get_real_machine_position(float *pos, bool debug) const
+{
+    get_current_machine_position(pos);
+    if(compensationTransform) compensationTransform(pos, true, debug);
+}
+
+Robot::compensation_fn Robot::take_compensation()
+{
+    compensation_fn fn= compensationTransform;
+    compensationTransform= nullptr;
+    return fn;
+}
+
 bool  Robot::any_motor_moving() const
 {
     for (StepperMotor *m : actuators) if(m->is_moving()) return true;

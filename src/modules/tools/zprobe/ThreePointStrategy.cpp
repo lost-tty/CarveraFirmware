@@ -166,7 +166,6 @@ bool ThreePointStrategy::handleGcode(Gcode *gcode)
             delete this->plane;
             if(gcode->get_num_args() == 0) {
                 this->plane= nullptr;
-                // delete the compensationTransform in robot
                 setAdjustFunction(false);
                 gcode->stream->printf("saved plane cleared\n");
             }else{
@@ -311,7 +310,6 @@ bool ThreePointStrategy::doProbing(StreamOutput *stream)
     if((mmx.second - mmx.first) <= this->tolerance) {
         this->plane= nullptr; // plane is flat no need to do anything
         stream->printf("DEBUG: flat plane\n");
-        // clear the compensationTransform in robot
         setAdjustFunction(false);
 
     }else{
@@ -357,11 +355,10 @@ bool ThreePointStrategy::test_probe_points(Gcode *gcode)
 void ThreePointStrategy::setAdjustFunction(bool on)
 {
     if(on) {
-        // set the compensationTransform in robot
-        THEROBOT.compensationTransform= [this](float *target, bool inverse, bool debug) { if(inverse) target[2] -= this->plane->getz(target[0], target[1]); else target[2] += this->plane->getz(target[0], target[1]); };
+        THEROBOT.set_compensation([this](float *target, bool inverse, bool debug) { if(inverse) target[2] -= this->plane->getz(target[0], target[1]); else target[2] += this->plane->getz(target[0], target[1]); });
     }else{
         // clear it
-        THEROBOT.compensationTransform= nullptr;
+        THEROBOT.clear_compensation();
     }
 }
 

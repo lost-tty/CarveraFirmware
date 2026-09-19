@@ -535,8 +535,7 @@ void ZProbe::coordinated_move(float x, float y, float z, float feedrate, bool re
     } else {
         // machine coordinates, ignoring any WCS offset
         float pos[3];
-        THEROBOT.get_current_machine_position(pos);
-        if(THEROBOT.compensationTransform) THEROBOT.compensationTransform(pos, true, false);
+        THEROBOT.get_real_machine_position(pos);
         if(!isnan(x)) delta[X_AXIS]= x - pos[X_AXIS];
         if(!isnan(y)) delta[Y_AXIS]= y - pos[Y_AXIS];
         if(!isnan(z)) delta[Z_AXIS]= z - pos[Z_AXIS];

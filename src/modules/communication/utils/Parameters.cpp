@@ -17,9 +17,7 @@
 
 static void machine_position(float *mpos)
 {
-    THEROBOT.get_current_machine_position(mpos);
-    // machine_position includes the compensation transform, undo it to report the real position
-    if (THEROBOT.compensationTransform) THEROBOT.compensationTransform(mpos, true, false);
+    THEROBOT.get_real_machine_position(mpos);
 }
 
 bool Parameters::get(int n, float &v) const

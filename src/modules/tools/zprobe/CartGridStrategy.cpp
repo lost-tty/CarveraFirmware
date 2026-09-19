@@ -427,7 +427,6 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
 
     } else if(gcode->has_m) {
         if(gcode->m == 370 || gcode->m == 561) { // M370, M561: Clear bed
-            // delete the compensationTransform in robot
             setAdjustFunction(false);
             reset_bed_level();
             gcode->stream->printf("grid cleared and disabled\n");
@@ -485,14 +484,13 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
 void CartGridStrategy::setAdjustFunction(bool on)
 {
     if(on) {
-        // set the compensationTransform in robot
         using std::placeholders::_1;
         using std::placeholders::_2;
         using std::placeholders::_3;
-        THEROBOT.compensationTransform = std::bind(&CartGridStrategy::doCompensation, this, _1, _2, _3); // [this](float *target, bool inverse) { doCompensation(target, inverse); };
+        THEROBOT.set_compensation(std::bind(&CartGridStrategy::doCompensation, this, _1, _2, _3));
     } else {
         // clear it
-        THEROBOT.compensationTransform = nullptr;
+        THEROBOT.clear_compensation();
     }
 }
 

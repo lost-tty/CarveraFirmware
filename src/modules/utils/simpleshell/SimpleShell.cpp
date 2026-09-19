@@ -1087,8 +1087,7 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
     	THEROBOT.get_current_machine_position(mpos);
     	float old_mpos[3];
     	memcpy(old_mpos, mpos, sizeof(mpos));
-		// current_position/mpos includes the compensation transform so we need to get the inverse to get actual position
-		if(THEROBOT.compensationTransform) THEROBOT.compensationTransform(mpos, true, true); // get inverse compensation transform
+		THEROBOT.get_real_machine_position(mpos, true);
 		stream->printf("Curr: %1.3f,%1.3f,%1.3f, Comp: %1.3f,%1.3f,%1.3f\n", old_mpos[0], old_mpos[1], old_mpos[2], mpos[0], mpos[1], mpos[2]);
     } else if (what == "wp" || what == "wp_state") {
     	wireless_probe.request_state();

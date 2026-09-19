@@ -692,8 +692,7 @@ void Endstops::process_home_command(Gcode* gcode)
     THECONVEYOR.wait_for_idle();
 
     // turn off any compensation transform so Z does not move as XY home
-    auto savect= THEROBOT.compensationTransform;
-    THEROBOT.compensationTransform= nullptr;
+    auto savect= THEROBOT.take_compensation();
 
     // figure out which axis to home
     axis_bitmap_t haxis;
@@ -738,8 +737,7 @@ void Endstops::process_home_command(Gcode* gcode)
         home(haxis);
     }
 
-    // restore compensationTransform
-    THEROBOT.compensationTransform= savect;
+    THEROBOT.put_compensation(savect);
 
     // check if on_halt (eg kill or fail)
     if(THEKERNEL->is_halted()) {
