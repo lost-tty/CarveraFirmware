@@ -353,6 +353,17 @@ bool Robot::step_motor(uint8_t axis, bool dir, unsigned steps, unsigned steps_pe
 }
 
 bool  Robot::motor_is_moving(uint8_t i) const     { return i < n_motors && actuators[i]->is_moving(); }
+Robot::NoSegmentation::NoSegmentation()
+{
+    saved = THEROBOT.disable_segmentation;
+    THEROBOT.disable_segmentation = true;
+}
+
+Robot::NoSegmentation::~NoSegmentation()
+{
+    THEROBOT.disable_segmentation = saved;
+}
+
 uint8_t Robot::get_plane_code() const
 {
     if(plane_axis_0 == X_AXIS && plane_axis_1 == Z_AXIS && plane_axis_2 == Y_AXIS) return 18;

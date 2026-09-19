@@ -579,7 +579,7 @@ void Endstops::home(axis_bitmap_t a)
     // Start moving the axes to the origin
     this->status = MOVING_TO_ENDSTOP_FAST;
 
-    THEROBOT.disable_segmentation= true; // we must disable segmentation as this won't work with it enabled
+    Robot::NoSegmentation no_segmentation;   // homing won't work with it enabled
 
     if(!home_z_first) home_xy();
 
@@ -619,7 +619,6 @@ void Endstops::home(axis_bitmap_t a)
                 this->status = NOT_HOMING;
                 THEKERNEL->call_event(ON_HALT, nullptr);
                 THEKERNEL->set_halt_reason(HOME_FAIL);
-                THEROBOT.disable_segmentation= false;
                 return;
             }
         }
@@ -632,7 +631,6 @@ void Endstops::home(axis_bitmap_t a)
                 this->status = NOT_HOMING;
                 THEKERNEL->call_event(ON_HALT, nullptr);
                 THEKERNEL->set_halt_reason(HOME_FAIL);
-                THEROBOT.disable_segmentation = false;
                 return;
             }
         }
@@ -680,8 +678,6 @@ void Endstops::home(axis_bitmap_t a)
     // we did not complete movement the full distance if we hit the endstops
     // TODO Maybe only reset axis involved in the homing cycle
     THEROBOT.reset_position_from_current_actuator_position();
-
-    THEROBOT.disable_segmentation= false;
 
     this->status = NOT_HOMING;
 }

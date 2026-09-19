@@ -113,10 +113,18 @@ class Robot : public Module {
 
         void set_absolute_mode() { absolute_mode = true; }
 
+        // homing and probing drive the actuators directly
+        class NoSegmentation {
+        public:
+            NoSegmentation();
+            ~NoSegmentation();
+        private:
+            bool saved;
+        };
+
         struct {
             bool absolute_arc_centre:1;                       // G90.1: I/J/K are centre coordinates, not offsets
             bool next_command_is_MCS:1;                       // set by G53
-            bool disable_segmentation:1;                      // set to disable segmentation
             bool disable_arm_solution:1;                      // set to disable the arm solution
             bool segment_z_moves:1;
             bool save_g92:1;                                  // save g92 on M500 if set
@@ -128,7 +136,10 @@ class Robot : public Module {
         };
 
     private:
+        friend class NoSegmentation;
+
         struct {
+            bool disable_segmentation:1;
             bool inch_mode:1;                                 // true for inch mode, false for millimeter mode ( default )
             bool absolute_mode:1;                             // true for absolute mode ( default ), false for relative mode
             uint8_t plane_axis_0:2;                           // Current plane ( XY, XZ, YZ )

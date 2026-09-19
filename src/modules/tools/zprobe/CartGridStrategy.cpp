@@ -385,13 +385,11 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
                 THECONVEYOR.wait_for_idle(); // it is a user string, it may move
             }
 
-            THEROBOT.disable_segmentation= true;
             if(!doProbe(gcode)) {
                 gcode->stream->printf("Probe failed to complete, check the initial probe height and/or initial_height settings\n");
             } else {
                 gcode->stream->printf("Probe completed.\n");
             }
-            THEROBOT.disable_segmentation= false;
 
             if(!after_probe.empty()) {
                 gcode_dispatch.run_line(after_probe, &StreamOutput::NullStream);
@@ -566,6 +564,7 @@ bool CartGridStrategy::scan_bed(Gcode *gc)
 
 bool CartGridStrategy::doProbe(Gcode *gc)
 {
+    Robot::NoSegmentation no_segmentation;
     bool use_wcs= false;
     gc->stream->printf("Rectangular Grid Probe...\n");
 
