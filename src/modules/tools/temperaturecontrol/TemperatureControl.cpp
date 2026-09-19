@@ -56,10 +56,6 @@
 #define preset1_checksum                   CHECKSUM("preset1")
 #define preset2_checksum                   CHECKSUM("preset2")
 
-#define runaway_range_checksum             CHECKSUM("runaway_range")
-#define runaway_heating_timeout_checksum   CHECKSUM("runaway_heating_timeout")
-#define runaway_cooling_timeout_checksum   CHECKSUM("runaway_cooling_timeout")
-#define runaway_error_range_checksum       CHECKSUM("runaway_error_range")
 
 
 TemperatureControl::~TemperatureControl()
@@ -126,21 +122,6 @@ void TemperatureControl::load_config()
     this->readings_per_second = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, readings_per_second_checksum)->by_default(20)->as_number();
 
     this->designator          = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, designator_checksum)->by_default(string("T"))->as_string();
-
-    // Runaway parameters
-    uint32_t n= THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, runaway_range_checksum)->by_default(20)->as_number();
-    if(n > 63) n= 63;
-    this->runaway_range= n;
-
-    // these need to fit in 9 bits after dividing by 8 so max is 4088 secs or 68 minutes
-    n= THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, runaway_heating_timeout_checksum)->by_default(900)->as_number();
-    if(n > 4088) n= 4088;
-    this->runaway_heating_timeout = n/8; // we have 8 second ticks
-    n= THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, runaway_cooling_timeout_checksum)->by_default(0)->as_number(); // disable by default
-    if(n > 4088) n= 4088;
-    this->runaway_cooling_timeout = n/8;
-
-    this->runaway_error_range= THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, runaway_error_range_checksum)->by_default(1.0F)->as_number();
 
     // Max and min temperatures we are not allowed to get over (Safety)
     this->max_temp = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, max_temp_checksum)->by_default(300)->as_number();
@@ -317,7 +298,6 @@ void TemperatureControl::on_gcode_received(Gcode *argument)
                         return;
                     }
 
-                    this->waiting = true; // on_second_tick will announce temps
                     while ( get_temperature() < target_temperature ) {
                         THEKERNEL->call_event(ON_IDLE, this);
                         // check if ON_HALT was called (usually by kill button)
@@ -326,7 +306,6 @@ void TemperatureControl::on_gcode_received(Gcode *argument)
                             break;
                         }
                     }
-                    this->waiting = false;
                 }
             }
         }
@@ -370,8 +349,6 @@ void TemperatureControl::set_desired_temperature(float desired_temperature)
         else if (this->iTerm < 0.0) this->iTerm = 0.0;
     }
 
-    // reset the runaway state, even if it was a temp change
-    this->runaway_state = NOT_HEATING;
 }
 
 float TemperatureControl::get_temperature()
@@ -448,85 +425,14 @@ void TemperatureControl::pid_process(float temperature)
 
 void TemperatureControl::on_second_tick(void *argument)
 {
-	if (this->readonly) {
-	    if(THEKERNEL->is_halted()) return;
-	    float temperature = sensor->get_temperature();
-		if (isinf(temperature) || temperature < min_temp || temperature > max_temp) {
-	        printk("ERROR: Spindle overheated, max - %1.1f, current - %1.1f\n", max_temp, temperature);
-	        THEKERNEL->call_event(ON_HALT, nullptr);
-	        THEKERNEL->set_halt_reason(SPINDLE_OVERHEATED);
-		}
-	} else {
-	    // If waiting for a temperature to be reach, display it to keep host programs up to date on the progress
-	    if (waiting)
-	        printk("%s:%3.1f /%3.1f @%d\n", designator.c_str(), get_temperature(), ((target_temperature <= 0) ? 0.0 : target_temperature), o);
+    if(!this->readonly || THEKERNEL->is_halted()) return;
 
-	    // Check whether or not there is a temperature runaway issue, if so stop everything and report it
-	    if(THEKERNEL->is_halted()) return;
-
-	    // see if runaway detection is enabled
-	    if(this->runaway_heating_timeout == 0 && this->runaway_range == 0) return;
-
-	    // check every 8 seconds, depends on tick being 3 bits
-	    if(++tick != 0) return;
-
-	    if(this->target_temperature <= 0){ // If we are not trying to heat, state is NOT_HEATING
-	        this->runaway_state = NOT_HEATING;
-
-	    }else{
-	        float current_temperature= this->get_temperature();
-	        // heater is active
-	        switch( this->runaway_state ){
-	            case NOT_HEATING: // If we were previously not trying to heat, but we are now, change to state WAITING_FOR_TEMP_TO_BE_REACHED
-	                this->runaway_state= (this->target_temperature >= current_temperature || this->runaway_cooling_timeout == 0) ? HEATING_UP : COOLING_DOWN;
-	                this->runaway_timer = 0;
-	                tick= 0;
-	                break;
-
-	            case HEATING_UP:
-	            case COOLING_DOWN:
-	                // check temp has reached the target temperature within the given error range
-	                if( (runaway_state == HEATING_UP && current_temperature >= (this->target_temperature - this->runaway_error_range)) ||
-	                    (runaway_state == COOLING_DOWN && current_temperature <= (this->target_temperature + this->runaway_error_range)) ) {
-	                    this->runaway_state = TARGET_TEMPERATURE_REACHED;
-	                    this->runaway_timer = 0;
-	                    tick= 0;
-
-	                }else{
-	                    uint16_t t= (runaway_state == HEATING_UP) ? this->runaway_heating_timeout : this->runaway_cooling_timeout;
-	                    // we are still heating up see if we have hit the max time allowed
-	                    if(t > 0 && ++this->runaway_timer > t){
-	                        printk("ERROR: Temperature took too long to be reached on %s, HALT asserted, TURN POWER OFF IMMEDIATELY - reset or M999 required\n", designator.c_str());
-	                        THEKERNEL->call_event(ON_HALT, nullptr);
-	                        this->runaway_state = NOT_HEATING;
-	                        this->runaway_timer = 0;
-	                    }
-	                }
-	                break;
-
-	            case TARGET_TEMPERATURE_REACHED:
-	                if(this->runaway_range != 0) {
-	                    // we are in state TARGET_TEMPERATURE_REACHED, check for thermal runaway
-	                    float delta= current_temperature - this->target_temperature;
-
-	                    // If the temperature is outside the acceptable range for 8 seconds, this allows for some noise spikes without halting
-	                    if(fabsf(delta) > this->runaway_range){
-	                        if(this->runaway_timer++ >= 1) { // this being 8 seconds
-	                            printk("ERROR: Temperature runaway on %s (delta temp %f), HALT asserted, TURN POWER OFF IMMEDIATELY - reset or M999 required\n", designator.c_str(), delta);
-	                            THEKERNEL->call_event(ON_HALT, nullptr);
-	                            this->runaway_state = NOT_HEATING;
-	                            this->runaway_timer= 0;
-	                        }
-
-	                    }else{
-	                        this->runaway_timer= 0;
-	                    }
-	                }
-
-	                break;
-	        }
-	    }
-	}
+    float temperature = sensor->get_temperature();
+    if (isinf(temperature) || temperature < min_temp || temperature > max_temp) {
+        printk("ERROR: Spindle overheated, max - %1.1f, current - %1.1f\n", max_temp, temperature);
+        THEKERNEL->call_event(ON_HALT, nullptr);
+        THEKERNEL->set_halt_reason(SPINDLE_OVERHEATED);
+    }
 }
 
 void TemperatureControl::setPIDp(float p)
