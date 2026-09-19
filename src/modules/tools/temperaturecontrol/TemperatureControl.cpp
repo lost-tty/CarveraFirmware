@@ -55,14 +55,8 @@ void TemperatureControl::on_module_loaded()
 
     // Register for events
     GcodeDispatch::add_handler(this);
-    this->register_for_event(ON_IDLE);
     this->register_for_event(ON_SECOND_TICK);
 
-}
-
-void TemperatureControl::on_idle(void *arg)
-{
-    sensor->on_idle();
 }
 
 void TemperatureControl::on_main_loop(void *argument)

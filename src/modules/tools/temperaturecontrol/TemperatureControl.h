@@ -34,7 +34,6 @@ class TemperatureControl : public Module {
         void on_main_loop(void* argument);
         void on_gcode_received(Gcode *argument);
         void on_second_tick(void* argument);
-        void on_idle(void* argument);
 
         float get_temperature();
 
