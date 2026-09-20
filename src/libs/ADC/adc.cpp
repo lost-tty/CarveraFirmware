@@ -83,7 +83,7 @@ ADC::ADC(int sample_rate, int cclk_div)
 
     //* Attach IRQ
     instance = this;
-    NVIC_SetVector(ADC_IRQn, (uint32_t)&_adcisr);
+    NVIC_SetVector(ADC_IRQn, (uintptr_t)&_adcisr);
 
     //Disable global interrupt
     LPC_ADC->ADINTEN &= ~0x100;
@@ -364,14 +364,14 @@ int ADC::interrupt_state(PinName pin) {
 //Attach custom interrupt handler replacing default
 void ADC::attach(void(*fptr)(void)) {
     //* Attach IRQ
-    NVIC_SetVector(ADC_IRQn, (uint32_t)fptr);
+    NVIC_SetVector(ADC_IRQn, (uintptr_t)fptr);
 }
 
 //Restore default interrupt handler
 void ADC::detach(void) {
     //* Attach IRQ
     instance = this;
-    NVIC_SetVector(ADC_IRQn, (uint32_t)&_adcisr);
+    NVIC_SetVector(ADC_IRQn, (uintptr_t)&_adcisr);
 }
 
 

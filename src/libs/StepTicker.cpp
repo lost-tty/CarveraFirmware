@@ -64,8 +64,8 @@ void StepTicker::init()
 //called when everything is setup and interrupts can start
 void StepTicker::start()
 {
-    NVIC_SetVector(TIMER0_IRQn, (uint32_t)&_TIMER0_isr);
-    NVIC_SetVector(TIMER1_IRQn, (uint32_t)&_TIMER1_isr);
+    NVIC_SetVector(TIMER0_IRQn, (uintptr_t)&_TIMER0_isr);
+    NVIC_SetVector(TIMER1_IRQn, (uintptr_t)&_TIMER1_isr);
 
     NVIC_EnableIRQ(TIMER0_IRQn);     // Enable interrupt handler
     NVIC_EnableIRQ(TIMER1_IRQn);     // Enable interrupt handler

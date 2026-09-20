@@ -77,7 +77,7 @@ bool UsbHost::init_controller()
     LPC_USB->USBClkCtrl &= ~PORTSEL_CLK_EN;
     LPC_PINCON->PINSEL1 = (LPC_PINCON->PINSEL1 & ~((3 << 26) | (3 << 28))) | (1 << 26) | (1 << 28);  // USB_D+/D-
 
-    NVIC_SetVector(USB_IRQn, (uint32_t)USB_IRQHandler);
+    NVIC_SetVector(USB_IRQn, (uintptr_t)USB_IRQHandler);
     NVIC_SetPriority(USB_IRQn, 6);   // tuh_init() enables it
     return true;
 }

@@ -284,9 +284,9 @@ int main() {
     serial_init(&console, P2_8, P2_9);
     serial_baud(&console, DEFAULT_SERIAL_BAUD_RATE);
 
-    NVIC_SetVector(SVCall_IRQn, (uint32_t)vPortSVCHandler);
-    NVIC_SetVector(PendSV_IRQn, (uint32_t)xPortPendSVHandler);
-    NVIC_SetVector(SysTick_IRQn, (uint32_t)xPortSysTickHandler);
+    NVIC_SetVector(SVCall_IRQn, (uintptr_t)vPortSVCHandler);
+    NVIC_SetVector(PendSV_IRQn, (uintptr_t)xPortPendSVHandler);
+    NVIC_SetVector(SysTick_IRQn, (uintptr_t)xPortSysTickHandler);
 
     // Create a FreeRTOS task main loop
     TaskHandle_t xHandle = xTaskCreateStatic(
