@@ -470,9 +470,11 @@ void Kernel::register_for_event(_EVENT_ENUM id_event, Module *mod)
 // Call a specific event with an argument
 void Kernel::clear_halt()
 {
-    dispatch_halt(); // the queue and the source stack must be cleared before anything runs again
-    call_event(ON_HALT, (void *)1);
+    dispatch_halt(); // the halt may still be pending if the main loop has not run since
+    halted = false;
+    feed_hold = false;
     Killable::restore_all();
+    THEROBOT.reset_position_from_current_actuator_position();
 }
 
 void Kernel::halt(uint8_t reason)
@@ -488,31 +490,16 @@ void Kernel::dispatch_halt()
 {
     if(!halt_pending) return;
     halt_pending = false;
+    bool was_idle = THECONVEYOR.is_idle();
     Killable::cleanup_all();
-    call_event(ON_HALT, nullptr);
+    // backed up commands leave the planner ahead of where the machine stopped
+    if(!was_idle) THEROBOT.reset_position_from_current_actuator_position();
 }
 
 void Kernel::call_event(_EVENT_ENUM id_event, void * argument)
 {
-    bool was_idle = true;
-    if(id_event == ON_HALT) {
-        this->halted = (argument == nullptr);
-        if(!this->halted && this->feed_hold) this->feed_hold= false; // also clear feed hold
-        was_idle = THECONVEYOR.is_idle(); // see if we were doing anything like printing
-    }
-
-    // send to all registered modules
     for (auto m : hooks[id_event]) {
         (m->*kernel_callback_functions[id_event])(argument);
-    }
-
-    if(id_event == ON_HALT) {
-        if(!this->halted || !was_idle) {
-            // if we were running and this is a HALT
-            // or if we are clearing the halt with $X or M999
-            // fix up the current positions in case they got out of sync due to backed up commands
-            THEROBOT.reset_position_from_current_actuator_position();
-        }
     }
 }
 

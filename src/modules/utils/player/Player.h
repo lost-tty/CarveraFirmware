@@ -9,6 +9,7 @@
 #pragma once
 
 #include "Module.h"
+#include "libs/Killable.h"
 class Gcode;
 #include "GcodeFile.h"
 #include "Source.h"
@@ -27,7 +28,7 @@ using std::string;
 class StreamOutput;
 
 // Job control: plays a file as the bottom source of the stack and feeds the stack from its main loop.
-class Player : public Module, public Source {
+class Player : public Module, public Source, public Killable {
 
     public:
         void on_module_loaded();
@@ -36,7 +37,8 @@ class Player : public Module, public Source {
         bool get_progress(struct pad_progress &p);
         void restart_job();
         void on_gcode_received(Gcode *argument);
-        void on_halt(void *argument);
+        void kill() override {}
+        void cleanup() override;
         Source::Result next(SerialMessage &msg) override;
         void abort() override;
         void list(StreamOutput* stream, unsigned around) override;

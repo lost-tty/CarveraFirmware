@@ -3,13 +3,14 @@
 
 using namespace std;
 #include "Module.h"
+#include "libs/Killable.h"
 class Gcode;
 #include "Pin.h"
 
 #include "SoftTimer.h"
 #include "SimpleShell.h"
 
-class ATCHandler : public Module
+class ATCHandler : public Module, public Killable
 {
 
 public:
@@ -25,7 +26,8 @@ public:
 
     void on_module_loaded();
     void on_gcode_received(Gcode *argument);
-    void on_halt(void *argument);
+    void kill() override {}
+    void cleanup() override;
     void on_config_reload(void *argument);
 
 private:

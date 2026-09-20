@@ -62,7 +62,6 @@ void Player::on_module_loaded()
 
     for (unsigned i= 0; COMMANDS[i].name != nullptr; i++) SimpleShell::add_command(shell_slots[i], COMMANDS[i].name, &Player::shell, this, COMMANDS[i].help);
     GcodeDispatch::add_handler(this);
-    this->register_for_event(ON_HALT);
 
     this->leave_heaters_on = THEKERNEL->config->value(leave_heaters_on_suspend_checksum)->by_default(false)->as_bool();
 
@@ -79,9 +78,9 @@ unsigned long Player::calculate_elapsed_secs()
     return (pdTICKS_TO_MS(elapsedTicks) + 500) / 1000;
 }
 
-void Player::on_halt(void* argument)
+void Player::cleanup()
 {
-    if(argument == nullptr && (THEKERNEL->is_suspending() || THEKERNEL->is_waiting())) {
+    if(THEKERNEL->is_suspending() || THEKERNEL->is_waiting()) {
         THEKERNEL->set_waiting(false);
         sources.resume();
         THEROBOT.pop_state();

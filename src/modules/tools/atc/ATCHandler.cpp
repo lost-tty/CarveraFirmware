@@ -81,7 +81,6 @@ void ATCHandler::on_module_loaded()
 
 
     GcodeDispatch::add_handler(this);
-    this->register_for_event(ON_HALT);
 
     this->on_config_reload(this);
 
@@ -140,12 +139,10 @@ void ATCHandler::on_config_reload(void *argument)
 	this->clearance_z = THEKERNEL->config->value(coordinate_checksum, clearance_z_checksum)->by_default(-3  )->as_number();
 }
 
-void ATCHandler::on_halt(void* argument)
+void ATCHandler::cleanup()
 {
-    if (argument == nullptr ) {
-        THEKERNEL->set_atc_state(ATC_NONE);
-        this->atc_home_info.clamp_status = UNHOMED;
-	}
+    THEKERNEL->set_atc_state(ATC_NONE);
+    this->atc_home_info.clamp_status = UNHOMED;
 }
 
 // Called every millisecond in an ISR

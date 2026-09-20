@@ -13,7 +13,6 @@
 void SourceStack::on_module_loaded()
 {
     register_for_event(ON_MAIN_LOOP);
-    register_for_event(ON_HALT);
     SimpleShell::add_command(shell_slot, "list", &SourceStack::shell, this, "list [n] - lines around the one running");
 }
 
@@ -56,9 +55,9 @@ void SourceStack::on_main_loop(void *)
     }
 }
 
-void SourceStack::on_halt(void *argument)
+void SourceStack::cleanup()
 {
-    if(argument == nullptr) clear();
+    clear();
 }
 
 void SourceStack::clear()

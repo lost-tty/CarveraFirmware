@@ -16,8 +16,7 @@ Module::~Module(){}
 const ModuleCallback kernel_callback_functions[NUMBER_OF_DEFINED_EVENTS] = {
     &Module::on_main_loop,
     &Module::on_idle,
-    &Module::on_second_tick,
-    &Module::on_halt
+    &Module::on_second_tick
 };
 
 

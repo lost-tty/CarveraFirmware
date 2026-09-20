@@ -8,11 +8,12 @@
 #pragma once
 
 #include "libs/Module.h"
+#include "libs/Killable.h"
 #include "BlockQueue.h"
 
 class Block;
 
-class Conveyor : public Module 
+class Conveyor : public Module, public Killable
 {
 public:
     void init();
@@ -20,7 +21,8 @@ public:
 
     void on_module_loaded(void);
     void on_idle(void *);
-    void on_halt(void *);
+    void kill() override {}
+    void cleanup() override;
 
     bool wait_for_idle(bool wait_for_motors=true); // false when a halt cut the wait short
     bool is_queue_empty() { return queue.is_empty(); };

@@ -66,7 +66,6 @@ void Conveyor::init()
 void Conveyor::on_module_loaded()
 {
     register_for_event(ON_IDLE);
-    register_for_event(ON_HALT);
 
     // Attach to the end_of_move stepper event
     queue_delay_time_ms = THEKERNEL->config->value(queue_delay_time_ms_checksum)->by_default(100)->as_number();
@@ -79,11 +78,9 @@ void Conveyor::start(uint8_t n_actuators)
     running = true;
 }
 
-void Conveyor::on_halt(void* argument)
+void Conveyor::cleanup()
 {
-    if(argument == nullptr) {
-        flush_queue();
-    }
+    flush_queue();
 }
 
 void Conveyor::on_idle(void*)

@@ -15,7 +15,6 @@ enum _EVENT_ENUM {
     ON_MAIN_LOOP,
     ON_IDLE,
     ON_SECOND_TICK,
-    ON_HALT,
     NUMBER_OF_DEFINED_EVENTS
 };
 
@@ -44,7 +43,6 @@ public:
     virtual void on_gcode_received(Gcode *) {};
     virtual void on_idle(void *) {};
     virtual void on_second_tick(void *) {};
-    virtual void on_halt(void *) {};
 
 };
 
