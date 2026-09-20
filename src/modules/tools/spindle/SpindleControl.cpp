@@ -55,7 +55,7 @@ void SpindleControl::on_gcode_received(Gcode *argument)
                 }
             	// check if is tool -1 or tool 0
             	if (!tool_ok) {
-        			THEKERNEL->halt(MANUAL);
+        			THEKERNEL->halt(MANUAL, "no tool set");
         			printk("ERROR: No tool or probe tool!\n");
         			return;
             	}

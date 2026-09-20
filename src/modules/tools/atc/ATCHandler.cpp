@@ -260,7 +260,7 @@ void ATCHandler::home_clamp()
 	if(!moved) return;
 
     if (!atc_home_info.triggered) {
-        THEKERNEL->halt(ATC_HOME_FAIL);
+        THEKERNEL->halt(ATC_HOME_FAIL, "tool changer homing failed");
         printk("ERROR: Homing atc failed - check the atc max travel settings\n");
         return;
     } else {
@@ -333,8 +333,7 @@ void ATCHandler::set_tool_offset()
 
 static void halt(int reason, const char *msg)
 {
-    THEKERNEL->halt(reason);
-    printk("ERROR: %s\n", msg);
+    THEKERNEL->halt(reason, msg);
 }
 
 void ATCHandler::on_gcode_received(Gcode *argument)

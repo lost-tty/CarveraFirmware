@@ -137,7 +137,7 @@ void MainButton::on_second_tick(void *)
 
 // both edges fire, so check the button rather than halting on release too
 void MainButton::e_stop_irq() {
-	if(this->e_stop.get()) THEKERNEL->halt(E_STOP);
+	if(this->e_stop.get()) THEKERNEL->halt(E_STOP, "e-stop");
 }
 
 void MainButton::on_idle(void *argument)
@@ -172,7 +172,7 @@ void MainButton::on_idle(void *argument)
 					this->switch_power_24(0);
         			// go to sleep
     				THEKERNEL->set_sleeping(true);
-    				THEKERNEL->halt(MANUAL);
+    				THEKERNEL->halt(MANUAL, "stopped by button");
         		}
         	} else {
         		sleep_countdown_us = us_ticker_read();
@@ -200,7 +200,7 @@ void MainButton::on_idle(void *argument)
     			case RUN:
     			case HOME:
     				// Halt
-    		        THEKERNEL->halt(MANUAL);
+    		        THEKERNEL->halt(MANUAL, "stopped by button");
     				break;
     			case HOLD:
     				// resume
@@ -227,7 +227,7 @@ void MainButton::on_idle(void *argument)
 						this->switch_power_24(0);
 	        			// go to sleep
 	    				THEKERNEL->set_sleeping(true);
-	    				THEKERNEL->halt(MANUAL);
+	    				THEKERNEL->halt(MANUAL, "stopped by button");
 	    			}
 
 // turn off 12V/24V power supply
@@ -240,7 +240,7 @@ void MainButton::on_idle(void *argument)
     			case RUN:
     			case HOME:
     				// halt
-    		        THEKERNEL->halt(MANUAL);
+    		        THEKERNEL->halt(MANUAL, "stopped by button");
     				break;
     			case HOLD:
     				// resume
@@ -310,7 +310,7 @@ void MainButton::on_idle(void *argument)
     				break;
     		}
     		if (cover_open_stop) {
-		        THEKERNEL->halt(COVER_OPEN);
+		        THEKERNEL->halt(COVER_OPEN, "cover open");
     		}
     	}
     	button_state = NONE;

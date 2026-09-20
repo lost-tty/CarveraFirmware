@@ -120,7 +120,7 @@ void Scripts::finish()
 
 void Scripts::halt(int reason)
 {
-    THEKERNEL->halt(reason);
+    THEKERNEL->halt(reason, name.empty() ? "script aborted" : name.c_str());
 }
 
 // M6 T3 -> o<tool_change> with #<t> = 3 and #<subcode> = 0; every word of the block becomes a #<letter>.

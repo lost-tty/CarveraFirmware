@@ -477,10 +477,14 @@ void Kernel::clear_halt()
     THEROBOT.reset_position_from_current_actuator_position();
 }
 
-void Kernel::halt(uint8_t reason)
+void Kernel::halt(uint8_t reason, const char *msg)
 {
     // the first reason is the cause; a halt raised while stopping is a consequence of it
-    if(!halted) halt_reason = reason;
+    if(!halted) {
+        halt_reason = reason;
+        strncpy(halt_msg, msg != nullptr ? msg : "halted", sizeof(halt_msg) - 1);
+        halt_msg[sizeof(halt_msg) - 1] = '\0';
+    }
     halted = true;
     Killable::kill_all();
     halt_pending = true;
@@ -490,6 +494,7 @@ void Kernel::dispatch_halt()
 {
     if(!halt_pending) return;
     halt_pending = false;
+    printk("ALARM: %s\n", halt_msg);
     bool was_idle = THECONVEYOR.is_idle();
     Killable::cleanup_all();
     // backed up commands leave the planner ahead of where the machine stopped

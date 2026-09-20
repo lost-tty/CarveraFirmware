@@ -1422,7 +1422,7 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, unsigned int
             if( (!isnan(soft_endstop_min[i]) && transformed_target[i] < soft_endstop_min[i]) || (!isnan(soft_endstop_max[i]) && transformed_target[i] > soft_endstop_max[i]) ) {
                 if(soft_endstop_halt) {
                     printk("error:Soft Endstop %c was exceeded - reset or $X or M999 required\n", i+'X');
-                    THEKERNEL->halt(SOFT_LIMIT);
+                    THEKERNEL->halt(SOFT_LIMIT, "soft limit");
                     return false;
 
                 //} else if(soft_endstop_truncate) {

@@ -98,7 +98,7 @@ void GcodeDispatch::init()
 
 void GcodeDispatch::halt()
 {
-    THEKERNEL->halt(MANUAL);
+    THEKERNEL->halt(MANUAL, "stopped");
 }
 
 // nothing of the line has run yet: the reply is enough unless a job or script would go on past it
@@ -218,7 +218,7 @@ bool GcodeDispatch::homed_enough(const gcode::Words &words, StreamOutput *stream
         if(!homed_check || !is_command(w)) continue;
         if((classify(w).flags & NEEDS_HOMED) && !THEROBOT.is_homed_all_axes()) {
             stream->printf("error:Machine has not been homed, home first (M888 disables this check)\n");
-            THEKERNEL->halt(NON_HOME);
+            THEKERNEL->halt(NON_HOME, "machine is not homed");
             return false;
         }
     }

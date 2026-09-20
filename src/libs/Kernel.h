@@ -119,7 +119,7 @@ class Kernel {
 
         bool is_using_leds() const { return use_leds; }
         // safe from an interrupt
-        void halt(uint8_t reason);
+        void halt(uint8_t reason, const char *msg = nullptr);
         void dispatch_halt();
         bool is_halted() const { return halted; }
         void clear_halt();
@@ -182,6 +182,7 @@ class Kernel {
 
         uint8_t get_state();
         uint8_t halt_reason;
+        char halt_msg[32];
         uint8_t atc_state;
         EEPROM_data eeprom_data;
 

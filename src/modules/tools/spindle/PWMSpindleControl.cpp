@@ -142,8 +142,7 @@ void PWMSpindleControl::on_update_speed()
 {
     // the VFD latches its alarm output, so one read is the whole check
     if(!THEKERNEL->is_halted() && alarm_pin.get()) {
-        printk("ALARM: Spindle alarm triggered -  power off/on required\n");
-        THEKERNEL->halt(SPINDLE_ALARM);
+        THEKERNEL->halt(SPINDLE_ALARM, "spindle alarm, power off/on");
         return;
     }
 

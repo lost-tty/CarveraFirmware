@@ -454,8 +454,9 @@ void Endstops::service()
             if(status == MOVING_TO_ENDSTOP_FAST || status == MOVING_TO_ENDSTOP_SLOW) i->triggered= true;
         } else {
             status= LIMIT_TRIGGERED;
-            printk("ALARM: Hard limit %c%c\n", THEROBOT.motor_direction(i->axis_index) ? '-' : '+', i->axis);
-            THEKERNEL->halt(HARD_LIMIT);
+            char msg[32];
+            snprintf(msg, sizeof(msg), "hard limit %c%c", i->axis, THEROBOT.motor_direction(i->axis_index) ? '-' : '+');
+            THEKERNEL->halt(HARD_LIMIT, msg);
             return;
         }
     }
@@ -463,8 +464,9 @@ void Endstops::service()
     // a driver fault is a latched logic line, nothing to debounce
     for(auto& i : motor_alarms) {
         if(i->pin.get()) {
-            printk("ALARM: %c motor alarm triggered -  reset required\n", i->axis);
-            THEKERNEL->halt(MOTOR_ERROR_X + i->axis_index);
+            char msg[32];
+            snprintf(msg, sizeof(msg), "%c motor alarm", i->axis);
+            THEKERNEL->halt(MOTOR_ERROR_X + i->axis_index, msg);
             return;
         }
     }
@@ -548,7 +550,7 @@ void Endstops::home(axis_bitmap_t a)
         for (size_t i = X_AXIS; i <= Z_AXIS; ++i) {
             if(axis_to_home[i] && !homing_axis[i].pin_info->triggered) {
                 this->status = NOT_HOMING;
-                THEKERNEL->halt(HOME_FAIL);
+                THEKERNEL->halt(HOME_FAIL, "homing failed");
                 return;
             }
         }
@@ -559,7 +561,7 @@ void Endstops::home(axis_bitmap_t a)
         for (size_t i = A_AXIS; i < homing_axis.size(); ++i) {
             if(axis_to_home[i] && !homing_axis[i].pin_info->triggered) {
                 this->status = NOT_HOMING;
-                THEKERNEL->halt(HOME_FAIL);
+                THEKERNEL->halt(HOME_FAIL, "homing failed");
                 return;
             }
         }
