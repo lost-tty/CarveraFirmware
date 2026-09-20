@@ -140,6 +140,13 @@ void PWMSpindleControl::on_pin_rise()
 
 void PWMSpindleControl::on_update_speed()
 {
+    // the VFD latches its alarm output, so one read is the whole check
+    if(!THEKERNEL->is_halted() && alarm_pin.get()) {
+        printk("ALARM: Spindle alarm triggered -  power off/on required\n");
+        THEKERNEL->halt(SPINDLE_ALARM);
+        return;
+    }
+
     // If we don't get any interrupts for 1 second, set current RPM to 0
     if (++time_since_update > UPDATE_FREQ)
     {
@@ -275,18 +282,6 @@ void PWMSpindleControl::get_status(struct spindle_status *t)
 
 
 // returns spindle status
-bool PWMSpindleControl::get_alarm(void)
-{
-	uint32_t debounce = 0;
-	while (this->alarm_pin.get()) {
-		if ( ++debounce >= 10 ) {
-			// pin triggered
-			return true;
-		}
-	}
-	return false;
-}
-
 // get stall status
 bool PWMSpindleControl::get_stall(void)
 {
@@ -300,23 +295,5 @@ bool PWMSpindleControl::get_stall(void)
 		stall_timer = 0;
 	}
 	return false;
-}
-
-void PWMSpindleControl::on_idle(void *argument)
-{
-	if(THEKERNEL->is_halted()) return;
-	// check spindle alarm
-    if (this->get_alarm()) {
-		printk("ALARM: Spindle alarm triggered -  power off/on required\n");
-		THEKERNEL->halt(SPINDLE_ALARM);
-		return;
-    }
-    // check spindle stall
-    /*
-    if (this->get_stall()) {
-		printk("ALARM: Spindle stall triggered -  reset required\n");
-		THEKERNEL->halt(SPINDLE_STALL);
-    }*/
-
 }
 

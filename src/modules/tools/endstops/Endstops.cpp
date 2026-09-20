@@ -54,7 +54,6 @@ enum DEFNS { MIN_PIN, MAX_PIN, MAX_TRAVEL, FAST_RATE, SLOW_RATE, RETRACT, DIRECT
 
 // global config settings
 
-#define endstop_debounce_count_checksum  CHECKSUM("endstop_debounce_count")
 #define endstop_debounce_ms_checksum     CHECKSUM("endstop_debounce_ms")
 
 #define home_z_first_checksum            CHECKSUM("home_z_first")
@@ -115,7 +114,7 @@ void Endstops::on_module_loaded()
 
     GcodeDispatch::add_handler(this);
 
-	read_endstops_timer.start();
+	service_timer.start();
 
     // load g28 data from eeprom
 //    this->g28_position[0] = THEKERNEL->eeprom_data.G28[0];
@@ -132,7 +131,6 @@ bool Endstops::load_old_config()
         ENDSTOP_CHECKSUMS("gamma")    // Z
     };
 
-    bool limit_enabled = false;
     for (int i = X_AXIS; i <= Z_AXIS; ++i) { // X_AXIS to Z_AXIS
         homing_info_t hinfo;
 
@@ -163,7 +161,6 @@ bool Endstops::load_old_config()
         if (THEKERNEL->config->value(checksums[i][ALARM_PIN])->by_default("nc" )->as_string() != "nc") {
         	motor_alarm_info_t *info = new motor_alarm_info_t;
         	info->pin.from_string(THEKERNEL->config->value(checksums[i][ALARM_PIN])->as_string())->as_input();
-            info->debounce = 0;
             info->axis = 'X' + i;
             info->axis_index = i;
             motor_alarms.push_back(info);
@@ -194,7 +191,6 @@ bool Endstops::load_old_config()
 
             // limits enabled
             info->limit_enable = THEKERNEL->config->value(checksums[i][LIMIT])->by_default(false)->as_bool();
-            limit_enabled |= info->limit_enable;
         }
 
         homing_axis.push_back(hinfo);
@@ -208,17 +204,12 @@ bool Endstops::load_old_config()
 
     get_global_configs();
 
-    if(limit_enabled) {
-        register_for_event(ON_IDLE);
-    }
-
     return true;
 }
 
 // Get config using new syntax supports ABC
 bool Endstops::load_config()
 {
-    bool limit_enabled= false;
     size_t max_index= 0;
 
     std::array<homing_info_t, k_max_actuators> temp_axis_array; // needs to be at least XYZ, but allow for ABC
@@ -283,7 +274,6 @@ bool Endstops::load_config()
 
         // are limits enabled
         pin_info->limit_enable= THEKERNEL->config->value(endstop_checksum, cs, limit_checksum)->by_default(false)->as_bool();
-        limit_enabled |= pin_info->limit_enable;
 
         // enter into endstop array
         endstops.push_back(pin_info);
@@ -360,18 +350,12 @@ bool Endstops::load_config()
     // sets some endstop global configs applicable to all endstops
     get_global_configs();
 
-    if(limit_enabled) {
-        register_for_event(ON_IDLE);
-    }
-
     return true;
 }
 
 void Endstops::get_global_configs()
 {
-    // NOTE the debounce count is in milliseconds so probably does not need to beset anymore
-    this->debounce_ms= THEKERNEL->config->value(endstop_debounce_ms_checksum)->by_default(10)->as_number();
-    this->debounce_count= THEKERNEL->config->value(endstop_debounce_count_checksum)->by_default(100)->as_number();
+    this->debounce_ms= THEKERNEL->config->value(endstop_debounce_ms_checksum)->by_default(1)->as_number();
 
 
     this->home_z_first= THEKERNEL->config->value(home_z_first_checksum)->by_default(true)->as_bool();
@@ -400,79 +384,6 @@ void Endstops::get_global_configs()
     // set to true by default for deltas due to trim, false on cartesians
 }
 
-bool Endstops::debounced_get(Pin *pin)
-{
-    if(pin == nullptr) return false;
-    uint32_t debounce = 0;
-    while (pin->get()) {
-        if ( ++debounce >= this->debounce_count ) {
-            // pin triggered
-            return true;
-        }
-    }
-    return false;
-}
-
-// only called if limits are enabled
-void Endstops::on_idle(void *argument)
-{
-    if(this->status == LIMIT_TRIGGERED) {
-        // if we were in limit triggered see if it has been cleared
-        for(auto& i : endstops) {
-            if(i->limit_enable) {
-                if(i->pin.get()) {
-                    // still triggered, so exit
-                    i->debounce = 0;
-                    return;
-                }
-
-                if(i->debounce++ > debounce_count) { // can use less as it calls on_idle in between
-                    // clear the state
-                    this->status = NOT_HOMING;
-                }
-            }
-        }
-        return;
-
-    } else if(this->status != NOT_HOMING) {
-        // don't check while homing
-        return;
-    }
-
-    if(THEKERNEL->is_halted()) return;
-
-    for(auto& i : endstops) {
-        if(i->limit_enable && THEROBOT.motor_is_moving(i->axis_index)) {
-            // check min and max endstops
-            if(debounced_get(&i->pin)) {
-                // endstop triggered
-                printk("ALARM: Hard limit %c%c\n", THEROBOT.motor_direction(i->axis_index) ? '-' : '+', i->axis);
-
-                this->status = LIMIT_TRIGGERED;
-                i->debounce = 0;
-                // disables heaters and motors, ignores incoming Gcode and flushes block queue
-                THEKERNEL->halt(HARD_LIMIT);
-                return;
-            }
-        }
-    }
-
-    for(auto& i : motor_alarms) {
-		// check min and max endstops
-		if(debounced_get(&i->pin)) {
-			// endstop triggered
-			printk("ALARM: %c motor alarm triggered -  reset required\n", i->axis);
-
-			i->debounce= 0;
-			// disables heaters and motors, ignores incoming Gcode and flushes block queue
-			THEKERNEL->halt(MOTOR_ERROR_X + i->axis_index);
-			return;
-		}
-	}
-}
-
-// if limit switches are enabled, then we must move off of the endstop otherwise we won't be able to move
-// checks if triggered and only backs off if triggered
 void Endstops::back_off_home(axis_bitmap_t axis)
 {
     float delta[k_max_actuators]{0};
@@ -485,7 +396,7 @@ void Endstops::back_off_home(axis_bitmap_t axis)
         // cartesians move every triggered axis off its endstop at once
         for( auto& e : homing_axis) {
             if(!axis[e.axis_index]) continue; // only for axes we asked to move
-            if(e.pin_info == nullptr || !e.pin_info->limit_enable || !e.pin_info->triggered) continue;
+            if(e.pin_info == nullptr || !e.pin_info->triggered) continue;
             delta[e.axis_index]= e.retract * (e.home_direction ? 1 : -1);
             moving= true;
             // select slowest of them all
@@ -505,36 +416,58 @@ void Endstops::after_home(axis_bitmap_t axis)
     scripts.run_sub("after_home", nullptr, 0);
 }
 
-// Called every millisecond in an ISR
-void Endstops::read_endstops()
+// the switch an axis homes to is expected to be pressed for the whole cycle, including the
+// retract off it; any other switch is a crash
+bool Endstops::homing_toward(const endstop_info_t *e) const
 {
-    if(this->status != MOVING_TO_ENDSTOP_SLOW && this->status != MOVING_TO_ENDSTOP_FAST) return; // not doing anything we need to monitor for
+    if(status == NOT_HOMING || status == LIMIT_TRIGGERED) return false;
+    uint8_t m= e->axis_index;
+    if(m >= homing_axis.size()) return false;
+    return axis_to_home[m] && homing_axis[m].pin_info == e;
+}
 
-    // check each homing endstop
-    for(auto& e : homing_axis) { // check all axis homing endstops
-        if(e.pin_info == nullptr) continue; // ignore if not a homing endstop
-        int m= e.axis_index;
+void Endstops::service()
+{
+    if(status == LIMIT_TRIGGERED) {
+        for(auto& i : endstops) {
+            if(i->limit_enable && i->pin.get()) { limit_clear_ms= 0; return; }
+        }
+        // every limit has to stay released, not just the one that tripped
+        if(limit_clear_ms++ >= LIMIT_RELEASE_MS) status= NOT_HOMING;
+        return;
+    }
 
-        if(THEROBOT.motor_is_moving(m)) {
-            // if it is moving then we check the associated endstop, and debounce it
-            if(e.pin_info->pin.get()) {
-                if(e.pin_info->debounce < debounce_ms) {
-                    e.pin_info->debounce++;
+    if(THEKERNEL->is_halted()) return;
 
-                } else {
-                    // we signal the motor to stop, which will preempt any moves on that axis
-                    THEROBOT.stop_motor(m);
-                    e.pin_info->triggered= true;
-                }
+    for(auto& i : endstops) {
+        if(!i->limit_enable && !homing_toward(i)) continue;
 
-            } else {
-                // The endstop was not hit yet
-                e.pin_info->debounce= 0;
-            }
+        if(!i->pin.get()) { i->debounce= 0; continue; }   // the press ends at the pin, not the motor
+        if(i->debounce > debounce_ms) continue;           // already acted on this one
+        if(!THEROBOT.motor_is_moving(i->axis_index)) continue;
+        if(++i->debounce < debounce_ms) continue;
+        i->debounce= debounce_ms + 1;
+
+        THEROBOT.stop_motor(i->axis_index);
+
+        if(homing_toward(i)) {
+            if(status == MOVING_TO_ENDSTOP_FAST || status == MOVING_TO_ENDSTOP_SLOW) i->triggered= true;
+        } else {
+            status= LIMIT_TRIGGERED;
+            printk("ALARM: Hard limit %c%c\n", THEROBOT.motor_direction(i->axis_index) ? '-' : '+', i->axis);
+            THEKERNEL->halt(HARD_LIMIT);
+            return;
         }
     }
 
-    return;
+    // a driver fault is a latched logic line, nothing to debounce
+    for(auto& i : motor_alarms) {
+        if(i->pin.get()) {
+            printk("ALARM: %c motor alarm triggered -  reset required\n", i->axis);
+            THEKERNEL->halt(MOTOR_ERROR_X + i->axis_index);
+            return;
+        }
+    }
 }
 
 void Endstops::home_xy()
@@ -656,6 +589,9 @@ void Endstops::home(axis_bitmap_t a)
     // wait until finished
     THECONVEYOR.wait_for_idle();
 
+    // the switch may still be held from the fast pass, so re-arm before approaching it again
+    for(auto& e : endstops) { e->debounce= 0; e->triggered= false; }
+
     // Start moving the axes towards the endstops slowly
     this->status = MOVING_TO_ENDSTOP_SLOW;
     for (auto& i : homing_axis) {
@@ -752,7 +688,6 @@ void Endstops::process_home_command(Gcode* gcode)
 
     // on some systems where 0,0 is bed center it is nice to have home goto 0,0 after homing
     // default is off for cartesian and on for deltas
-    // if limit switches are enabled we must back off endstop after setting home
     back_off_home(haxis);
     after_home(haxis);
 }

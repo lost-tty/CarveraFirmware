@@ -28,7 +28,7 @@ class Endstops : public Module{
         void get_endstop_states(char *data) const;
         const float *get_g28_position() const { return g28_position; }
         Endstops()
-        : read_endstops_timer("Endstops", 1, true, this, &Endstops::read_endstops)
+        : service_timer("Endstops", 1, true, this, &Endstops::service)
         {}
 
         void on_module_loaded();
@@ -43,18 +43,17 @@ class Endstops : public Module{
         void home_xy();
         void back_off_home(axis_bitmap_t axis);
         void after_home(axis_bitmap_t axis);
-        void on_idle(void *argument);
-        bool debounced_get(Pin *pin);
         void process_home_command(Gcode* gcode);
         void set_homing_offset(Gcode* gcode);
-        void read_endstops();
+        void service();
 
-        SoftTimer read_endstops_timer;
+        SoftTimer service_timer;
 
         // global settings
         float g28_position[3]{0}; // save G28 (in grbl mode)
-        uint32_t debounce_count;
         uint32_t  debounce_ms;
+        uint32_t  limit_clear_ms{0};
+        static const uint32_t LIMIT_RELEASE_MS = 100;
         axis_bitmap_t axis_to_home;
 
 
@@ -63,12 +62,12 @@ class Endstops : public Module{
         // per endstop settings
         using endstop_info_t = struct {
             Pin pin;
+            uint16_t debounce;      // the service counts here, home() reads triggered
+            bool triggered;
             struct {
-                uint16_t debounce:16;
                 char axis:8; // one of XYZABC
                 uint8_t axis_index:3;
                 bool limit_enable:1;
-                bool triggered:1;
             };
         };
 
@@ -76,11 +75,12 @@ class Endstops : public Module{
         using motor_alarm_info_t = struct {
         	Pin pin;
             struct {
-                uint16_t debounce:16;
                 char axis:8; // one of XYZABC
                 uint8_t axis_index:3;
             };
         };
+
+        bool homing_toward(const endstop_info_t *e) const;
 
         using homing_info_t = struct {
             float homing_position;

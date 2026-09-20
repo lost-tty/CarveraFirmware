@@ -28,7 +28,6 @@ class PWMSpindleControl: public SpindleControl {
         virtual ~PWMSpindleControl() {};
         void on_module_loaded();
         void get_status(struct spindle_status *t) override;
-        void on_idle(void* argument);
 
     private:
         
@@ -89,7 +88,6 @@ class PWMSpindleControl: public SpindleControl {
         void set_i_term(float);
         void set_d_term(float);
         void report_settings(void);
-        bool get_alarm(void);
         bool get_stall(void);
         void set_factor(float);
 };
