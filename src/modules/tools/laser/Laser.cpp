@@ -52,6 +52,12 @@ void Laser::on_module_loaded()
         return;
     }
 
+    uint32_t period = THEKERNEL->config->value(laser_module_pwm_period_checksum)->by_default(20)->as_number();
+    if(period < 1 || period > 1000000) {
+        printk("ERROR: laser_module_pwm_period %lu out of range, laser disabled\n", period);
+        return;
+    }
+
     // Get smoothie-style pin from config
     this->laser_pin = new Pin();
     this->laser_pin->from_string(THEKERNEL->config->value(laser_module_pin_checksum)->by_default("2.12")->as_string())->as_output();
@@ -88,8 +94,6 @@ void Laser::on_module_loaded()
         ttl_pin = NULL;
     }
 
-
-    uint32_t period = THEKERNEL->config->value(laser_module_pwm_period_checksum)->by_default(20)->as_number();
     this->pwm_pin->period_us(period);
     this->pwm_pin->write(this->pwm_inverting ? 1 : 0);
     this->laser_test_power = THEKERNEL->config->value(laser_module_test_power_checksum)->by_default(0.1f)->as_number() ;
@@ -107,9 +111,9 @@ void Laser::on_module_loaded()
     SimpleShell::add_command(shell_slot, "laser", &Laser::shell, this, "laser on|off|status|test - laser mode");
 
     // no point in updating the power more than the PWM frequency, but not faster than 1KHz
-    ms_per_tick = 1000 / std::min(1000UL, 1000000 / period);
-    // 2024
-    laser_power_timer.setFrequency(std::min(1000UL, 1000000 / period));
+    uint32_t tick_hz = std::min<uint32_t>(1000, std::max<uint32_t>(1, 1000000 / period));
+    ms_per_tick = 1000 / tick_hz;
+    laser_power_timer.setFrequency(tick_hz);
 	laser_power_timer.start();
     // THEKERNEL->attach_periodic_timer(std::min(4000UL, 1000000 / period), this, &Laser::set_proportional_power);
     // THEKERNEL->attach_periodic_timer(1, this, &Laser::set_proportional_power);
