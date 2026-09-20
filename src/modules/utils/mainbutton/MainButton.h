@@ -2,12 +2,16 @@
 #define MAINBUTTON_H
 
 #include "libs/Pin.h"
+#include "libs/Killable.h"
+#include "libs/Kernel.h"
 #include "mbed.h"
 #include "SoftTimer.h"
 
-class MainButton : public Module {
+class MainButton : public Module, public Killable {
     public:
         bool e_stop_state() const { return e_stop.get(); }
+        void kill() override { PS24.set(0); }
+        void restore() override { if(!THEKERNEL->is_sleeping()) PS24.set(1); }
         void set_power_12(bool on) { switch_power_12(on); }
         void set_power_24(bool on) { switch_power_24(on); }
         MainButton()

@@ -6,6 +6,7 @@
 */
 
 #pragma once
+#include "libs/Killable.h"
 #include "Pin.h"
 #include "Pwm.h"
 #include "SoftPWM.h"
@@ -21,7 +22,7 @@ namespace mbed {
     class PwmOut;
 }
 
-class Switch : public Module {
+class Switch : public Module, public Killable {
 
     public:
         Switch(): Switch(0) {};
@@ -30,8 +31,16 @@ class Switch : public Module {
             : name_checksum(name),
             pinpoll_timer("SwitchPolling", 10, true, this, &Switch::pinpoll_tick),
             pwm_timer("PWMTimer", 1, true, this->sigmadelta_pin, &Pwm::on_tick)
-        {}
+        {
+            // kill() can run from the e-stop interrupt before the config is read
+            output_type= NONE;
+            ignore_on_halt= false;
+            failsafe= 0;
+            digital_pin= nullptr;
+        }
 
+        void kill() override;
+        void cleanup() override;
         uint16_t get_name() const { return name_checksum; }
         void get_state(struct pad_switch *pad) const;
         void set_state(bool on);
@@ -41,7 +50,6 @@ class Switch : public Module {
         void on_main_loop(void *argument);
         void on_config_reload(void* argument);
         void on_gcode_received(Gcode *argument);
-        void on_halt(void *arg);
 
         void pinpoll_tick();
         enum OUTPUT_TYPE {NONE, SIGMADELTA, DIGITAL, HWPWM, SWPWM, DIGITALPWM};

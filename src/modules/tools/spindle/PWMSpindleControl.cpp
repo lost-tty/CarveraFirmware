@@ -211,6 +211,12 @@ void PWMSpindleControl::turn_on() {
     }
 }
 
+void PWMSpindleControl::kill() {
+    spindle_on = false;
+    current_pwm_value = 0;
+    if(pwm_pin != nullptr) pwm_pin->write(output_inverted ? 1 : 0);
+}
+
 void PWMSpindleControl::turn_off() {
     spindle_on = false;
     if (delay_s > 0) {
@@ -302,16 +308,14 @@ void PWMSpindleControl::on_idle(void *argument)
 	// check spindle alarm
     if (this->get_alarm()) {
 		printk("ALARM: Spindle alarm triggered -  power off/on required\n");
-		THEKERNEL->call_event(ON_HALT, nullptr);
-		THEKERNEL->set_halt_reason(SPINDLE_ALARM);
+		THEKERNEL->halt(SPINDLE_ALARM);
 		return;
     }
     // check spindle stall
     /*
     if (this->get_stall()) {
 		printk("ALARM: Spindle stall triggered -  reset required\n");
-		THEKERNEL->call_event(ON_HALT, nullptr);
-		THEKERNEL->set_halt_reason(SPINDLE_STALL);
+		THEKERNEL->halt(SPINDLE_STALL);
     }*/
 
 }

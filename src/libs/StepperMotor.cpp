@@ -32,20 +32,10 @@ StepperMotor::StepperMotor(Pin &step, Pin &dir, Pin &en) : step_pin(step), dir_p
     unstep(); // initialize step pin
     set_direction(false); // initialize dir pin
 
-    this->register_for_event(ON_HALT);
 }
 
 StepperMotor::~StepperMotor()
 {
-    THEKERNEL->unregister_for_event(ON_HALT, this);
-}
-
-void StepperMotor::on_halt(void *argument)
-{
-    if(argument == nullptr) {
-        enable(false);
-        moving= false;
-    }
 }
 
 void StepperMotor::change_steps_per_mm(float new_steps)

@@ -118,8 +118,11 @@ class Kernel {
         float get_user_var(int var_num);
 
         bool is_using_leds() const { return use_leds; }
+        // safe from an interrupt
+        void halt(uint8_t reason);
+        void dispatch_halt();
         bool is_halted() const { return halted; }
-        void clear_halt() { call_event(ON_HALT, (void *)1); }
+        void clear_halt();
         bool is_ok_per_line() const { return ok_per_line; }
 
         void set_feed_hold(bool f) { feed_hold= f; }
@@ -153,7 +156,6 @@ class Kernel {
         void set_zprobing(bool f) { zprobing = f; }
         bool is_zprobing() const { return zprobing; }
 
-        void set_halt_reason(uint8_t reason) { halt_reason = reason; }
         uint8_t get_halt_reason() const { return halt_reason; }
 
         void set_atc_state(uint8_t state) { atc_state = state; }
@@ -187,9 +189,11 @@ class Kernel {
         // When a module asks to be called for a specific event ( a hook ), this is where that request is remembered
         mbed::I2C* i2c;
         std::array<std::vector<Module*>, NUMBER_OF_DEFINED_EVENTS> hooks;
+        volatile bool halted;
+        volatile bool halt_pending;
+
         struct {
             bool use_leds:1;
-            bool halted:1;
             bool feed_hold:1;
             bool ok_per_line:1;
             volatile bool enable_feed_hold:1;

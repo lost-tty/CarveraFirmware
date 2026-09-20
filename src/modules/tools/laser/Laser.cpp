@@ -106,7 +106,6 @@ void Laser::on_module_loaded()
     set_laser_power(0);
 
     //register for events
-    this->register_for_event(ON_HALT);
     GcodeDispatch::add_handler(this);
     SimpleShell::add_command(shell_slot, "laser", &Laser::shell, this, "laser on|off|status|test - laser mode");
 
@@ -161,6 +160,13 @@ void Laser::sub_test(std::string, StreamOutput *stream)
 }
 
 // returns instance
+void Laser::kill()
+{
+    if(pwm_pin != nullptr) pwm_pin->write(this->pwm_inverting ? 1 : 0);
+    if(ttl_used) ttl_pin->set(false);
+    if(laser_pin != nullptr) laser_pin->set(false);
+}
+
 void Laser::get_status(struct laser_status *t)
 {
     t->mode = THEKERNEL->get_laser_mode();
@@ -333,14 +339,10 @@ bool Laser::set_laser_power(float power)
     }
 }
 
-void Laser::on_halt(void *argument)
+void Laser::cleanup()
 {
-    if(argument == nullptr) {
-        set_laser_power(0);
-        this->laser_on = false;
-    	THEKERNEL->set_laser_mode(false);
-    	this->laser_pin->set(false);
-    	this->testing = false;
-    	THEROBOT.clearLaserOffset();
-    }
+    this->laser_on = false;
+    this->testing = false;
+    THEKERNEL->set_laser_mode(false);
+    THEROBOT.clearLaserOffset();
 }

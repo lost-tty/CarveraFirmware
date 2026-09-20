@@ -165,8 +165,7 @@ void Player::play_command( string parameters, StreamOutput *stream )
 
     if (!THEROBOT.is_homed_all_axes()) {
         stream->printf("error:Machine has not been homed, home first\r\n");
-        THEKERNEL->set_halt_reason(NON_HOME);
-        THEKERNEL->call_event(ON_HALT, nullptr);
+        THEKERNEL->halt(NON_HOME);
         return;
     }
 

@@ -21,10 +21,10 @@ class ModbusSpindleControl: public SpindleControl {
         
         Modbus* modbus;
         
-        virtual void turn_on(void);
-        virtual void turn_off(void);
-        virtual void set_speed(int);
-        virtual void report_speed(void);
+        virtual void turn_on(void) = 0;
+        virtual void turn_off(void) = 0;
+        virtual void set_speed(int) = 0;
+        virtual void report_speed(void) = 0;
 
 };
 

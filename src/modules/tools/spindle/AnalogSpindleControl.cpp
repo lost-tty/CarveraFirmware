@@ -71,6 +71,13 @@ void AnalogSpindleControl::turn_on()
 }
 
 
+void AnalogSpindleControl::kill()
+{
+    if(switch_on != nullptr) switch_on->set(false);
+    spindle_on = false;
+    if(pwm_pin != nullptr) update_pwm(0);
+}
+
 void AnalogSpindleControl::turn_off() 
 {
     // clear the output for switching the VFD on 

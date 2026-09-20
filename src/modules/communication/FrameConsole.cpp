@@ -24,8 +24,7 @@ void FrameConsole::on_frame()
                     send(Frame::DIAG, s.data(), s.size());
                     break;
                 case 'X' - 'A' + 1: // ^X
-                    THEKERNEL->call_event(ON_HALT, nullptr);
-                    THEKERNEL->set_halt_reason(MANUAL);
+                    THEKERNEL->halt(MANUAL);
                     printf("ALARM: Abort during cycle\r\n");
                     break;
                 case '!': if (THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(true); break;

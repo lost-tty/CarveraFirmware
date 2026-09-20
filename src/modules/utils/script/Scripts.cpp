@@ -120,8 +120,7 @@ void Scripts::finish()
 
 void Scripts::halt(int reason)
 {
-    THEKERNEL->set_halt_reason(reason);
-    THEKERNEL->call_event(ON_HALT, nullptr);
+    THEKERNEL->halt(reason);
 }
 
 // M6 T3 -> o<tool_change> with #<t> = 3 and #<subcode> = 0; every word of the block becomes a #<letter>.

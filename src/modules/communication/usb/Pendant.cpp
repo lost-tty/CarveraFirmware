@@ -128,8 +128,7 @@ void Pendant::key_down(uint8_t key, bool shifted)
                 else line(THEKERNEL->is_suspending() ? "resume" : "suspend");
                 break;
             case ABORT:
-                THEKERNEL->set_halt_reason(MANUAL);
-                THEKERNEL->call_event(ON_HALT, nullptr);
+                THEKERNEL->halt(MANUAL);
                 break;
             case UNLOCK:  line("$X"); break;
             case HOME:    line("$H"); break;

@@ -7,10 +7,10 @@
 
 #pragma once
 
-#include "Module.h"
+#include "libs/Killable.h"
 #include "Pin.h"
 
-class StepperMotor  : public Module {
+class StepperMotor : public Killable {
     public:
         StepperMotor(Pin& step, Pin& dir, Pin& en);
         ~StepperMotor();
@@ -56,7 +56,7 @@ class StepperMotor  : public Module {
 
 
     private:
-        void on_halt(void *argument);
+        void kill() override { enable(false); moving= false; }
 
         Pin step_pin;
         Pin dir_pin;

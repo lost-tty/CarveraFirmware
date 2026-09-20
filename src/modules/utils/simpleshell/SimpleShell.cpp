@@ -804,7 +804,7 @@ void SimpleShell::sleep_command(string parameters, StreamOutput *stream)
 	mainbutton.set_power_12(false);
 	mainbutton.set_power_24(false);
 	THEKERNEL->set_sleeping(true);
-	THEKERNEL->call_event(ON_HALT, nullptr);
+	THEKERNEL->halt(MANUAL);
 }
 
 // sleep command

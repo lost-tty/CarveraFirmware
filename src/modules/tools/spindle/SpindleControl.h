@@ -9,14 +9,16 @@
 #define SPINDLE_CONTROL_MODULE_H
 
 #include "libs/Module.h"
+#include "libs/Killable.h"
 class Gcode;
 
 struct spindle_status;
 
-class SpindleControl: public Module {
+class SpindleControl: public Module, public Killable {
     public:
         SpindleControl() {};
         virtual void get_status(struct spindle_status *t) {};
+        void kill() override = 0;
         virtual ~SpindleControl() {};
         virtual void on_module_loaded() {};
 
@@ -25,7 +27,6 @@ class SpindleControl: public Module {
 
     private:
         void on_gcode_received(Gcode *argument);
-        void on_halt(void *argument);
         
         virtual void turn_on(void) {};
         virtual void turn_off(void) {};

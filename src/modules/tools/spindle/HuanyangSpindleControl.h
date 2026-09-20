@@ -21,6 +21,8 @@ class HuanyangSpindleControl: public ModbusSpindleControl {
         
         void turn_on(void);
         void turn_off(void);
+        void kill(void) override;
+        void cleanup(void) override;
         void set_speed(int);
         void report_speed(void);
 };

@@ -52,22 +52,10 @@
 #define ROUND2DP(x) (roundf(x * 1e2F) / 1e2F)
 
 // set the pin to the fail safe value on halt
-void Switch::on_halt(void *arg)
+void Switch::cleanup()
 {
-    if(arg == nullptr) {
-        if(this->ignore_on_halt) return;
-
-        // set pin to failsafe value
-        switch(this->output_type) {
-            case DIGITAL: this->digital_pin->set(this->failsafe); break;
-            case SIGMADELTA: this->sigmadelta_pin->set(this->failsafe); break;
-            case HWPWM: this->pwm_pin->write(switch_value / 100.0F); break;
-            case SWPWM: this->swpwm_pin->write(switch_value / 100.0F); break;
-            case DIGITALPWM: this->digital_pin->set(this->failsafe); break;
-            case NONE: return;
-        }
-        this->switch_state= this->failsafe;
-    }
+    if(this->ignore_on_halt) return;
+    this->switch_state= this->failsafe;
 }
 
 void Switch::on_module_loaded()
@@ -76,7 +64,6 @@ void Switch::on_module_loaded()
 
     GcodeDispatch::add_handler(this);
     this->register_for_event(ON_MAIN_LOOP);
-    this->register_for_event(ON_HALT);
 
     // Settings
     this->on_config_reload(this);
@@ -436,6 +423,22 @@ void Switch::on_gcode_received(Gcode *argument)
     	this->turn_on_switch(gcode->has_letter('S') ? gcode->get_value('S') : -1);
     } else if (match_input_off_gcode(gcode)) {
     	this->turn_off_switch();
+    }
+}
+
+// every output goes to the configured failsafe state, not to whatever it was last set to
+void Switch::kill()
+{
+    if(this->ignore_on_halt) return;
+
+    const float pwm = this->failsafe ? 1.0F : 0.0F;
+    switch(this->output_type) {
+        case DIGITAL: this->digital_pin->set(this->failsafe); break;
+        case SIGMADELTA: this->sigmadelta_pin->set(this->failsafe); break;
+        case HWPWM: this->pwm_pin->write(pwm); break;
+        case SWPWM: this->swpwm_pin->write(pwm); break;
+        case DIGITALPWM: this->digital_pin->set(this->failsafe); this->pwm_pin->write(pwm); break;
+        case NONE: break;
     }
 }
 

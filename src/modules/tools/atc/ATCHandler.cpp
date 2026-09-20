@@ -263,8 +263,7 @@ void ATCHandler::home_clamp()
 	if(!moved) return;
 
     if (!atc_home_info.triggered) {
-        THEKERNEL->call_event(ON_HALT, nullptr);
-        THEKERNEL->set_halt_reason(ATC_HOME_FAIL);
+        THEKERNEL->halt(ATC_HOME_FAIL);
         printk("ERROR: Homing atc failed - check the atc max travel settings\n");
         return;
     } else {
@@ -337,8 +336,7 @@ void ATCHandler::set_tool_offset()
 
 static void halt(int reason, const char *msg)
 {
-    THEKERNEL->call_event(ON_HALT, nullptr);
-    THEKERNEL->set_halt_reason(reason);
+    THEKERNEL->halt(reason);
     printk("ERROR: %s\n", msg);
 }
 

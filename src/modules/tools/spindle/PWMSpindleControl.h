@@ -37,7 +37,7 @@ class PWMSpindleControl: public SpindleControl {
 
         SoftTimer spindle_speed_timer;
         
-        mbed::PwmOut *pwm_pin; // PWM output for spindle speed control
+        mbed::PwmOut *pwm_pin= nullptr;
         mbed::InterruptIn *feedback_pin; // Interrupt pin for measuring speed
         bool output_inverted;
        
@@ -82,6 +82,7 @@ class PWMSpindleControl: public SpindleControl {
 
         void turn_on(void);
         void turn_off(void);
+        void kill(void) override;
         void set_speed(int);
         void report_speed(void);
         void set_p_term(float);

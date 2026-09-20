@@ -100,6 +100,17 @@ void HuanyangSpindleControl::turn_on()
 
 }
 
+// modbus cannot be driven from an interrupt, so the VFD stops one main loop later than the pins
+void HuanyangSpindleControl::kill()
+{
+    spindle_on = false;
+}
+
+void HuanyangSpindleControl::cleanup()
+{
+    turn_off();
+}
+
 void HuanyangSpindleControl::turn_off() 
 {
     // prepare data for the spindle off command

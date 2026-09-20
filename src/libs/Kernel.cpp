@@ -7,6 +7,7 @@
 
 #include "libs/Kernel.h"
 #include "libs/Module.h"
+#include "libs/Killable.h"
 #include "libs/Config.h"
 #include "libs/nuts_bolts.h"
 #include "libs/StreamOutputPool.h"
@@ -23,8 +24,8 @@
 #include "modules/tools/laser/Laser.h"
 #include "modules/tools/spindle/SpindleControl.h"
 #include "modules/utils/player/Player.h"
-#include "modules/utils/mainbutton/MainButton.h"
 #include "modules/tools/endstops/Endstops.h"
+#include "modules/utils/mainbutton/MainButton.h"
 #include "modules/tools/atc/ATCHandler.h"
 #include "modules/robot/Robot.h"
 #include "StepperMotor.h"
@@ -467,6 +468,30 @@ void Kernel::register_for_event(_EVENT_ENUM id_event, Module *mod)
 }
 
 // Call a specific event with an argument
+void Kernel::clear_halt()
+{
+    dispatch_halt(); // the queue and the source stack must be cleared before anything runs again
+    call_event(ON_HALT, (void *)1);
+    Killable::restore_all();
+}
+
+void Kernel::halt(uint8_t reason)
+{
+    // the first reason is the cause; a halt raised while stopping is a consequence of it
+    if(!halted) halt_reason = reason;
+    halted = true;
+    Killable::kill_all();
+    halt_pending = true;
+}
+
+void Kernel::dispatch_halt()
+{
+    if(!halt_pending) return;
+    halt_pending = false;
+    Killable::cleanup_all();
+    call_event(ON_HALT, nullptr);
+}
+
 void Kernel::call_event(_EVENT_ENUM id_event, void * argument)
 {
     bool was_idle = true;

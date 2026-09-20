@@ -15,6 +15,7 @@ class Gcode;
 class StreamOutput;
 
 #include "libs/Module.h"
+#include "libs/Killable.h"
 #include "SoftTimer.h"
 
 #include <stdint.h>
@@ -25,7 +26,7 @@ namespace mbed {
 class Pin;
 class Block;
 
-class Laser : public Module{
+class Laser : public Module, public Killable {
 
     public:
         Laser()
@@ -33,7 +34,6 @@ class Laser : public Module{
         {}
 
         void on_module_loaded();
-        void on_halt(void* argument);
         void on_gcode_received(Gcode *argument);
         static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
         static const SimpleShell::Sub<Laser> SUBS[];
@@ -43,6 +43,8 @@ class Laser : public Module{
         void sub_test(std::string args, StreamOutput *stream);
         SimpleShell::Registered shell_slot;
 
+        void kill() override;
+        void cleanup() override;
         void get_status(struct laser_status *t);
         void set_scale(float s) { scale= s/100; }
         float get_scale() const { return scale*100; }
@@ -55,9 +57,9 @@ class Laser : public Module{
 
         SoftTimer laser_power_timer;
 
-        Pin *laser_pin;
-        mbed::PwmOut *pwm_pin;    // PWM output to regulate the laser power
-        Pin *ttl_pin;				// TTL output to fire laser
+        Pin *laser_pin= nullptr;
+        mbed::PwmOut *pwm_pin= nullptr;
+        Pin *ttl_pin= nullptr;
         float laser_test_power;    // laser power when doing calibration
         float laser_maximum_power; // maximum allowed laser power to be output on the pwm pin
         float laser_minimum_power; // value used to tickle the laser on moves.  Also minimum value for auto-scaling

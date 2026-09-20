@@ -119,13 +119,14 @@ bool Conveyor::is_idle() const
 }
 
 // Wait for the queue to be empty and for all the jobs to finish in step ticker
-void Conveyor::wait_for_idle(bool wait_for_motors)
+bool Conveyor::wait_for_idle(bool wait_for_motors)
 {
     // wait for the job queue to empty, this means cycling everything on the block queue into the job queue
     // forcing them to be jobs
-    running = false; // stops on_idle calling check_queue
+    running = false;
     while (!queue.is_empty()) {
         watchdog.alive();
+        if(THEKERNEL->is_halted()) { running = true; return false; }
         check_queue(true); // forces queue to be made available to stepticker
         THEKERNEL->call_event(ON_IDLE, this);
     }
@@ -134,12 +135,14 @@ void Conveyor::wait_for_idle(bool wait_for_motors)
         // now we wait for all motors to stop moving
         while(!is_idle()) {
             watchdog.alive();
+            if(THEKERNEL->is_halted()) { running = true; return false; }
             THEKERNEL->call_event(ON_IDLE, this);
         }
     }
 
     running = true;
     // returning now means that everything has totally finished
+    return true;
 }
 
 /*
@@ -189,11 +192,7 @@ void Conveyor::check_queue(bool force)
 bool Conveyor::get_next_block(Block **block)
 {
     // mark entire queue for GC if flush flag is asserted
-    if (flush){
-        while (queue.isr_tail_i != queue.head_i) {
-            queue.isr_tail_i = queue.next(queue.isr_tail_i);
-        }
-    }
+    if (flush) queue.isr_tail_i = queue.head_i;
 
     // default the feerate to zero if there is no block available
     this->current_feedrate= 0;
@@ -236,12 +235,16 @@ void Conveyor::flush_queue()
 {
     allow_fetch = false;
     flush= true;
+    running = false;
 
     // TODO force deceleration of last block
 
-    // now wait until the block queue has been flushed
-    wait_for_idle(false);
+    while (!queue.is_empty()) {
+        check_queue(true);
+        THEKERNEL->call_event(ON_IDLE, this);
+    }
 
+    running = true;
     flush= false;
 }
 

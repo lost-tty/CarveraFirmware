@@ -403,8 +403,7 @@ void ZProbe::probe_XYZ(Gcode *gcode)
 
     if(this->probe_pin.get() != invert_probe) {
         gcode->stream->printf("Error:ZProbe triggered before move, aborting command.\n");
-        THEKERNEL->call_event(ON_HALT, nullptr);
-        THEKERNEL->set_halt_reason(PROBE_FAIL);
+        THEKERNEL->halt(PROBE_FAIL);
         return;
     }
 
@@ -417,8 +416,7 @@ void ZProbe::probe_XYZ(Gcode *gcode)
     THEKERNEL->set_zprobing(true);
     if(!THEROBOT.delta_move(delta, rate, 3)) {
     	gcode->stream->printf("ERROR: Move too small,  %1.3f, %1.3f, %1.3f\n", x, y, z);
-        THEKERNEL->call_event(ON_HALT, nullptr);
-        THEKERNEL->set_halt_reason(PROBE_FAIL);
+        THEKERNEL->halt(PROBE_FAIL);
         probing = false;
         THEKERNEL->set_zprobing(false);
         return;
@@ -445,8 +443,7 @@ void ZProbe::probe_XYZ(Gcode *gcode)
     if(probeok == 0 && (gcode->subcode == 2 || gcode->subcode == 4)) {
         // issue error if probe was not triggered and subcode is 2 or 4
         gcode->stream->printf("ALARM: Probe fail\n");
-        THEKERNEL->call_event(ON_HALT, nullptr);
-        THEKERNEL->set_halt_reason(PROBE_FAIL);
+        THEKERNEL->halt(PROBE_FAIL);
     }
 }
 
@@ -484,8 +481,7 @@ void ZProbe::calibrate_Z(Gcode *gcode)
     THEKERNEL->set_zprobing(true);
     if(!THEROBOT.delta_move(delta, rate, 3)) {
         gcode->stream->printf("ERROR: Move too small,  %1.3f\n", z);
-        THEKERNEL->call_event(ON_HALT, nullptr);
-        THEKERNEL->set_halt_reason(PROBE_FAIL);
+        THEKERNEL->halt(PROBE_FAIL);
         calibrating = false;
         THEKERNEL->set_zprobing(false);
         return;
@@ -512,8 +508,7 @@ void ZProbe::calibrate_Z(Gcode *gcode)
     if (calibrateok == 0) {
         // issue error if probe was not triggered and subcode is 2 or 4
         gcode->stream->printf("ALARM: Calibrate fail!\n");
-        THEKERNEL->call_event(ON_HALT, nullptr);
-        THEKERNEL->set_halt_reason(CALIBRATE_FAIL);
+        THEKERNEL->halt(CALIBRATE_FAIL);
     }
 
     if (probe_detected) {

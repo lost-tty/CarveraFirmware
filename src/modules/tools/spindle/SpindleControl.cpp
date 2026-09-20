@@ -55,8 +55,7 @@ void SpindleControl::on_gcode_received(Gcode *argument)
                 }
             	// check if is tool -1 or tool 0
             	if (!tool_ok) {
-        			THEKERNEL->call_event(ON_HALT, nullptr);
-        			THEKERNEL->set_halt_reason(MANUAL);
+        			THEKERNEL->halt(MANUAL);
         			printk("ERROR: No tool or probe tool!\n");
         			return;
             	}
@@ -115,11 +114,3 @@ void SpindleControl::on_gcode_received(Gcode *argument)
 
 }
 
-void SpindleControl::on_halt(void *argument)
-{
-    if (argument == nullptr) {
-        if(spindle_on) {
-            turn_off();
-        }
-    }
-}
