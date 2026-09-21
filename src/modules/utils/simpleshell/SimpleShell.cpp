@@ -255,10 +255,6 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
         } else if (cmd == "config-default"){
             config_default_command(  possible_command, new_message.stream );
 
-        } else if (cmd == "play" || cmd == "progress" || cmd == "abort" || cmd == "suspend"
-        		|| cmd == "resume" || cmd == "goto") {
-            // these are handled by Player module
-
         } else if (cmd.substr(0, 2) == "ok") {
             // probably an echo so ignore the whole line
             //new_message.stream->printf("ok\n");
