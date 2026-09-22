@@ -1134,6 +1134,14 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
 
     if(!gcode->mcs) {
         if (this->absolute_mode) {
+            // refuse absolute WCS moves on an unhomed axis
+            for(int i= X_AXIS; i <= Z_AXIS; ++i) {
+                if(isnan(param[i]) || is_homed(i) || !gcode_dispatch.homed_check_enabled()) continue;
+                gcode->is_error= true;
+                gcode->txt_after_ok= "not homed: $H first, or move with G53 or G91";
+                return;
+            }
+
             // apply wcs offsets and g92 offset and tool offset
             if(!isnan(param[X_AXIS])) {
                 target[X_AXIS]= param[X_AXIS] + std::get<X_AXIS>(wcs_offsets[current_wcs]) - std::get<X_AXIS>(g92_offset) + std::get<X_AXIS>(tool_offset);
