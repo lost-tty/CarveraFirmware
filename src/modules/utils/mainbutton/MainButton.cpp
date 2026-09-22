@@ -158,7 +158,7 @@ void MainButton::on_idle(void *argument)
 				// turn off 12v
     			this->switch_power_12(0);
     		}
-		} else {
+		} else if (state != ALARM) {
 			this->switch_power_12(1);
 			this->power_fan_countdown_us = us_ticker_read();
 		}
