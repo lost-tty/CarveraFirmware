@@ -80,6 +80,10 @@
 
 #define enable_checksum                    CHECKSUM("enable")
 #define halt_checksum                      CHECKSUM("halt")
+#define keepout_checksum                   CHECKSUM("keepout")
+#define xmax_checksum                      CHECKSUM("x_max")
+#define ymax_checksum                      CHECKSUM("y_max")
+#define zmax_checksum                      CHECKSUM("z_max")
 #define coordinate_checksum				   CHECKSUM("coordinate")
 #define anchor1_x_checksum		           CHECKSUM("anchor1_x")
 #define anchor1_y_checksum			       CHECKSUM("anchor1_y")
@@ -286,6 +290,22 @@ void Robot::load_config()
     soft_endstop_min[X_AXIS] = THEKERNEL->config->value(soft_endstop_checksum, xmin_checksum)->by_default(-371.0F)->as_number();
     soft_endstop_min[Y_AXIS] = THEKERNEL->config->value(soft_endstop_checksum, ymin_checksum)->by_default(-250.0F)->as_number();
     soft_endstop_min[Z_AXIS] = THEKERNEL->config->value(soft_endstop_checksum, zmin_checksum)->by_default(-135.0F)->as_number();
+    load_keepout_config();
+}
+
+// keepout.<n>.x_min .. z_max define zone n like G22 would; a missing key leaves that side open
+void Robot::load_keepout_config()
+{
+    const uint16_t lo[3]{xmin_checksum, ymin_checksum, zmin_checksum};
+    const uint16_t hi[3]{xmax_checksum, ymax_checksum, zmax_checksum};
+    for (uint8_t n = 0; n < k_keepout_zones; n++) {
+        char name[2]{char('1' + n), 0};
+        uint16_t zone= get_checksum(name);
+        for (int i = 0; i < 3; i++) {
+            keepout[n].min[i]= THEKERNEL->config->value(keepout_checksum, zone, lo[i])->by_default(NAN)->as_number();
+            keepout[n].max[i]= THEKERNEL->config->value(keepout_checksum, zone, hi[i])->by_default(NAN)->as_number();
+        }
+    }
 }
 
 uint8_t Robot::register_motor(StepperMotor *motor)
@@ -643,6 +663,29 @@ void Robot::on_gcode_received(Gcode *argument)
                 }
                 break;
 
+            case 22: { // G22 [Pn] X Y Z I J K: zone n spans the two corners, an omitted word leaves that side open
+                unsigned n= gcode->has_letter('P') ? gcode->get_uint('P') : 1;
+                if(n < 1 || n > k_keepout_zones) {
+                    gcode->is_error= true;
+                    gcode->txt_after_ok= "G22 P must be 1 to 4";
+                    break;
+                }
+                KeepOut &z= keepout[n - 1];
+                const char lo[3]{'X', 'Y', 'Z'}, hi[3]{'I', 'J', 'K'};
+                bool corners= false;
+                for (int i = 0; i < 3; i++) corners= corners || gcode->has_letter(lo[i]) || gcode->has_letter(hi[i]);
+                if(corners) {
+                    for (int i = 0; i < 3; i++) {
+                        z.min[i]= gcode->has_letter(lo[i]) ? to_millimeters(gcode->get_value(lo[i])) : NAN;
+                        z.max[i]= gcode->has_letter(hi[i]) ? to_millimeters(gcode->get_value(hi[i])) : NAN;
+                        if(z.min[i] > z.max[i]) std::swap(z.min[i], z.max[i]);
+                    }
+                }
+                keepout_on= true;
+                break;
+            }
+            case 23: keepout_on= false; break;
+
             case 90: if(gcode->subcode == 0) this->absolute_mode = true; else if(gcode->subcode == 1) this->absolute_arc_centre = true; break;
             case 91: if(gcode->subcode == 0) this->absolute_mode = false; else if(gcode->subcode == 1) this->absolute_arc_centre = false; break;
 
@@ -749,6 +792,7 @@ void Robot::on_gcode_received(Gcode *argument)
             case 2: // M2 end of program
                 current_wcs = 0;
                 absolute_mode = true;
+                keepout_on = true;
                 seconds_per_minute= 60;
                 // issue M5 and M9 in case spindle and coolant are being used
                 gcode_dispatch.run_line("M5", &StreamOutput::NullStream);
@@ -1435,7 +1479,7 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode
     }
 
     if(!within_soft_limits(transformed_target, gcode)) return false;
-
+    if(!clear_of_keepout(compensated_machine_position, transformed_target, gcode)) return false;
 
     bool move= false;
     float sos= 0; // sum of squares for just primary axis (XYZ usually)
@@ -1698,6 +1742,35 @@ bool Robot::within_soft_limits(const float transformed_target[], Gcode *gcode)
     return true;
 }
 
+// the zones are for the tool tip, the lowest point of the spindle; a probe stops on contact, so it may enter
+bool Robot::clear_of_keepout(const float from[], const float to[], Gcode *gcode)
+{
+    if(!keepout_on || !is_homed_all_axes() || THEKERNEL->is_zprobing()) return true;
+
+    // the tool length is measured against the reference tool the zones were probed with
+    float tlo= std::get<Z_AXIS>(tool_offset);
+    float tip_from[3]{from[X_AXIS], from[Y_AXIS], from[Z_AXIS] - tlo};
+    float tip_to[3]{to[X_AXIS], to[Y_AXIS], to[Z_AXIS] - tlo};
+    bool not_lower= tip_to[X_AXIS] == tip_from[X_AXIS] && tip_to[Y_AXIS] == tip_from[Y_AXIS] && tip_to[Z_AXIS] >= tip_from[Z_AXIS];
+
+    for (uint8_t n = 0; n < k_keepout_zones; n++) {
+        const KeepOut &z= keepout[n];
+        if(z.unbounded()) continue;
+        if(z.contains(tip_from) ? not_lower : !z.crossed(tip_from, tip_to)) continue;
+
+        char msg[32];
+        snprintf(msg, sizeof(msg), "G22 zone %u in the way", n + 1);
+        if(gcode == nullptr) {
+            printk("error:%s\n", msg);
+        } else {
+            gcode->is_error= true;
+            gcode->txt_after_ok= msg;
+        }
+        return false;
+    }
+    return true;
+}
+
 // Append a move to the queue ( cutting it into segments if needed )
 bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s)
 {
@@ -1706,6 +1779,7 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s)
     memcpy(transformed_target, target, n_motors*sizeof(float));
     if(compensationTransform) compensationTransform(transformed_target, false, false);
     if(!within_soft_limits(transformed_target, gcode)) return false;
+    if(!clear_of_keepout(compensated_machine_position, transformed_target, gcode)) return false;
 
     // catch negative or zero feed rates and return the same error as GRBL does
     if(rate_mm_s <= 0.0F) {

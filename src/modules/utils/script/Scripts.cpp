@@ -114,6 +114,7 @@ bool Scripts::run(const char *sub, const float *args, unsigned nargs, StreamOutp
 void Scripts::finish()
 {
     THEROBOT.pop_state();
+    THEROBOT.set_keepout(true);
     THEKERNEL->set_atc_state(ATC_NONE);
     reply= nullptr;
 }

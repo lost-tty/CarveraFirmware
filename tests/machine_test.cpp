@@ -90,18 +90,18 @@ static std::string run(Machine &m, const char *sub, std::vector<float> args, std
 static std::string drop(int tool) {
     char b[300];
     int y = -234 + (tool == 0 ? 210 : (6 - tool) * 30);
-    snprintf(b, sizeof(b), "M497.1|G53 G0 Z-3|G53 G0 X-3 Y%d|M492.2|G53 G0 X-3 Y%d|G53 G1 Z-95 F500|G53 G1 Z-105 F60|M490.2|G53 G0 Z-20|M493.2 T-1|M492.1", y, y);
+    snprintf(b, sizeof(b), "M497.1|G23|G53 G0 Z-3|G53 G0 X-3 Y%d|M492.2|G53 G0 X-3 Y%d|G53 G1 Z-95 F500|G53 G1 Z-105 F60|M490.2|G53 G0 Z-20|M493.2 T-1|M492.1", y, y);
     return b;
 }
 static std::string pick(int tool, bool from_clearance) {
     char b[300];
     int y = -234 + (tool == 0 ? 210 : (6 - tool) * 30);
-    snprintf(b, sizeof(b), "M497.2|G53 G0 Z%d|G53 G0 X-3 Y%d|M492.1|M490.2|G53 G0 X-3 Y%d|G53 G1 Z-95 F500|G53 G1 Z-105 F60|M490.1|G53 G0 Z-10|M492.2", from_clearance ? -3 : -20, y, y);
+    snprintf(b, sizeof(b), "M497.2|G23|G53 G0 Z%d|G53 G0 X-3 Y%d|M492.1|M490.2|G53 G0 X-3 Y%d|G53 G1 Z-95 F500|G53 G1 Z-105 F60|M490.1|G53 G0 Z-10|M492.2", from_clearance ? -3 : -20, y, y);
     return b;
 }
 static std::string cali(int lift_z, bool probe, bool laser = false) {
     char b[300];
-    snprintf(b, sizeof(b), "M497.3|%sG53 G0 Z%d|G53 G0 X-3 Y-54|G38.6 Z-145 F300|G91 G0 Z2|G38.6 Z-3 F60|M493.1|G53 G0 Z-10%s", laser ? "M490.1|" : "", lift_z, probe ? "|M492.3" : "");
+    snprintf(b, sizeof(b), "M497.3|G23|%sG53 G0 Z%d|G53 G0 X-3 Y-54|G38.6 Z-145 F300|G91 G0 Z2|G38.6 Z-3 F60|M493.1|G53 G0 Z-10%s", laser ? "M490.1|" : "", lift_z, probe ? "|M492.3" : "");
     return b;
 }
 static const std::string home = "G53 G0 Z-3|G53 G0 X100 Y50";

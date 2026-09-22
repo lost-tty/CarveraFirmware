@@ -1,6 +1,7 @@
 (put tool #1 back into its slot)
 o<atc_drop> sub
   M497.1
+  G23
   o<slot_xy> call [#1]
   G53 G0 Z#<_clearance_z>
   G53 G0 X#<_slot_x> Y#<_slot_y>

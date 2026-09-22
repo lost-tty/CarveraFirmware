@@ -1,6 +1,7 @@
 (take tool #1 from its slot; #2 = 1 when the spindle comes from the clearance height, not from a drop)
 o<atc_pick> sub
   M497.2
+  G23
   o<slot_xy> call [#1]
   o1 if [#2 NE 0]
     G53 G0 Z#<_clearance_z>

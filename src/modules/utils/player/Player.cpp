@@ -303,6 +303,7 @@ void Player::abort()
     if(!finished) return;
     gcode_dispatch.run_line("M5", &StreamOutput::NullStream);
     gcode_dispatch.run_line("M9", &StreamOutput::NullStream);
+    THEROBOT.set_keepout(true);
 }
 
 void Player::abort_command( string parameters, StreamOutput *stream )

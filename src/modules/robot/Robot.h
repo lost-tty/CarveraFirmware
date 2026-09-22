@@ -18,6 +18,7 @@ using std::string;
 #include "libs/Module.h"
 #include "ActuatorCoordinates.h"
 #include "libs/Watch.h"
+#include "libs/KeepOut.h"
 #include "nuts_bolts.h"
 
 class Gcode;
@@ -78,6 +79,8 @@ class Robot : public Module {
         uint8_t get_plane_code() const;                                  // G17, G18 or G19
         uint8_t get_units_code() const { return inch_mode ? 20 : 21; }
         uint8_t get_distance_code() const { return absolute_mode ? 90 : 91; }
+        uint8_t get_stroke_code() const { return keepout_on ? 22 : 23; }
+        void set_keepout(bool on) { keepout_on= on; }
         wcs_t get_wcs_offset(uint8_t wcs) const { return wcs_offsets[wcs < MAX_WCS ? wcs : 0]; }
         wcs_t get_g92_offset() const { return g92_offset; }
         wcs_t get_tool_offset() const { return tool_offset; }
@@ -163,6 +166,8 @@ class Robot : public Module {
 
         void load_config();
         bool within_soft_limits(const float transformed_target[], Gcode *gcode);
+        bool clear_of_keepout(const float from[], const float to[], Gcode *gcode);
+        void load_keepout_config();
         bool append_milestone(const float target[], float rate_mm_s, Gcode *gcode);
         bool append_line( Gcode* gcode, const float target[], float rate_mm_s);
         bool append_arc( Gcode* gcode, const float target[], const float offset[], float radius, bool is_clockwise );
@@ -221,6 +226,9 @@ class Robot : public Module {
         float max_speed;                                     // Setting : maximum feedrate in mm/s as specified by F parameter
 
         float soft_endstop_min[3], soft_endstop_max[3];
+        static const uint8_t k_keepout_zones= 4;
+        KeepOut keepout[k_keepout_zones];
+        bool keepout_on= true;
 
         uint8_t n_motors;                                    //count of the motors/axis registered
 

@@ -24,7 +24,7 @@
 // RS274 execution order of the commands in one block
 // Smoothie-specific M codes (OTHER_M) keep their traditional place after the motion
 enum Rank : uint8_t { FEED_MODE, TOOL_CHANGE, SPINDLE, COOLANT, DWELL, PLANE, UNITS, CUTTER_COMP,
-                      TOOL_OFFSET, WCS, PATH, DISTANCE, RETRACT, NON_MODAL, MOTION, OTHER_M, STOP };
+                      TOOL_OFFSET, WCS, PATH, STROKE, DISTANCE, RETRACT, NON_MODAL, MOTION, OTHER_M, STOP };
 
 enum Flag : uint8_t {
     AXIS_WORDS = 1,   // takes the axis words itself, so it cannot share a block with a motion word
@@ -47,6 +47,8 @@ static Class classify(const gcode::Word &w)
             case 10: return {0, NON_MODAL, AXIS_WORDS};
             case 17: case 18: case 19: return {2, PLANE, 0};
             case 20: case 21: return {6, UNITS, 0};
+            case 22: return {16, STROKE, AXIS_WORDS};
+            case 23: return {16, STROKE, 0};
             case 28: return {0, NON_MODAL, AXIS_WORDS};
             case 30: return {0, NON_MODAL, uint8_t(AXIS_WORDS | NEEDS_HOMED)};
             case 31: case 32: return {0, NON_MODAL, AXIS_WORDS};
@@ -254,7 +256,7 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
         groups|= 1u << c.group;
         if(c.rank == MOTION) b->motion= true;
         if(c.flags & AXIS_WORDS) b->axis_code= true;
-        if(!is_modal_setting(c)) b->settings_only= false;
+        if(!is_modal_setting(c) || (c.flags & AXIS_WORDS)) b->settings_only= false;
         size_t pos= order.size();
         while(pos > 0 && (order[pos - 1].block > block_of[i] || (order[pos - 1].block == block_of[i] && order[pos - 1].rank > c.rank))) pos--;
         order.insert(order.begin() + pos, Cmd{i, block_of[i], c.rank});
@@ -276,7 +278,7 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
         const gcode::Word &w= all[c.index];
         Blk &b= blocks[c.block];
         if(c.rank == MOTION && b.mcs && w.value > 1) return fail(stream, "G53 needs G0 or G1");
-        if(c.rank == MOTION && b.axis_code) return fail(stream, "G10/G28/G30/G92 cannot share a line with a motion word");
+        if(c.rank == MOTION && b.axis_code) return fail(stream, "G10/G22/G28/G30/G92 cannot share a line with a motion word");
     }
     for (size_t i= 0; i < words.size(); i++) {
         const gcode::Word &w= words[i];
