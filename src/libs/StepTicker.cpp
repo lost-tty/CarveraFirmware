@@ -123,8 +123,60 @@ void StepTicker::handle_finish (void)
 }
 
 // step clock
+void StepTicker::set_limits(const Limit *l, uint8_t count, uint16_t hyst)
+{
+    if(count > k_max_actuators * 2) count= k_max_actuators * 2;
+    for (uint8_t i = 0; i < count; i++) limits[i]= l[i];
+    limit_hysteresis= hyst;
+    n_limits= count;
+    limit_count= 0;
+}
+
+// stops dead rather than ramping: the travel left past the switch is unknown
+void StepTicker::check_limits()
+{
+    bool closing= false;
+    for (uint8_t i = 0; i < n_limits; i++) {
+        const Limit &l= limits[i];
+        if(!motor[l.motor]->is_moving() || !l.pin.get()) continue;
+        if(l.at_end && motor[l.motor]->which_direction() == l.at_max) continue;
+        closing= true;
+        break;
+    }
+
+    if(!closing) {
+        limit_count= 0;
+        return;
+    }
+    if(++limit_count < limit_hysteresis) return;
+
+    for (uint8_t m = 0; m < num_motors; m++) motor[m]->stop_moving();
+    limit_tripped= true;
+}
+
+// at_steps is taken on the first asserted tick, so the hysteresis does not bias it
+void StepTicker::check_watch()
+{
+    if(!watch->inputs.any()) {
+        watch->count= 0;
+        return;
+    }
+
+    if(watch->count == 0) {
+        for (uint8_t m = 0; m < num_motors; m++) watch->at_steps[m]= motor[m]->get_current_step();
+    }
+
+    if(++watch->count < watch->hysteresis) return;
+
+    for (uint8_t m = 0; m < num_motors; m++) {
+        if(watch->motors & (1 << m)) motor[m]->stop_moving();
+    }
+    watch->hit= true;
+}
+
 void StepTicker::step_tick (void)
 {
+
     //SET_STEPTICKER_DEBUG_PIN(running ? 1 : 0);
 
     // if nothing has been setup we ignore the ticks
@@ -144,6 +196,9 @@ void StepTicker::step_tick (void)
         current_block= nullptr;
         return;
     }
+
+    if(watch != nullptr && !watch->hit) check_watch();
+    if(n_limits != 0 && !limit_tripped) check_limits();
 
     bool still_moving= false;
     bool accel_end= current_tick == current_block->accelerate_until && current_block->accelerate_until != 0;

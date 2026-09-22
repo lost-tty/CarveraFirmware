@@ -390,6 +390,7 @@ bool  Robot::any_motor_moving() const
 
 bool  Robot::motor_direction(uint8_t i) const     { return i < n_motors && actuators[i]->which_direction(); }
 float Robot::motor_position(uint8_t i) const      { return i < n_motors ? actuators[i]->get_current_position() : 0.0F; }
+int32_t Robot::motor_step(uint8_t i) const        { return i < n_motors ? actuators[i]->get_current_step() : 0; }
 float Robot::motor_steps_per_mm(uint8_t i) const  { return i < n_motors ? actuators[i]->get_steps_per_mm() : 0.0F; }
 float Robot::motor_max_rate(uint8_t i) const      { return i < n_motors ? actuators[i]->get_max_rate() : 0.0F; }
 
@@ -1661,6 +1662,17 @@ bool Robot::delta_move(const float *delta, float rate_mm_s, uint8_t naxis)
 }
 
 // plan the move and return once the machine stands still, so the caller can read or switch hardware
+bool Robot::delta_move_watch(const float *delta, float rate_mm_s, uint8_t naxis, Watch &w)
+{
+    THECONVEYOR.wait_for_idle();   // the watch must not see a block queued before it
+    w.arm();
+    THEKERNEL->step_ticker.set_watch(&w);
+    bool ok= delta_move(delta, rate_mm_s, naxis);
+    if(ok) THECONVEYOR.wait_for_idle();
+    THEKERNEL->step_ticker.set_watch(nullptr);
+    return ok && !THEKERNEL->is_halted();
+}
+
 bool Robot::delta_move_sync(const float *delta, float rate_mm_s, uint8_t naxis)
 {
     if(!delta_move(delta, rate_mm_s, naxis)) return false;

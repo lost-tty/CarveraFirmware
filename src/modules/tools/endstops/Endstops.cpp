@@ -54,7 +54,7 @@ enum DEFNS { MIN_PIN, MAX_PIN, MAX_TRAVEL, FAST_RATE, SLOW_RATE, RETRACT, DIRECT
 
 // global config settings
 
-#define endstop_debounce_ms_checksum     CHECKSUM("endstop_debounce_ms")
+#define endstop_hysteresis_mm_checksum   CHECKSUM("endstop_hysteresis_mm")
 
 #define home_z_first_checksum            CHECKSUM("home_z_first")
 #define homing_order_checksum            CHECKSUM("homing_order")
@@ -185,9 +185,10 @@ bool Endstops::load_old_config()
             if((hinfo.home_direction && j == MIN_PIN) || (!hinfo.home_direction && j == MAX_PIN)) hinfo.pin_info= info;
 
             // init struct
-            info->debounce = 0;
             info->axis = 'X' + i;
             info->axis_index = i;
+            info->at_end = true;
+            info->at_max = (j == MAX_PIN);
 
             // limits enabled
             info->limit_enable = THEKERNEL->config->value(checksums[i][LIMIT])->by_default(false)->as_bool();
@@ -203,6 +204,8 @@ bool Endstops::load_old_config()
     endstops.shrink_to_fit();
 
     get_global_configs();
+    for(auto& a : motor_alarms) alarm_pins.add(a->pin);
+    arm_limits();
 
     return true;
 }
@@ -268,12 +271,16 @@ bool Endstops::load_config()
         if(i > max_index) max_index= i;
 
         // init pin struct
-        pin_info->debounce= 0;
         pin_info->axis= toupper(axis[0]);
         pin_info->axis_index= i;
 
         // are limits enabled
         pin_info->limit_enable= THEKERNEL->config->value(endstop_checksum, cs, limit_checksum)->by_default(false)->as_bool();
+
+        // a limit with no homing direction sits somewhere in the middle, and is reached from either side
+        string dir= THEKERNEL->config->value(endstop_checksum, cs, direction_checksum)->by_default("none")->as_string();
+        pin_info->at_end= (dir != "none");
+        pin_info->at_max= (dir == "home_to_max");
 
         // enter into endstop array
         endstops.push_back(pin_info);
@@ -349,13 +356,15 @@ bool Endstops::load_config()
 
     // sets some endstop global configs applicable to all endstops
     get_global_configs();
+    for(auto& a : motor_alarms) alarm_pins.add(a->pin);
+    arm_limits();
 
     return true;
 }
 
 void Endstops::get_global_configs()
 {
-    this->debounce_ms= THEKERNEL->config->value(endstop_debounce_ms_checksum)->by_default(1)->as_number();
+    this->hysteresis_mm= THEKERNEL->config->value(endstop_hysteresis_mm_checksum)->by_default(0.1f)->as_number();
 
 
     this->home_z_first= THEKERNEL->config->value(home_z_first_checksum)->by_default(true)->as_bool();
@@ -393,10 +402,9 @@ void Endstops::back_off_home(axis_bitmap_t axis)
     this->status = BACK_OFF_HOME;
 
     {
-        // cartesians move every triggered axis off its endstop at once
         for( auto& e : homing_axis) {
             if(!axis[e.axis_index]) continue; // only for axes we asked to move
-            if(e.pin_info == nullptr || !e.pin_info->triggered) continue;
+            if(e.pin_info == nullptr) continue;
             delta[e.axis_index]= e.retract * (e.home_direction ? 1 : -1);
             moving= true;
             // select slowest of them all
@@ -418,50 +426,39 @@ void Endstops::after_home(axis_bitmap_t axis)
 
 // the switch an axis homes to is expected to be pressed for the whole cycle, including the
 // retract off it; any other switch is a crash
-bool Endstops::homing_toward(const endstop_info_t *e) const
-{
-    if(status == NOT_HOMING || status == LIMIT_TRIGGERED) return false;
-    uint8_t m= e->axis_index;
-    if(m >= homing_axis.size()) return false;
-    return axis_to_home[m] && homing_axis[m].pin_info == e;
-}
-
 void Endstops::service()
 {
+    check_motor_alarms();
+
     if(status == LIMIT_TRIGGERED) {
         for(auto& i : endstops) {
             if(i->limit_enable && i->pin.get()) { limit_clear_ms= 0; return; }
         }
         // every limit has to stay released, not just the one that tripped
-        if(limit_clear_ms++ >= LIMIT_RELEASE_MS) status= NOT_HOMING;
+        if(limit_clear_ms++ >= LIMIT_RELEASE_MS) {
+            status= NOT_HOMING;
+            THEKERNEL->step_ticker.clear_limit();
+        }
         return;
     }
 
     if(THEKERNEL->is_halted()) return;
+    if(!THEKERNEL->step_ticker.limit_hit()) return;
 
+    status= LIMIT_TRIGGERED;
     for(auto& i : endstops) {
-        if(!i->limit_enable && !homing_toward(i)) continue;
-
-        if(!i->pin.get()) { i->debounce= 0; continue; }   // the press ends at the pin, not the motor
-        if(i->debounce > debounce_ms) continue;           // already acted on this one
-        if(!THEROBOT.motor_is_moving(i->axis_index)) continue;
-        if(++i->debounce < debounce_ms) continue;
-        i->debounce= debounce_ms + 1;
-
-        THEROBOT.stop_motor(i->axis_index);
-
-        if(homing_toward(i)) {
-            if(status == MOVING_TO_ENDSTOP_FAST || status == MOVING_TO_ENDSTOP_SLOW) i->triggered= true;
-        } else {
-            status= LIMIT_TRIGGERED;
-            char msg[32];
-            snprintf(msg, sizeof(msg), "hard limit %c%c", i->axis, THEROBOT.motor_direction(i->axis_index) ? '-' : '+');
-            THEKERNEL->halt(HARD_LIMIT, msg);
-            return;
-        }
+        if(!i->limit_enable || !i->pin.get()) continue;
+        char msg[32];
+        snprintf(msg, sizeof(msg), "hard limit %c%c", i->axis, THEROBOT.motor_direction(i->axis_index) ? '-' : '+');
+        THEKERNEL->halt(HARD_LIMIT, msg);
+        return;
     }
+    THEKERNEL->halt(HARD_LIMIT, "hard limit");
+}
 
-    // a driver fault is a latched logic line, nothing to debounce
+void Endstops::check_motor_alarms()
+{
+    if(THEKERNEL->is_halted() || !alarm_pins.any()) return;
     for(auto& i : motor_alarms) {
         if(i->pin.get()) {
             char msg[32];
@@ -472,147 +469,96 @@ void Endstops::service()
     }
 }
 
-void Endstops::home_xy()
+void Endstops::arm_limits(const endstop_info_t *approaching)
 {
-    if(axis_to_home[X_AXIS] && axis_to_home[Y_AXIS]) {
-        // Home XY first so as not to slow them down by homing Z at the same time
-        float delta[3] {homing_axis[X_AXIS].max_travel, homing_axis[Y_AXIS].max_travel, 0};
-        if(homing_axis[X_AXIS].home_direction) delta[X_AXIS]= -delta[X_AXIS];
-        if(homing_axis[Y_AXIS].home_direction) delta[Y_AXIS]= -delta[Y_AXIS];
-        float feed_rate = std::min(homing_axis[X_AXIS].fast_rate, homing_axis[Y_AXIS].fast_rate);
-        THEROBOT.delta_move(delta, feed_rate, 3);
-
-    } else if(axis_to_home[X_AXIS]) {
-        // now home X only
-        float delta[3] {homing_axis[X_AXIS].max_travel, 0, 0};
-        if(homing_axis[X_AXIS].home_direction) delta[X_AXIS]= -delta[X_AXIS];
-        THEROBOT.delta_move(delta, homing_axis[X_AXIS].fast_rate, 3);
-
-    } else if(axis_to_home[Y_AXIS]) {
-        // now home Y only
-        float delta[3] {0,  homing_axis[Y_AXIS].max_travel, 0};
-        if(homing_axis[Y_AXIS].home_direction) delta[Y_AXIS]= -delta[Y_AXIS];
-        THEROBOT.delta_move(delta, homing_axis[Y_AXIS].fast_rate, 3);
+    StepTicker::Limit l[k_max_actuators * 2];
+    uint8_t n= 0;
+    uint16_t steps= 0;
+    for(auto& e : endstops) {
+        if(!e->limit_enable || e == approaching) continue;
+        if(n >= k_max_actuators * 2) break;
+        l[n++]= StepTicker::Limit{e->pin, e->axis_index, e->at_end, e->at_max};
+        uint16_t s= hysteresis_steps(e->axis_index);
+        if(s > steps) steps= s;
     }
+    THEKERNEL->step_ticker.set_limits(l, n, steps == 0 ? 1 : steps);
+}
 
-    // Wait for axis to have homed
-    THECONVEYOR.wait_for_idle();
+uint16_t Endstops::hysteresis_steps(uint8_t axis) const
+{
+    float steps= hysteresis_mm * THEROBOT.motor_steps_per_mm(axis);
+    return steps < 1 ? 1 : (uint16_t)steps;
+}
+
+bool Endstops::approach(uint8_t axis, float distance, float rate)
+{
+    homing_info_t &h= homing_axis[axis];
+    if(h.pin_info == nullptr) return false;
+
+    approach_watch.inputs.clear();
+    approach_watch.inputs.add(h.pin_info->pin);
+    approach_watch.motors= 1 << axis;
+    approach_watch.hysteresis= hysteresis_steps(axis);
+
+    arm_limits(h.pin_info);
+
+    float delta[k_max_actuators]{0};
+    delta[axis]= h.home_direction ? -distance : distance;
+
+    bool ok= THEROBOT.delta_move_watch(delta, rate, homing_axis.size(), approach_watch);
+    bool hit= approach_watch.hit;
+    approach_watch.inputs.clear();
+    arm_limits();
+    return ok && hit;
+}
+
+// the fast pass finds the switch, the slow pass sets the position
+bool Endstops::home_axis(uint8_t axis)
+{
+    homing_info_t &h= homing_axis[axis];
+
+    if(!approach(axis, h.max_travel, h.fast_rate)) return false;
+
+    float delta[k_max_actuators]{0};
+    delta[axis]= h.home_direction ? h.retract : -h.retract;
+    if(!THEROBOT.delta_move_sync(delta, h.slow_rate, homing_axis.size())) return false;
+
+    return approach(axis, h.retract * 2, h.slow_rate);
 }
 
 void Endstops::home(axis_bitmap_t a)
 {
-    // reset debounce counts for all endstops
-    for(auto& e : endstops) {
-       e->debounce= 0;
-       e->triggered= false;
-    }
-
     this->axis_to_home= a;
-
-    // Start moving the axes to the origin
     this->status = MOVING_TO_ENDSTOP_FAST;
 
     Robot::NoSegmentation no_segmentation;   // homing won't work with it enabled
 
-    if(!home_z_first) home_xy();
-
-    if(axis_to_home[Z_AXIS]) {
-        // now home z
-        float delta[3] {0, 0, homing_axis[Z_AXIS].max_travel}; // we go the max z
-        if(homing_axis[Z_AXIS].home_direction) delta[Z_AXIS]= -delta[Z_AXIS];
-        THEROBOT.delta_move(delta, homing_axis[Z_AXIS].fast_rate, 3);
-        // wait for Z
-        THECONVEYOR.wait_for_idle();
+    uint8_t order[axis_bitmap_t().size()];
+    uint8_t n= 0;
+    if(homing_order != 0) {
+        for (uint32_t m = homing_order; m != 0; m >>= 3) {
+            uint32_t a= (m & 0x07) - 1;
+            if(a < homing_axis.size() && axis_to_home[a]) order[n++]= a;
+        }
+    } else {
+        // Z first by default: the spindle has to be clear of the work before XY move
+        if(home_z_first && axis_to_home[Z_AXIS]) order[n++]= Z_AXIS;
+        if(axis_to_home[X_AXIS]) order[n++]= X_AXIS;
+        if(axis_to_home[Y_AXIS]) order[n++]= Y_AXIS;
+        if(!home_z_first && axis_to_home[Z_AXIS]) order[n++]= Z_AXIS;
+        for (size_t i = A_AXIS; i < homing_axis.size(); ++i) if(axis_to_home[i]) order[n++]= i;
     }
 
-    if(home_z_first) home_xy();
-
-    // potentially home A B and C individually
-    if(homing_axis.size() > 3){
-        for (size_t i = A_AXIS; i < homing_axis.size(); ++i) {
-            if(axis_to_home[i]) {
-                // now home A B or C
-                float delta[i+1];
-                for (size_t j = 0; j <= i; ++j) delta[j]= 0;
-                delta[i]= homing_axis[i].max_travel; // we go the max
-                if(homing_axis[i].home_direction) delta[i]= -delta[i];
-                THEROBOT.delta_move(delta, homing_axis[i].fast_rate, i+1);
-                // wait for it
-                THECONVEYOR.wait_for_idle();
-            }
+    for (uint8_t i = 0; i < n; ++i) {
+        if(!home_axis(order[i])) {
+            THEROBOT.reset_position_from_current_actuator_position();
+            this->status = NOT_HOMING;
+            if(!THEKERNEL->is_halted()) THEKERNEL->halt(HOME_FAIL, "homing failed");
+            return;
         }
     }
 
-    // check that the endstops were hit and it did not stop short for some reason
-    // if the endstop is not triggered then enter ALARM state
-    // with deltas we check all three axis were triggered, but at least one of XYZ must be set to home
-    if(axis_to_home[X_AXIS] || axis_to_home[Y_AXIS] || axis_to_home[Z_AXIS]) {
-        for (size_t i = X_AXIS; i <= Z_AXIS; ++i) {
-            if(axis_to_home[i] && !homing_axis[i].pin_info->triggered) {
-                this->status = NOT_HOMING;
-                THEKERNEL->halt(HOME_FAIL, "homing failed");
-                return;
-            }
-        }
-    }
-
-    // also check ABC
-    if(homing_axis.size() > 3){
-        for (size_t i = A_AXIS; i < homing_axis.size(); ++i) {
-            if(axis_to_home[i] && !homing_axis[i].pin_info->triggered) {
-                this->status = NOT_HOMING;
-                THEKERNEL->halt(HOME_FAIL, "homing failed");
-                return;
-            }
-        }
-    }
-
-    // we did not complete movement the full distance if we hit the endstops
-    // TODO Maybe only reset axis involved in the homing cycle
     THEROBOT.reset_position_from_current_actuator_position();
-
-    // Move back a small distance for all homing axis
-    this->status = MOVING_BACK;
-    float delta[homing_axis.size()];
-    for (size_t i = 0; i < homing_axis.size(); ++i) delta[i]= 0;
-
-    // use minimum feed rate of all axes that are being homed (sub optimal, but necessary)
-    float feed_rate= homing_axis[X_AXIS].slow_rate;
-    for (auto& i : homing_axis) {
-        int c= i.axis_index;
-        if(axis_to_home[c]) {
-            delta[c]= i.retract;
-            if(!i.home_direction) delta[c]= -delta[c];
-            feed_rate= std::min(i.slow_rate, feed_rate);
-        }
-    }
-
-    THEROBOT.delta_move(delta, feed_rate, homing_axis.size());
-    // wait until finished
-    THECONVEYOR.wait_for_idle();
-
-    // the switch may still be held from the fast pass, so re-arm before approaching it again
-    for(auto& e : endstops) { e->debounce= 0; e->triggered= false; }
-
-    // Start moving the axes towards the endstops slowly
-    this->status = MOVING_TO_ENDSTOP_SLOW;
-    for (auto& i : homing_axis) {
-        int c= i.axis_index;
-        if(axis_to_home[c]) {
-            delta[c]= i.retract*2; // move further than we moved off to make sure we hit it cleanly
-            if(i.home_direction) delta[c]= -delta[c];
-        }else{
-            delta[c]= 0;
-        }
-    }
-    THEROBOT.delta_move(delta, feed_rate, homing_axis.size());
-    // wait until finished
-    THECONVEYOR.wait_for_idle();
-
-    // we did not complete movement the full distance if we hit the endstops
-    // TODO Maybe only reset axis involved in the homing cycle
-    THEROBOT.reset_position_from_current_actuator_position();
-
     this->status = NOT_HOMING;
 }
 

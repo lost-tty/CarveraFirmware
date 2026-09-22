@@ -10,6 +10,7 @@
 
 #include "Module.h"
 #include "Pin.h"
+#include "libs/Watch.h"
 
 #include <vector>
 
@@ -49,9 +50,6 @@ private:
     void config_load();
     void probe_XYZ(Gcode *gc);
     void calibrate_Z(Gcode *gc);
-    void probe_pin_irq_rise();
-    void probe_pin_irq_fall();
-    void probe_pin_irq(bool);
     void calibrate_pin_irq();
 
     float slow_feedrate;
@@ -67,9 +65,8 @@ private:
 
     uint32_t probe_trigger_time;
 
-    volatile bool probing;
     volatile bool calibrating;
-    volatile bool probe_detected;
+    Watch probe_watch;
     volatile bool calibrate_detected;
 
     struct {

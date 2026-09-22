@@ -10,6 +10,8 @@
 #include "libs/Module.h"
 #include "Pin.h"
 #include "SoftTimer.h"
+#include "libs/PinGroup.h"
+#include "libs/Watch.h"
 
 #include <bitset>
 #include <array>
@@ -40,18 +42,21 @@ class Endstops : public Module{
         void get_global_configs();
         using axis_bitmap_t = std::bitset<6>;
         void home(axis_bitmap_t a);
-        void home_xy();
         void back_off_home(axis_bitmap_t axis);
         void after_home(axis_bitmap_t axis);
         void process_home_command(Gcode* gcode);
         void set_homing_offset(Gcode* gcode);
         void service();
+        void check_motor_alarms();
+        bool approach(uint8_t axis, float distance, float rate);
+        bool home_axis(uint8_t axis);
+        uint16_t hysteresis_steps(uint8_t axis) const;
 
         SoftTimer service_timer;
 
         // global settings
         float g28_position[3]{0}; // save G28 (in grbl mode)
-        uint32_t  debounce_ms;
+        float     hysteresis_mm;
         uint32_t  limit_clear_ms{0};
         static const uint32_t LIMIT_RELEASE_MS = 100;
         axis_bitmap_t axis_to_home;
@@ -62,13 +67,11 @@ class Endstops : public Module{
         // per endstop settings
         using endstop_info_t = struct {
             Pin pin;
-            uint16_t debounce;      // the service counts here, home() reads triggered
-            bool triggered;
-            struct {
-                char axis:8; // one of XYZABC
-                uint8_t axis_index:3;
-                bool limit_enable:1;
-            };
+            char     axis{0};          // one of XYZABC
+            uint8_t  axis_index{0};
+            bool     limit_enable{false};
+            bool     at_end{false};
+            bool     at_max{false};
         };
 
         // motor alarm settings
@@ -80,7 +83,8 @@ class Endstops : public Module{
             };
         };
 
-        bool homing_toward(const endstop_info_t *e) const;
+
+        void arm_limits(const endstop_info_t *approaching = nullptr);
 
         using homing_info_t = struct {
             float homing_position;
@@ -109,10 +113,14 @@ class Endstops : public Module{
         // axis that can be homed, 0,1,2 always there and optionally 3 is A, 4 is B, 5 is C
         std::vector<homing_info_t> homing_axis;
 
+        // its own byte: the service writes it from the timer task while homing drives the rest
+        volatile char status{0};   // NOT_HOMING
+        PinGroup alarm_pins;
+        Watch    approach_watch;   // the isr holds a pointer to this, so it outlives the move
+
         // Global state
         struct {
             uint32_t homing_order:18;
-            volatile char status:3;
             bool home_z_first:1;
         };
 };

@@ -16,6 +16,8 @@
 #include <atomic>
 
 #include "ActuatorCoordinates.h"
+#include "Watch.h"
+#include "Pin.h"
 #include "TSRingBuffer.h"
 
 class StepperMotor;
@@ -36,6 +38,13 @@ class StepTicker{
         const Block *get_current_block() const { return current_block; }
         float get_trapezoid_rate(int m) const { return STEPTICKER_FROMFP(state[m].steps_per_tick) * frequency; } // steps/sec now
 
+        void set_watch(Watch *w) { watch= w; }
+
+        struct Limit { Pin pin; uint8_t motor; bool at_end; bool at_max; };
+        void set_limits(const Limit *l, uint8_t count, uint16_t hyst);
+        bool limit_hit() const { return limit_tripped; }
+        void clear_limit() { limit_tripped= false; limit_count= 0; }
+
         void step_tick (void);
         void handle_finish (void);
         void start();
@@ -49,12 +58,20 @@ class StepTicker{
         static void _TIMER1_isr(void);
 
         bool start_next_block();
+        void check_watch();
+        void check_limits();
 
         float frequency;
         uint32_t period;
         std::array<StepperMotor*, k_max_actuators> motor;
         uint32_t unstep;
 
+        Watch *watch{nullptr};
+        Limit    limits[k_max_actuators * 2];
+        uint8_t  n_limits{0};
+        uint16_t limit_hysteresis{1};
+        uint16_t limit_count{0};
+        volatile bool limit_tripped{false};
         Block *current_block;
         uint32_t current_tick{0};
 

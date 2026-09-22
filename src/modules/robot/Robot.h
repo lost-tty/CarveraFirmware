@@ -17,6 +17,7 @@ using std::string;
 
 #include "libs/Module.h"
 #include "ActuatorCoordinates.h"
+#include "libs/Watch.h"
 #include "nuts_bolts.h"
 
 class Gcode;
@@ -83,6 +84,7 @@ class Robot : public Module {
         std::tuple<float, float, float, uint8_t> get_last_probe_position() const { return last_probe_position; }
         void set_last_probe_position(std::tuple<float, float, float, uint8_t> p) { last_probe_position = p; }
         bool delta_move(const float delta[], float rate_mm_s, uint8_t naxis);
+        bool delta_move_watch(const float delta[], float rate_mm_s, uint8_t naxis, Watch &w);
         bool delta_move_sync(const float delta[], float rate_mm_s, uint8_t naxis);
         void jog(const float delta[], float scale);
         bool move_to_machine_position(const float pos[3]);
@@ -97,6 +99,7 @@ class Robot : public Module {
         bool     any_motor_moving() const;
         bool     motor_direction(uint8_t i) const;
         float    motor_position(uint8_t i) const;
+        int32_t  motor_step(uint8_t i) const;
         float    motor_steps_per_mm(uint8_t i) const;
         float    motor_max_rate(uint8_t i) const;
         void     stop_motor(uint8_t i);

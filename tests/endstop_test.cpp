@@ -1,9 +1,8 @@
-// Endstops::service decides, for every configured switch, whether a trigger means "homed" or
-// "crash". The decision is transcribed from Endstops.cpp; the pins, the robot and the halt are
-// faked so a whole homing cycle can be driven tick by tick.
+// Endstops::service is only the limit check now: homing terminates its own moves through the step
+// ticker's watch, which watch_test covers. What is left is when a limit halts the machine and when
+// the latch clears.
 #include <cstdio>
 #include <cstdint>
-#include <string>
 #include <vector>
 
 static int fails = 0;
@@ -13,192 +12,197 @@ enum STATUS { NOT_HOMING, MOVING_TO_ENDSTOP_FAST, MOVING_TO_ENDSTOP_SLOW, MOVING
 enum { HARD_LIMIT = 21, MOTOR_ERROR_X = 30 };
 
 struct endstop_info_t {
-    bool     pressed;        // stands in for pin.get()
+    bool     pressed;
     uint16_t debounce;
-    bool     triggered;
     char     axis;
     uint8_t  axis_index;
     bool     limit_enable;
+    bool     at_end;
+    bool     at_max;
 };
 
-// ---- the world service() talks to -------------------------------------------------------------
 static std::vector<endstop_info_t *> endstops;
 static std::vector<endstop_info_t *> motor_alarms;
-static endstop_info_t *homing_pin[6];      // homing_axis[m].pin_info
-static bool     axis_to_home[6];
 static bool     motor_moving[6];
+static bool     motor_negative[6];
 static STATUS   status;
-static uint32_t debounce_ms;
 static uint32_t limit_clear_ms;
 static const uint32_t LIMIT_RELEASE_MS = 100;
 static bool     halted;
 static uint8_t  halt_reason;
-static std::vector<int> stopped;           // axes stop_motor was called on
+static std::vector<int> stopped;
 
 static void halt(uint8_t reason) { if(!halted) halt_reason = reason; halted = true; }
 static void stop_motor(uint8_t m) { stopped.push_back(m); motor_moving[m] = false; }
+static bool watched_any() { for(auto *e : endstops) if(e->pressed) return true;
+                            for(auto *a : motor_alarms) if(a->pressed) return true; return false; }
 
-// ---- Endstops::homing_toward, verbatim --------------------------------------------------------
-static bool homing_toward(const endstop_info_t *e)
+// Endstops::service, verbatim
+static bool limit_tripped;      // the step ticker's flag
+static uint16_t limit_count;
+static uint16_t limit_hysteresis;
+static endstop_info_t *suspended;   // the switch homing is approaching, if any
+
+// StepTicker::check_limits, verbatim
+static void check_limits()
 {
-    if(status == NOT_HOMING || status == LIMIT_TRIGGERED) return false;
-    uint8_t m = e->axis_index;
-    if(m >= 6) return false;
-    return axis_to_home[m] && homing_pin[m] == e;
+    if(limit_tripped) return;
+
+    bool closing = false;
+    for(auto& l : endstops) {
+        if(!l->limit_enable || l == suspended) continue;
+        if(!motor_moving[l->axis_index] || !l->pressed) continue;
+        if(l->at_end && motor_negative[l->axis_index] == l->at_max) continue;
+        closing = true;
+        break;
+    }
+
+    if(!closing) { limit_count = 0; return; }
+    if(++limit_count < limit_hysteresis) return;
+
+    for (int m = 0; m < 6; m++) motor_moving[m] = false;
+    limit_tripped = true;
 }
 
-// ---- Endstops::service, verbatim --------------------------------------------------------------
-static void service()
+static void check_motor_alarms()
 {
-    if(status == LIMIT_TRIGGERED) {
-        for(auto& i : endstops) {
-            if(i->limit_enable && i->pressed) { limit_clear_ms = 0; return; }
-        }
-        if(limit_clear_ms++ >= LIMIT_RELEASE_MS) status = NOT_HOMING;
-        return;
-    }
-
     if(halted) return;
-
-    for(auto& i : endstops) {
-        if(!i->limit_enable && !homing_toward(i)) continue;
-
-        if(!i->pressed) { i->debounce = 0; continue; }   // the press ends at the pin, not the motor
-        if(i->debounce > debounce_ms) continue;          // already acted on this one
-        if(!motor_moving[i->axis_index]) continue;
-        if(++i->debounce < debounce_ms) continue;
-        i->debounce= debounce_ms + 1;
-
-        stop_motor(i->axis_index);
-
-        if(homing_toward(i)) {
-            if(status == MOVING_TO_ENDSTOP_FAST || status == MOVING_TO_ENDSTOP_SLOW) i->triggered = true;
-        } else {
-            status = LIMIT_TRIGGERED;
-            halt(HARD_LIMIT);
-            return;
-        }
-    }
-
     for(auto& i : motor_alarms) {
         if(i->pressed) { halt(MOTOR_ERROR_X + i->axis_index); return; }
     }
 }
 
-// Endstops::back_off_home's selection rule: step off any switch we homed onto
-static bool backs_off(const endstop_info_t *e) { return e != nullptr && e->triggered; }
-
-// ---- fixture ----------------------------------------------------------------------------------
-static endstop_info_t *mk(char axis, uint8_t idx, bool limit)
+// Endstops::service, verbatim
+static void service()
 {
-    auto *e = new endstop_info_t{false, 0, false, axis, idx, limit};
+    check_motor_alarms();
+
+    if(status == LIMIT_TRIGGERED) {
+        for(auto& i : endstops) {
+            if(i->limit_enable && i->pressed) { limit_clear_ms = 0; return; }
+        }
+        if(limit_clear_ms++ >= LIMIT_RELEASE_MS) {
+            status = NOT_HOMING;
+            limit_tripped = false; limit_count = 0;
+        }
+        return;
+    }
+
+    if(halted) return;
+    if(!limit_tripped) return;
+
+    status = LIMIT_TRIGGERED;
+    halt(HARD_LIMIT);
+}
+
+static endstop_info_t *mk(char axis, uint8_t idx, bool limit, bool at_end = true, bool at_max = true)
+{
+    auto *e = new endstop_info_t{false, 0, axis, idx, limit, at_end, at_max};
     endstops.push_back(e);
     return e;
 }
 
-// X/Y/Z as shipped: each homes to its max switch and that same switch is a limit
 static endstop_info_t *xmax, *ymax, *zmax, *amax;
-static void reset(bool a_axis_limit = false)
+static void reset()
 {
     for(auto *e : endstops) delete e;
     for(auto *e : motor_alarms) delete e;
     endstops.clear(); motor_alarms.clear();
-    for(int i = 0; i < 6; i++) { homing_pin[i] = nullptr; axis_to_home[i] = false; motor_moving[i] = false; }
-    status = NOT_HOMING; debounce_ms = 1; limit_clear_ms = 0;
+    for(int i = 0; i < 6; i++) { motor_moving[i] = false; motor_negative[i] = false; }
+    status = NOT_HOMING; limit_clear_ms = 0;
     halted = false; halt_reason = 0; stopped.clear();
+    limit_tripped = false; limit_count = 0; limit_hysteresis = 1; suspended = nullptr;
 
-    xmax = mk('X', 0, true);  homing_pin[0] = xmax;
-    ymax = mk('Y', 1, true);  homing_pin[1] = ymax;
-    zmax = mk('Z', 2, true);  homing_pin[2] = zmax;
-    // a rotary axis: homes to a flag that is not a limit
-    amax = mk('A', 3, a_axis_limit); homing_pin[3] = amax;
+    xmax = mk('X', 0, true);
+    ymax = mk('Y', 1, true);
+    zmax = mk('Z', 2, true);
+    amax = mk('A', 3, false);   // a rotary flag: homes to it, never a limit
 }
 
-static void ticks(int n) { for(int i = 0; i < n; i++) service(); }
+static void ticks(int n) { for(int i = 0; i < n; i++) { check_limits(); service(); } }
 
 int main()
 {
-    // a switch must be held for debounce_ms consecutive ticks
-    reset();
-    status = MOVING_TO_ENDSTOP_FAST; axis_to_home[0] = true; motor_moving[0] = true;
-    debounce_ms = 3;
-    xmax->pressed = true;
-    ticks(2);
-    CHECK(stopped.empty());
-    CHECK(!xmax->triggered);
-    ticks(1);
-    CHECK(stopped.size() == 1 && stopped[0] == 0);
-    CHECK(xmax->triggered);
-
-    // a glitch that does not persist resets the count
-    reset();
-    status = MOVING_TO_ENDSTOP_FAST; axis_to_home[0] = true; motor_moving[0] = true;
-    debounce_ms = 3;
-    xmax->pressed = true;  ticks(2);
-    xmax->pressed = false; ticks(1);
-    xmax->pressed = true;  ticks(2);
-    CHECK(stopped.empty());
-
-    // homing X: hitting X's own switch is expected, not a limit
-    reset();
-    status = MOVING_TO_ENDSTOP_FAST; axis_to_home[0] = true; motor_moving[0] = true;
-    xmax->pressed = true;
-    ticks(2);
-    CHECK(xmax->triggered);
-    CHECK(!halted);
-
-    // the retract runs while still on the switch and must not halt
-    reset();
-    status = MOVING_TO_ENDSTOP_FAST; axis_to_home[0] = true; motor_moving[0] = true;
-    xmax->pressed = true; ticks(2);
-    CHECK(xmax->triggered);
-    status = MOVING_BACK; motor_moving[0] = true;     // retracting, switch still pressed
-    ticks(10);
-    CHECK(!halted);
-
-    // ... and the slow re-approach re-arms triggered (home() clears the latch between passes)
-    xmax->triggered = false; xmax->debounce = 0;
-    status = MOVING_TO_ENDSTOP_SLOW; motor_moving[0] = true;
-    ticks(2);
-    CHECK(xmax->triggered);
-    CHECK(!halted);
-
-    // homing X while Y hits its limit is a crash, not a home
-    reset();
-    status = MOVING_TO_ENDSTOP_FAST; axis_to_home[0] = true;
-    motor_moving[0] = true; motor_moving[1] = true;
-    ymax->pressed = true;
-    ticks(2);
-    CHECK(halted);
-    CHECK(halt_reason == HARD_LIMIT);
-    CHECK(status == LIMIT_TRIGGERED);
-    CHECK(!ymax->triggered);
-
-    // a limit during normal motion halts
+    // a limit closing on a moving axis halts
     reset();
     motor_moving[2] = true;
     zmax->pressed = true;
     ticks(2);
     CHECK(halted && halt_reason == HARD_LIMIT);
+    CHECK(status == LIMIT_TRIGGERED);
+    CHECK(!motor_moving[2]);
 
-    // a switch that is not pressed while the axis is still is ignored
+    // it must hold for limit_hysteresis consecutive ticks
+    reset();
+    limit_hysteresis = 3;
+    motor_moving[0] = true;
+    xmax->pressed = true;
+    ticks(2);
+    CHECK(!halted);
+    ticks(1);
+    CHECK(halted);
+
+    // a glitch that does not persist resets the count
+    reset();
+    limit_hysteresis = 3;
+    motor_moving[0] = true;
+    xmax->pressed = true;  ticks(2);
+    xmax->pressed = false; ticks(1);
+    xmax->pressed = true;  ticks(2);
+    CHECK(!halted);
+
+    // a switch under a still axis is not a limit
     reset();
     motor_moving[2] = false;
     zmax->pressed = true;
     ticks(50);
     CHECK(!halted);
 
-    // a rotary home flag with limit_enable false never halts, but does stop the axis when homing
+    // leaving a switch is how you get off it, so moving away never halts
+    reset();
+    motor_moving[0] = true; motor_negative[0] = true;   // max switch, moving away
+    xmax->pressed = true;
+    ticks(50);
+    CHECK(!halted);
+    motor_negative[0] = false;                          // now closing on it
+    ticks(2);
+    CHECK(halted && halt_reason == HARD_LIMIT);
+
+    // the switch being approached is the step ticker's business, not this one
+    reset();
+    status = MOVING_TO_ENDSTOP_FAST;
+    suspended = xmax;
+    motor_moving[0] = true;
+    xmax->pressed = true;
+    ticks(50);
+    CHECK(!halted);
+    CHECK(!limit_tripped);
+
+    // ... including the retract off that switch while it is still held
+    reset();
+    status = MOVING_BACK;
+    suspended = xmax;
+    motor_moving[0] = true;
+    xmax->pressed = true;
+    ticks(50);
+    CHECK(!halted);
+
+    // but another axis hitting its limit during homing still halts
+    reset();
+    status = MOVING_TO_ENDSTOP_FAST;
+    suspended = xmax;                 // X is the one being homed
+    motor_moving[1] = true;
+    ymax->pressed = true;               // Y should not be anywhere near its switch
+    ticks(2);
+    CHECK(halted && halt_reason == HARD_LIMIT);
+
+    // a switch with limit_enable false never halts, whatever it does
     reset();
     motor_moving[3] = true;
     amax->pressed = true;
     ticks(50);
-    CHECK(!halted);                       // not a limit
-    CHECK(stopped.empty());
-    status = MOVING_TO_ENDSTOP_FAST; axis_to_home[3] = true; motor_moving[3] = true;
-    ticks(2);
-    CHECK(stopped.size() == 1 && stopped[0] == 3);
-    CHECK(amax->triggered);
+    CHECK(!halted);
+    CHECK(!limit_tripped);
 
     // the latch clears only when every limit has been released for LIMIT_RELEASE_MS
     reset();
@@ -206,46 +210,69 @@ int main()
     xmax->pressed = true;
     ticks(2);
     CHECK(status == LIMIT_TRIGGERED);
-    zmax->pressed = true;                 // a second switch still held
+    zmax->pressed = true;
     xmax->pressed = false;
     ticks(LIMIT_RELEASE_MS + 10);
-    CHECK(status == LIMIT_TRIGGERED);     // must not clear while Z is pressed
+    CHECK(status == LIMIT_TRIGGERED);
     zmax->pressed = false;
     ticks(LIMIT_RELEASE_MS + 1);
     CHECK(status == NOT_HOMING);
 
     // one triggered switch does not re-stop the axis every tick
     reset();
-    status = MOVING_TO_ENDSTOP_FAST; axis_to_home[0] = true; motor_moving[0] = true;
+    motor_moving[0] = true;
     xmax->pressed = true;
     ticks(2);
-    CHECK(stopped.size() == 1);
-    motor_moving[0] = true;               // pretend it is still coasting
+    CHECK(limit_tripped);
+    halted = false;                      // as if unlocked, switch still held
+    status = NOT_HOMING;
+    motor_moving[0] = true;
     ticks(20);
-    CHECK(stopped.size() == 1);
+    CHECK(limit_tripped);
 
-    // a rotary flag is backed off after homing like any other axis, limit or not
+    // a motor alarm halts with the axis in the reason, with no debounce, and with every
+    // endstop clear: the fast path has to cover the alarm pins or a driver fault is invisible
     reset();
-    status = MOVING_TO_ENDSTOP_SLOW; axis_to_home[3] = true; motor_moving[3] = true;
-    amax->pressed = true;
-    ticks(2);
-    CHECK(amax->triggered);
-    CHECK(backs_off(amax));               // limit_enable is false here
-    CHECK(!backs_off(zmax));              // never homed, never triggered
-
-    // a motor alarm halts with the axis in the reason
-    reset();
-    auto *alarm = new endstop_info_t{true, 0, false, 'Y', 1, false};
+    auto *alarm = new endstop_info_t{true, 0, 'Y', 1, false, true, true};
     motor_alarms.push_back(alarm);
+    for(auto *e : endstops) e->pressed = false;
     ticks(1);
     CHECK(halted && halt_reason == MOTOR_ERROR_X + 1);
 
-    // nothing runs once halted
+    // the isr stops motors even while halted: a limit is a limit
     reset();
     halted = true;
     motor_moving[0] = true; xmax->pressed = true;
     ticks(50);
-    CHECK(stopped.empty());
+    CHECK(limit_tripped);
+    CHECK(!motor_moving[0]);
+
+    // an alarm is seen even while a limit is latched: two independent faults
+    reset();
+    motor_moving[0] = true;
+    xmax->pressed = true;
+    ticks(2);
+    CHECK(status == LIMIT_TRIGGERED);
+    halted = false; halt_reason = 0;          // as if unlocked, limit still held
+    auto *a2 = new endstop_info_t{true, 0, 'Z', 2, false, true, true};
+    motor_alarms.push_back(a2);
+    ticks(1);
+    CHECK(halted && halt_reason == MOTOR_ERROR_X + 2);
+
+    // a mid-travel limit is reached from either side, so direction does not excuse it
+    reset();
+    auto *mid = mk('X', 0, true, false);   // limit, not at an end
+    motor_moving[0] = true; motor_negative[0] = true;
+    mid->pressed = true;
+    ticks(2);
+    CHECK(limit_tripped);
+
+    reset();
+    mid = mk('X', 0, true, false);
+    motor_moving[0] = true; motor_negative[0] = false;   // the other way, still a limit
+    mid->pressed = true;
+    ticks(2);
+    CHECK(limit_tripped);
 
     printf(fails == 0 ? "endstops: all passed\n" : "endstops: %d FAILED\n", fails);
     return fails != 0;

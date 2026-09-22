@@ -19,7 +19,7 @@ class Pin {
 
         Pin* from_string(std::string value);
 
-        inline bool connected(){
+        inline bool connected() const {
             return this->valid;
         }
 
