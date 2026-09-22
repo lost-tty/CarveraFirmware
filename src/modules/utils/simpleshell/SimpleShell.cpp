@@ -623,7 +623,7 @@ void SimpleShell::task_command(string parameters, StreamOutput *stream)
         stream->printf("    Current Priority: %lu\r\n", (unsigned long)taskStatus->uxCurrentPriority);
         stream->printf("    Handle: %p\r\n", taskStatus->xHandle);
         stream->printf("    Stack: %p\r\n", taskStatus->pxStackBase);
-        stream->printf("    Stack High Water Mark (Unused): %lu bytes\r\n", (unsigned long)taskStatus->usStackHighWaterMark);
+        stream->printf("    Stack High Water Mark (Unused): %lu bytes\r\n", (unsigned long)taskStatus->usStackHighWaterMark * sizeof(StackType_t));
         stream->printf("    Runtime Counter: %lu\r\n", (unsigned long)taskStatus->ulRunTimeCounter);
 
         #if ( configGENERATE_RUN_TIME_STATS == 1 )
