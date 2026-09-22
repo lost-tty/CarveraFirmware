@@ -125,11 +125,11 @@ void StepTicker::handle_finish (void)
 // step clock
 void StepTicker::set_limits(const Limit *l, uint8_t count, uint16_t hyst)
 {
-    if(count > k_max_actuators * 2) count= k_max_actuators * 2;
     for (uint8_t i = 0; i < count; i++) limits[i]= l[i];
     limit_hysteresis= hyst;
     n_limits= count;
     limit_count= 0;
+    limit_tripped= false;
 }
 
 // stops dead rather than ramping: the travel left past the switch is unknown
@@ -152,6 +152,7 @@ void StepTicker::check_limits()
 
     for (uint8_t m = 0; m < num_motors; m++) motor[m]->stop_moving();
     limit_tripped= true;
+    THEKERNEL->halt(HARD_LIMIT, "hard limit");
 }
 
 // at_steps is taken on the first asserted tick, so the hysteresis does not bias it

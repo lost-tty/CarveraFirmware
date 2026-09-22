@@ -128,6 +128,7 @@ void ZProbe::calibrate_pin_irq() {
         // we signal the motors to stop, which will preempt any moves on that axis
         // we do all motors as it may be a delta
         THEROBOT.stop_motors();
+        probe_seen_at_setter = this->probe_pin.get();
         calibrate_detected = true;
     }
 }
@@ -469,7 +470,8 @@ void ZProbe::calibrate_Z(Gcode *gcode)
         THEKERNEL->halt(CALIBRATE_FAIL, "calibration failed");
     }
 
-    if (calibrate_detected) {
+    // M492.3 reads this as "the wireless probe is alive": only a probe that signalled is
+    if (calibrate_detected && probe_seen_at_setter) {
     	this->probe_trigger_time = us_ticker_read();
     }
 

@@ -8,7 +8,7 @@
 static int fails = 0;
 #define CHECK(c) do { if(!(c)) { printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); fails++; } } while(0)
 
-enum STATUS { NOT_HOMING, MOVING_TO_ENDSTOP_FAST, MOVING_TO_ENDSTOP_SLOW, MOVING_BACK, LIMIT_TRIGGERED };
+enum STATUS { NOT_HOMING, HOMING, BACK_OFF_HOME, LIMIT_TRIGGERED };
 enum { HARD_LIMIT = 21, MOTOR_ERROR_X = 30 };
 
 struct endstop_info_t {
@@ -43,10 +43,10 @@ static uint16_t limit_count;
 static uint16_t limit_hysteresis;
 static endstop_info_t *suspended;   // the switch homing is approaching, if any
 
-// StepTicker::check_limits, verbatim
+// StepTicker::check_limits, with step_tick's is_halted return folded in
 static void check_limits()
 {
-    if(limit_tripped) return;
+    if(halted || limit_tripped) return;
 
     bool closing = false;
     for(auto& l : endstops) {
@@ -62,6 +62,7 @@ static void check_limits()
 
     for (int m = 0; m < 6; m++) motor_moving[m] = false;
     limit_tripped = true;
+    halt(HARD_LIMIT);
 }
 
 static void check_motor_alarms()
@@ -88,11 +89,8 @@ static void service()
         return;
     }
 
-    if(halted) return;
     if(!limit_tripped) return;
-
     status = LIMIT_TRIGGERED;
-    halt(HARD_LIMIT);
 }
 
 static endstop_info_t *mk(char axis, uint8_t idx, bool limit, bool at_end = true, bool at_max = true)
@@ -170,7 +168,7 @@ int main()
 
     // the switch being approached is the step ticker's business, not this one
     reset();
-    status = MOVING_TO_ENDSTOP_FAST;
+    status = HOMING;
     suspended = xmax;
     motor_moving[0] = true;
     xmax->pressed = true;
@@ -180,7 +178,7 @@ int main()
 
     // ... including the retract off that switch while it is still held
     reset();
-    status = MOVING_BACK;
+    status = BACK_OFF_HOME;
     suspended = xmax;
     motor_moving[0] = true;
     xmax->pressed = true;
@@ -189,7 +187,7 @@ int main()
 
     // but another axis hitting its limit during homing still halts
     reset();
-    status = MOVING_TO_ENDSTOP_FAST;
+    status = HOMING;
     suspended = xmax;                 // X is the one being homed
     motor_moving[1] = true;
     ymax->pressed = true;               // Y should not be anywhere near its switch
@@ -239,13 +237,12 @@ int main()
     ticks(1);
     CHECK(halted && halt_reason == MOTOR_ERROR_X + 1);
 
-    // the isr stops motors even while halted: a limit is a limit
+    // a limit is not detected while halted
     reset();
     halted = true;
     motor_moving[0] = true; xmax->pressed = true;
     ticks(50);
-    CHECK(limit_tripped);
-    CHECK(!motor_moving[0]);
+    CHECK(!limit_tripped);
 
     // an alarm is seen even while a limit is latched: two independent faults
     reset();

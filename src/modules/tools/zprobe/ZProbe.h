@@ -67,6 +67,7 @@ private:
 
     volatile bool calibrating;
     Watch probe_watch;
+    volatile bool probe_seen_at_setter{false};
     volatile bool calibrate_detected;
 
     struct {

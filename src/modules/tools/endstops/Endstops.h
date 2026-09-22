@@ -114,7 +114,8 @@ class Endstops : public Module{
         std::vector<homing_info_t> homing_axis;
 
         // its own byte: the service writes it from the timer task while homing drives the rest
-        volatile char status{0};   // NOT_HOMING
+        enum Status : char { NOT_HOMING, HOMING, BACK_OFF_HOME, LIMIT_TRIGGERED };
+        volatile Status status{NOT_HOMING};
         PinGroup alarm_pins;
         Watch    approach_watch;   // the isr holds a pointer to this, so it outlives the move
 

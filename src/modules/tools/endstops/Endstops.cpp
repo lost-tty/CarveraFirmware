@@ -85,16 +85,6 @@ enum DEFNS { MIN_PIN, MAX_PIN, MAX_TRAVEL, FAST_RATE, SLOW_RATE, RETRACT, DIRECT
 
 
 
-// Homing States
-enum STATES {
-    MOVING_TO_ENDSTOP_FAST, // homing move
-    MOVING_TO_ENDSTOP_SLOW, // homing move
-    MOVING_BACK,            // homing move
-    NOT_HOMING,
-    BACK_OFF_HOME,
-    LIMIT_TRIGGERED
-};
-
 void Endstops::on_module_loaded()
 {
     this->status = NOT_HOMING;
@@ -442,18 +432,8 @@ void Endstops::service()
         return;
     }
 
-    if(THEKERNEL->is_halted()) return;
     if(!THEKERNEL->step_ticker.limit_hit()) return;
-
     status= LIMIT_TRIGGERED;
-    for(auto& i : endstops) {
-        if(!i->limit_enable || !i->pin.get()) continue;
-        char msg[32];
-        snprintf(msg, sizeof(msg), "hard limit %c%c", i->axis, THEROBOT.motor_direction(i->axis_index) ? '-' : '+');
-        THEKERNEL->halt(HARD_LIMIT, msg);
-        return;
-    }
-    THEKERNEL->halt(HARD_LIMIT, "hard limit");
 }
 
 void Endstops::check_motor_alarms()
@@ -529,25 +509,18 @@ bool Endstops::home_axis(uint8_t axis)
 void Endstops::home(axis_bitmap_t a)
 {
     this->axis_to_home= a;
-    this->status = MOVING_TO_ENDSTOP_FAST;
+    this->status = HOMING;
 
     Robot::NoSegmentation no_segmentation;   // homing won't work with it enabled
 
+    // Z first by default: the spindle has to be clear of the work before XY move
     uint8_t order[axis_bitmap_t().size()];
     uint8_t n= 0;
-    if(homing_order != 0) {
-        for (uint32_t m = homing_order; m != 0; m >>= 3) {
-            uint32_t a= (m & 0x07) - 1;
-            if(a < homing_axis.size() && axis_to_home[a]) order[n++]= a;
-        }
-    } else {
-        // Z first by default: the spindle has to be clear of the work before XY move
-        if(home_z_first && axis_to_home[Z_AXIS]) order[n++]= Z_AXIS;
-        if(axis_to_home[X_AXIS]) order[n++]= X_AXIS;
-        if(axis_to_home[Y_AXIS]) order[n++]= Y_AXIS;
-        if(!home_z_first && axis_to_home[Z_AXIS]) order[n++]= Z_AXIS;
-        for (size_t i = A_AXIS; i < homing_axis.size(); ++i) if(axis_to_home[i]) order[n++]= i;
-    }
+    if(home_z_first && axis_to_home[Z_AXIS]) order[n++]= Z_AXIS;
+    if(axis_to_home[X_AXIS]) order[n++]= X_AXIS;
+    if(axis_to_home[Y_AXIS]) order[n++]= Y_AXIS;
+    if(!home_z_first && axis_to_home[Z_AXIS]) order[n++]= Z_AXIS;
+    for (size_t i = A_AXIS; i < homing_axis.size(); ++i) if(axis_to_home[i]) order[n++]= i;
 
     for (uint8_t i = 0; i < n; ++i) {
         if(!home_axis(order[i])) {
