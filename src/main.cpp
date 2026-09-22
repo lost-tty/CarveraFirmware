@@ -161,7 +161,7 @@ void init() {
 
     THEKERNEL->add_module(&simpleshell);
 
-    printk("Smoothie Running @%ldMHz\r\n", SystemCoreClock / 1000000);
+    printk("Smoothie Running @%luMHz\r\n", (unsigned long)(SystemCoreClock / 1000000));
     simpleshell.version_command("", &THEKERNEL->streams);
 
     bool sdok = (sd.disk_initialize() == 0);
@@ -275,7 +275,9 @@ void vTaskMainLoop(void *pvParameters) {
     }
 }
 
+#ifndef MAINLOOP_STACK_SIZE
 #define MAINLOOP_STACK_SIZE 768
+#endif
 
 StackType_t mainLoopStackBuffer[MAINLOOP_STACK_SIZE];
 StaticTask_t mainLoopTaskBuffer;
