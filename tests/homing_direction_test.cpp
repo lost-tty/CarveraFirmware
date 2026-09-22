@@ -74,21 +74,19 @@ int main()
         CHECK(m.move(-20.f) < 0);
     }
 
-    // Homing after a negative jog: reset to 0, then drive +max_travel
+    // Homing after a negative jog drives +max_travel from wherever the machine is
     {
         Machine m;
         m.move(-50.f);                       // jog away from the switch
-        m.reset_axis_position(0.f);          // process_home_command does this per axis
         int32_t steps = m.move(+max_travel); // home() issues this
         printf("after -50 jog: homing steps = %d\n", (int)steps);
         CHECK(steps > 0);                    // must drive toward the switch
     }
 
-    // Homing after a positive jog, which the machine gets right today
+    // Homing after a positive jog
     {
         Machine m;
         m.move(+20.f);
-        m.reset_axis_position(0.f);
         int32_t steps = m.move(+max_travel);
         printf("after +20 jog: homing steps = %d\n", (int)steps);
         CHECK(steps > 0);
@@ -97,9 +95,8 @@ int main()
     // Two homing cycles in a row must both drive positive
     {
         Machine m;
-        m.reset_axis_position(0.f);
         CHECK(m.move(+max_travel) > 0);
-        m.reset_axis_position(0.f);          // second $H
+        m.reset_axis_position(-1.f);         // homed position after the first $H
         CHECK(m.move(+max_travel) > 0);
     }
 

@@ -553,11 +553,7 @@ void Endstops::process_home_command(Gcode* gcode)
     for (auto &p : homing_axis) {
         // only enable homing if the endstop is defined,
         if(p.pin_info == nullptr) continue;
-        if(!axis_speced || gcode->has_letter(p.axis)) {
-            haxis.set(p.axis_index);
-            // now reset axis to 0 as we do not know what state we are in
-            THEROBOT.reset_axis_position(0, p.axis_index);
-        }
+        if(!axis_speced || gcode->has_letter(p.axis)) haxis.set(p.axis_index);
     }
 
     if(haxis.none()) {
@@ -588,10 +584,7 @@ void Endstops::process_home_command(Gcode* gcode)
 
     THEROBOT.put_compensation(savect);
 
-    // check if on_halt (eg kill or fail)
     if(THEKERNEL->is_halted()) {
-        printk("ALARM: Homing fail\n");
-        // clear all the homed flags
         for (auto &p : homing_axis) p.homed= false;
         return;
     }
