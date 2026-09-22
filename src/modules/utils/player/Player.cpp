@@ -256,11 +256,11 @@ void Player::progress_command( string parameters, StreamOutput *stream )
         float pcnt = file.bytes() * 100.0F / file.size();
         // If -b or -B is passed, report in the format used by Marlin and the others.
         if (!sdprinting) {
-            stream->printf("file: %s, %u %% complete, elapsed time: %02lu:%02lu:%02lu", this->filename.c_str(), (unsigned int)roundf(pcnt), elapsed_secs / 3600, (elapsed_secs % 3600) / 60, elapsed_secs % 60);
-            if(est > 0) {
-                stream->printf(", est time: %02lu:%02lu:%02lu",  est / 3600, (est % 3600) / 60, est % 60);
-            }
-            stream->printf("\r\n");
+            stream->printf(est > 0 ? "file: %s, %u %% complete, elapsed time: %02lu:%02lu:%02lu, est time: %02lu:%02lu:%02lu\r\n"
+                                   : "file: %s, %u %% complete, elapsed time: %02lu:%02lu:%02lu\r\n",
+                           this->filename.c_str(), (unsigned int)roundf(pcnt),
+                           elapsed_secs / 3600, (elapsed_secs % 3600) / 60, elapsed_secs % 60,
+                           est / 3600, (est % 3600) / 60, est % 60);
         } else {
             stream->printf("SD printing byte %lu/%lu\r\n", file.bytes(), file.size());
         }
