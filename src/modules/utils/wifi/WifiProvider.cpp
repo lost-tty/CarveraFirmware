@@ -163,9 +163,13 @@ void WifiProvider::int_to_ip(uint32_t i_ip, char* ip_addr)
 
 uint32_t WifiProvider::ip_to_int(char* ip_addr)
 {
-    unsigned int bytes[4];
-    sscanf(ip_addr, "%u.%u.%u.%u", &bytes[0], &bytes[1], &bytes[2], &bytes[3]);
-    return (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
+    uint32_t ip = 0;
+    char *p = ip_addr;
+    for (int i = 0; i < 4; i++) {
+        ip = (ip << 8) | (strtoul(p, &p, 10) & 0xFF);
+        if (*p == '.') p++;
+    }
+    return ip;
 }
 
 void WifiProvider::on_second_tick(void*)
