@@ -351,7 +351,7 @@ Source::Result Player::next(SerialMessage &msg)
     if (file.next_line(buf, sizeof(buf))) {
         if (this->current_stream != nullptr) {
             if (file.discarded() != discarded) this->current_stream->printf("Warning: Discarded long line\n");
-            this->current_stream->printf("%s", buf);
+            this->current_stream->printf("%lu: %s", file.lines(), buf);
         }
         msg.message = buf;
         msg.stream = this->current_stream == nullptr ? &(StreamOutput::NullStream) : this->current_stream;
