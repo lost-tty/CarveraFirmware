@@ -203,6 +203,10 @@ std::string absolute_from_relative( std::string path )
 {
     string cwd = THEKERNEL->current_path;
 
+    if ( path.length() > 1 && path.back() == '/' ) {
+        path.pop_back();
+    }
+
     if ( path.empty() ) {
         return THEKERNEL->current_path;
     }
