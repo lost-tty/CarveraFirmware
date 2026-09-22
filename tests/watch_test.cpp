@@ -1,7 +1,9 @@
-// The step ticker's watch: how many triggered ticks it takes, which motors stop, and that the
-// latched count is the one at the trigger rather than where the axis came to rest.
+// The step ticker's watch: how far a motor travels with the input held before it counts, which
+// motors stop, and that the latched count is the one at the trigger rather than where the axis
+// came to rest.
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
 #include <initializer_list>
 
 static int fails = 0;
@@ -12,11 +14,11 @@ static const int MOTORS = 3;
 struct Watch {
     bool     asserted{false};     // stands in for inputs.any()
     uint8_t  motors{0};
-    uint16_t hysteresis{1};
-    uint16_t count{0};
+    uint16_t hysteresis{0};
+    bool     seen{false};
     bool     hit{false};
     int32_t  at_steps[MOTORS]{};
-    void arm() { count = 0; hit = false; }
+    void arm() { seen = false; hit = false; }
 };
 
 static int32_t position[MOTORS];
@@ -27,10 +29,17 @@ static void tick(Watch *w)
 {
     if(w != nullptr && !w->hit) {
         if(!w->asserted) {
-            w->count = 0;
+            w->seen = false;
         } else {
-            if(w->count == 0) for (int m = 0; m < MOTORS; m++) w->at_steps[m] = position[m];
-            if(++w->count >= w->hysteresis) {
+            if(!w->seen) {
+                w->seen = true;
+                for (int m = 0; m < MOTORS; m++) w->at_steps[m] = position[m];
+            }
+            bool travelled = false;
+            for (int m = 0; m < MOTORS; m++) {
+                if((w->motors & (1 << m)) && abs(position[m] - w->at_steps[m]) >= w->hysteresis) travelled = true;
+            }
+            if(travelled) {
                 for (int m = 0; m < MOTORS; m++) if(w->motors & (1 << m)) moving[m] = false;
                 w->hit = true;
             }
@@ -43,43 +52,54 @@ static void reset() { for (int m = 0; m < MOTORS; m++) { position[m] = 0; moving
 
 int main()
 {
-    // hysteresis 1: the first asserted tick stops it
+    // hysteresis 0: the first asserted tick stops it
     {
         reset();
-        Watch w; w.motors = 1; w.hysteresis = 1; w.arm();
+        Watch w; w.motors = 1; w.hysteresis = 0; w.arm();
         tick(&w); CHECK(!w.hit);
         w.asserted = true;
         tick(&w); CHECK(w.hit);
         CHECK(!moving[0]);
     }
 
-    // hysteresis 20: nineteen asserted ticks are not enough
+    // hysteresis 20: nineteen steps with the input held are not enough
     {
         reset();
         Watch w; w.motors = 1; w.hysteresis = 20; w.arm();
         w.asserted = true;
-        for (int i = 0; i < 19; i++) tick(&w);
+        for (int i = 0; i < 20; i++) tick(&w);     // latched at 0, stepped to 19
         CHECK(!w.hit);
         CHECK(moving[0]);
-        tick(&w);
+        tick(&w);                                   // at 20
         CHECK(w.hit);
+        CHECK(position[0] - w.at_steps[0] == 20);
     }
 
-    // a release before the count is reached starts it over
+    // a release before the distance is covered starts it over
     {
         reset();
         Watch w; w.motors = 1; w.hysteresis = 20; w.arm();
         w.asserted = true;  for (int i = 0; i < 19; i++) tick(&w);
         w.asserted = false; tick(&w);
-        CHECK(w.count == 0);
+        CHECK(!w.seen);
         w.asserted = true;  for (int i = 0; i < 19; i++) tick(&w);
+        CHECK(!w.hit);
+    }
+
+    // the distance is the watched motor's: a still motor never confirms, however long the input is held
+    {
+        reset();
+        moving[0] = false;
+        Watch w; w.motors = 1; w.hysteresis = 5; w.arm();
+        w.asserted = true;
+        for (int i = 0; i < 100; i++) tick(&w);
         CHECK(!w.hit);
     }
 
     // only the named motors stop; the others keep stepping
     {
         reset();
-        Watch w; w.motors = (1 << 0); w.hysteresis = 1; w.arm();
+        Watch w; w.motors = (1 << 0); w.hysteresis = 0; w.arm();
         w.asserted = true;
         tick(&w);
         CHECK(!moving[0]);
@@ -97,7 +117,7 @@ int main()
         Watch w; w.motors = (1 << 0); w.hysteresis = 5; w.arm();
         for (int i = 0; i < 10; i++) tick(&w);      // 10 steps with nothing asserted
         w.asserted = true;
-        for (int i = 0; i < 5; i++) tick(&w);       // confirms on the fifth
+        for (int i = 0; i < 6; i++) tick(&w);       // confirms once it has travelled five
         CHECK(w.hit);
         CHECK(w.at_steps[0] == 10);                 // where it was when the input first changed
         for (int i = 0; i < 20; i++) tick(&w);
@@ -112,7 +132,7 @@ int main()
         w.asserted = true;  for (int i = 0; i < 2; i++) tick(&w);   // a bounce, not enough
         w.asserted = false; for (int i = 0; i < 10; i++) tick(&w);
         CHECK(!w.hit);
-        w.asserted = true;  for (int i = 0; i < 5; i++) tick(&w);   // the real edge
+        w.asserted = true;  for (int i = 0; i < 6; i++) tick(&w);   // the real edge
         CHECK(w.hit);
         CHECK(w.at_steps[0] == 22);                 // 10 + 2 + 10, not the glitch at 10
     }
@@ -120,7 +140,7 @@ int main()
     // once hit, it stays hit: a release does not re-arm within the same move
     {
         reset();
-        Watch w; w.motors = 1; w.hysteresis = 1; w.arm();
+        Watch w; w.motors = 1; w.hysteresis = 0; w.arm();
         w.asserted = true;  tick(&w); CHECK(w.hit);
         w.asserted = false; tick(&w); CHECK(w.hit);
         CHECK(!moving[0]);
@@ -128,9 +148,9 @@ int main()
 
     // arm() clears it for the next move
     {
-        Watch w; w.hit = true; w.count = 7;
+        Watch w; w.hit = true; w.seen = true;
         w.arm();
-        CHECK(!w.hit && w.count == 0);
+        CHECK(!w.hit && !w.seen);
     }
 
     // no watch at all is a plain move

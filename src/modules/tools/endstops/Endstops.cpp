@@ -461,13 +461,12 @@ void Endstops::arm_limits(const endstop_info_t *approaching)
         uint16_t s= hysteresis_steps(e->axis_index);
         if(s > steps) steps= s;
     }
-    THEKERNEL->step_ticker.set_limits(l, n, steps == 0 ? 1 : steps);
+    THEKERNEL->step_ticker.set_limits(l, n, steps);
 }
 
 uint16_t Endstops::hysteresis_steps(uint8_t axis) const
 {
-    float steps= hysteresis_mm * THEROBOT.motor_steps_per_mm(axis);
-    return steps < 1 ? 1 : (uint16_t)steps;
+    return (uint16_t)(hysteresis_mm * THEROBOT.motor_steps_per_mm(axis));
 }
 
 bool Endstops::approach(uint8_t axis, float distance, float rate)

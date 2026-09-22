@@ -43,7 +43,7 @@ class StepTicker{
         struct Limit { Pin pin; uint8_t motor; bool at_end; bool at_max; };
         void set_limits(const Limit *l, uint8_t count, uint16_t hyst);
         bool limit_hit() const { return limit_tripped; }
-        void clear_limit() { limit_tripped= false; limit_count= 0; }
+        void clear_limit() { limit_tripped= false; limit_seen= false; }
 
         void step_tick (void);
         void handle_finish (void);
@@ -69,8 +69,10 @@ class StepTicker{
         Watch *watch{nullptr};
         Limit    limits[k_max_actuators * 2];
         uint8_t  n_limits{0};
-        uint16_t limit_hysteresis{1};
-        uint16_t limit_count{0};
+        uint16_t limit_hysteresis{0};
+        bool     limit_seen{false};
+        uint8_t  limit_idx{0};
+        int32_t  limit_at_step{0};
         volatile bool limit_tripped{false};
         Block *current_block;
         uint32_t current_tick{0};

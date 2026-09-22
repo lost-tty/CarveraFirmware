@@ -128,27 +128,42 @@ void StepTicker::set_limits(const Limit *l, uint8_t count, uint16_t hyst)
     for (uint8_t i = 0; i < count; i++) limits[i]= l[i];
     limit_hysteresis= hyst;
     n_limits= count;
-    limit_count= 0;
+    limit_seen= false;
     limit_tripped= false;
 }
 
 // stops dead rather than ramping: the travel left past the switch is unknown
+// the distance into a switch adds up from its first edge for as long as it stays pressed, so
+// creeping into it block by block trips like one move would
 void StepTicker::check_limits()
 {
-    bool closing= false;
+    if(limit_seen && !limits[limit_idx].pin.get()) limit_seen= false;
+
+    uint8_t closing= n_limits;
     for (uint8_t i = 0; i < n_limits; i++) {
         const Limit &l= limits[i];
         if(!motor[l.motor]->is_moving() || !l.pin.get()) continue;
         if(l.at_end && motor[l.motor]->which_direction() == l.at_max) continue;
-        closing= true;
+        closing= i;
         break;
     }
+    if(closing == n_limits) return;
 
-    if(!closing) {
-        limit_count= 0;
-        return;
+    if(!limit_seen || closing != limit_idx) {
+        limit_seen= true;
+        limit_idx= closing;
+        limit_at_step= motor[limits[closing].motor]->get_current_step();
     }
-    if(++limit_count < limit_hysteresis) return;
+    const Limit &l= limits[limit_idx];
+    int32_t into= motor[l.motor]->get_current_step() - limit_at_step;
+    if(!l.at_end) {
+        into= abs(into);
+    } else if(!l.at_max) {
+        into= -into;
+    }
+
+    if(into < limit_hysteresis)
+        return;
 
     for (uint8_t m = 0; m < num_motors; m++) motor[m]->stop_moving();
     limit_tripped= true;
@@ -159,15 +174,20 @@ void StepTicker::check_limits()
 void StepTicker::check_watch()
 {
     if(!watch->inputs.any()) {
-        watch->count= 0;
+        watch->seen= false;
         return;
     }
 
-    if(watch->count == 0) {
+    if(!watch->seen) {
+        watch->seen= true;
         for (uint8_t m = 0; m < num_motors; m++) watch->at_steps[m]= motor[m]->get_current_step();
     }
 
-    if(++watch->count < watch->hysteresis) return;
+    bool travelled= false;
+    for (uint8_t m = 0; m < num_motors; m++) {
+        if((watch->motors & (1 << m)) && abs(motor[m]->get_current_step() - watch->at_steps[m]) >= watch->hysteresis) travelled= true;
+    }
+    if(!travelled) return;
 
     for (uint8_t m = 0; m < num_motors; m++) {
         if(watch->motors & (1 << m)) motor[m]->stop_moving();
