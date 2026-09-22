@@ -1277,6 +1277,16 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
             break;
     }
 
+    if(gcode->is_error) {
+        // segments queued before the refusal still run; take the position from where they end
+        if(moved) {
+            THECONVEYOR.wait_for_idle();
+            reset_position_from_current_actuator_position();
+            memcpy(arc_milestone, machine_position, sizeof(arc_milestone));
+        }
+        return;
+    }
+
     // needed to act as start of next arc command
     memcpy(arc_milestone, target, sizeof(arc_milestone));
 
@@ -1409,7 +1419,7 @@ void Robot::reset_position_from_current_actuator_position()
 // Convert target (in machine coordinates) to machine_position, then convert to actuator position and append this to the planner
 // target is in machine coordinates without the compensation transform, however we save a compensated_machine_position that includes
 // all transforms and is what we actually convert to actuator positions
-bool Robot::append_milestone(const float target[], float rate_mm_s, unsigned int line)
+bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode)
 {
     float deltas[n_motors];
     float transformed_target[n_motors]; // adjust target for bed compensation
@@ -1424,28 +1434,7 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, unsigned int
         compensationTransform(transformed_target, false, false);
     }
 
-    // check soft endstops only for homed axis that are enabled
-    if(soft_endstop_enabled && !THEKERNEL->is_zprobing()) {
-        for (int i = 0; i <= Z_AXIS; ++i) {
-            if(!is_homed(i)) continue;
-            if( (!isnan(soft_endstop_min[i]) && transformed_target[i] < soft_endstop_min[i]) || (!isnan(soft_endstop_max[i]) && transformed_target[i] > soft_endstop_max[i]) ) {
-                if(soft_endstop_halt) {
-                    printk("error:Soft Endstop %c was exceeded - reset or $X or M999 required\n", i+'X');
-                    THEKERNEL->halt(SOFT_LIMIT, "soft limit");
-                    return false;
-
-                //} else if(soft_endstop_truncate) {
-                    // TODO VERY hard to do need to go back and change the target, and calculate intercept with the edge
-                    // and store all preceding vectors that have on eor more points ourtside of bounds so we can create a propper clip against the boundaries
-
-                } else {
-                    // ignore it
-                    printk("error:Soft Endstop %c was exceeded - entire move ignored\n", i+'X');
-                    return false;
-                }
-            }
-        }
-    }
+    if(!within_soft_limits(transformed_target, gcode)) return false;
 
 
     bool move= false;
@@ -1628,7 +1617,7 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, unsigned int
     // Append the block to the planner
     // NOTE that distance here should be either the distance travelled by the XYZ axis, or the E mm travel if a solo E move
     // NOTE this call will bock until there is room in the block queue, on_idle will continue to be called
-    if(THEKERNEL->planner.append_block( actuator_pos, n_motors, rate_mm_s, distance, auxilliary_move ? nullptr : unit_vec, acceleration, s_value, is_g123, line)) {
+    if(THEKERNEL->planner.append_block( actuator_pos, n_motors, rate_mm_s, distance, auxilliary_move ? nullptr : unit_vec, acceleration, s_value, is_g123, gcode != nullptr ? gcode->line : 0)) {
 // 2024
 //    if(THEKERNEL->planner.append_block( actuator_pos, n_motors, rate_mm_s, distance, auxilliary_move ? nullptr : unit_vec, acceleration, s_values, s_count, is_g123, line)) {
         // this is the new compensated machine position
@@ -1661,7 +1650,7 @@ bool Robot::delta_move(const float *delta, float rate_mm_s, uint8_t naxis)
 
     is_g123= false; // we don't want the laser to fire
     // submit for planning and if moved update machine_position
-    if(append_milestone(target, rate_mm_s, 0)) {
+    if(append_milestone(target, rate_mm_s, nullptr)) {
          memcpy(machine_position, target, n_motors*sizeof(float));
          return true;
     }
@@ -1688,9 +1677,36 @@ bool Robot::delta_move_sync(const float *delta, float rate_mm_s, uint8_t naxis)
     return !THEKERNEL->is_halted();
 }
 
+// refuse a target outside the soft limits of a homed axis
+bool Robot::within_soft_limits(const float transformed_target[], Gcode *gcode)
+{
+    if(!soft_endstop_enabled || THEKERNEL->is_zprobing()) return true;
+    for (int i = 0; i <= Z_AXIS; ++i) {
+        if(!is_homed(i)) continue;
+        if(!(!isnan(soft_endstop_min[i]) && transformed_target[i] < soft_endstop_min[i]) &&
+           !(!isnan(soft_endstop_max[i]) && transformed_target[i] > soft_endstop_max[i])) continue;
+        if(!soft_endstop_halt) {
+            printk("error:soft limit %c exceeded, move ignored\n", i+'X');
+        } else if(gcode == nullptr) {
+            printk("error:soft limit %c exceeded\n", i+'X');
+        } else {
+            gcode->is_error= true;
+            gcode->txt_after_ok= std::string("soft limit ") + char('X' + i) + " exceeded";
+        }
+        return false;
+    }
+    return true;
+}
+
 // Append a move to the queue ( cutting it into segments if needed )
 bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s)
 {
+    // checked before segmenting, otherwise the segments inside the limit run before the refusal
+    float transformed_target[n_motors];
+    memcpy(transformed_target, target, n_motors*sizeof(float));
+    if(compensationTransform) compensationTransform(transformed_target, false, false);
+    if(!within_soft_limits(transformed_target, gcode)) return false;
+
     // catch negative or zero feed rates and return the same error as GRBL does
     if(rate_mm_s <= 0.0F) {
         gcode->is_error= true;
@@ -1703,7 +1719,7 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s)
 
     if(millimeters_of_travel < 0.00001F) {
         // we have no movement in XYZ, probably E only extrude or retract
-        return this->append_milestone(target, rate_mm_s, gcode->line);
+        return this->append_milestone(target, rate_mm_s, gcode);
     }
 
     /*
@@ -1758,13 +1774,14 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s)
 
             // Append the end of this segment to the queue
             // this can block waiting for free block queue or if in feed hold
-            bool b= this->append_milestone(segment_end, rate_mm_s, gcode->line);
+            bool b= this->append_milestone(segment_end, rate_mm_s, gcode);
+            if(gcode->is_error) return moved;
             moved= moved || b;
         }
     }
 
     // Append the end of this full move to the queue
-    if(this->append_milestone(target, rate_mm_s, gcode->line)) moved= true;
+    if(this->append_milestone(target, rate_mm_s, gcode)) moved= true;
 
     return moved;
 }
@@ -1909,13 +1926,14 @@ bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[]
             arc_target[this->plane_axis_2] += linear_per_segment;
 
             // Append this segment to the queue
-            bool b= this->append_milestone(arc_target, rate_mm_s, gcode->line);
+            bool b= this->append_milestone(arc_target, rate_mm_s, gcode);
+            if(gcode->is_error) return moved;
             moved= moved || b;
         }
     }
 
     // Ensure last segment arrives at target location.
-    if(this->append_milestone(target, rate_mm_s, gcode->line)) moved= true;
+    if(this->append_milestone(target, rate_mm_s, gcode)) moved= true;
 
     return moved;
 }

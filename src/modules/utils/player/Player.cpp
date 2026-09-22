@@ -164,7 +164,6 @@ void Player::play_command( string parameters, StreamOutput *stream )
 
     if (!THEROBOT.is_homed_all_axes()) {
         stream->printf("error:Machine has not been homed, home first\r\n");
-        THEKERNEL->halt(NON_HOME, "machine is not homed");
         return;
     }
 
@@ -287,7 +286,7 @@ void Player::list(StreamOutput *stream, unsigned around)
     file.list(stream, current_line(), around);
 }
 
-// the file ended, was aborted or the machine halted
+// the file ended, was aborted or the machine halted: queued motion finishes, then spindle and coolant go off as after M2
 void Player::abort()
 {
     this->playing_file = false;
@@ -297,6 +296,13 @@ void Player::abort()
     this->filename = "";
     this->current_stream = NULL;
     file.close();
+
+    THEKERNEL->set_waiting(true);
+    bool finished= THECONVEYOR.wait_for_idle();
+    THEKERNEL->set_waiting(false);
+    if(!finished) return;
+    gcode_dispatch.run_line("M5", &StreamOutput::NullStream);
+    gcode_dispatch.run_line("M9", &StreamOutput::NullStream);
 }
 
 void Player::abort_command( string parameters, StreamOutput *stream )
@@ -308,22 +314,10 @@ void Player::abort_command( string parameters, StreamOutput *stream )
 
     sources.clear(); // the file and any script on top of it, or a script alone
     sources.resume();
-    THEKERNEL->set_waiting(true);
-
-    // wait for queue to empty
-    THECONVEYOR.wait_for_idle();
 
     if(THEKERNEL->is_halted()) {
         printk("Aborted by halt\n");
-        THEKERNEL->set_waiting(false);
         return;
-    }
-
-    THEKERNEL->set_waiting(false);
-
-    // turn off spindle
-    {
-		gcode_dispatch.run_line("M5", &StreamOutput::NullStream);
     }
 
     if (parameters.empty()) {

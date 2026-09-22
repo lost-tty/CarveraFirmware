@@ -162,7 +162,8 @@ class Robot : public Module {
         };
 
         void load_config();
-        bool append_milestone(const float target[], float rate_mm_s, unsigned int line);
+        bool within_soft_limits(const float transformed_target[], Gcode *gcode);
+        bool append_milestone(const float target[], float rate_mm_s, Gcode *gcode);
         bool append_line( Gcode* gcode, const float target[], float rate_mm_s);
         bool append_arc( Gcode* gcode, const float target[], const float offset[], float radius, bool is_clockwise );
         bool arc_radius_to_offset(Gcode *gcode, const float target[], MOTION_MODE_T mode, float offset[3]);

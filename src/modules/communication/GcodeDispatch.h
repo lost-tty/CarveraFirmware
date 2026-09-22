@@ -37,16 +37,16 @@ public:
     Parameters &parameters() { return params; }
     void set_script_hook(ScriptHook *hook) { scripts= hook; }
     void run_mdi(const SerialMessage &msg); // a console line: refused while a job or script runs
-    void run_line(const SerialMessage &msg);
-    void run_line(const std::string &line, StreamOutput *stream);
+    bool run_line(const SerialMessage &msg); // false: the line was refused
+    bool run_line(const std::string &line, StreamOutput *stream);
 private:
-    void dispatch(const SerialMessage &msg);
-    bool allowed_while_halted(const gcode::Words &words, StreamOutput *stream);
-    bool homed_enough(const gcode::Words &words, StreamOutput *stream);
-    void execute(const gcode::Words &words, const std::string &text, StreamOutput *stream, unsigned int line);
-    void parameter_statement(const char *p, StreamOutput *stream);
-    void fail(StreamOutput *stream, const char *msg);
-    void halt();
+    enum Gate { PASS, HANDLED, REFUSED };
+    bool dispatch(const SerialMessage &msg);
+    Gate allowed_while_halted(const gcode::Words &words, StreamOutput *stream);
+    Gate homed_enough(const gcode::Words &words, StreamOutput *stream);
+    bool execute(const gcode::Words &words, const std::string &text, StreamOutput *stream, unsigned int line);
+    bool parameter_statement(const char *p, StreamOutput *stream);
+    bool fail(StreamOutput *stream, const char *msg);
 
     Parameters params;
     static Module *handlers;
