@@ -135,6 +135,7 @@ bool ZProbe::run_probe(float& mm, float feedrate, float max_dist, bool reverse)
     probe_watch.witness.clear();
     probe_watch.inputs.add(probe_pin, invert_probe);
     probe_watch.motors= (1<<X_AXIS)|(1<<Y_AXIS)|(1<<Z_AXIS);
+    probe_watch.hysteresis= 0;   // a probe stops on the first edge, the measurement is that point
 
     int32_t z_start_steps= THEROBOT.motor_step(Z_AXIS);
 
@@ -358,7 +359,7 @@ void ZProbe::probe_XYZ(Gcode *gcode)
     probe_watch.inputs.clear();
     probe_watch.inputs.add(probe_pin, invert_probe);
     probe_watch.motors= (1<<X_AXIS)|(1<<Y_AXIS)|(1<<Z_AXIS);
-
+    probe_watch.hysteresis= 0;
     probe_watch.witness.clear();
 
     float delta[3]= {x, y, z};
@@ -422,6 +423,7 @@ void ZProbe::calibrate_Z(Gcode *gcode)
     probe_watch.witness.clear();
     probe_watch.witness.add(probe_pin, invert_probe);
     probe_watch.motors= (1<<X_AXIS)|(1<<Y_AXIS)|(1<<Z_AXIS);
+    probe_watch.hysteresis= 0;
 
     float delta[3]= {0, 0, z};
     if(!THEROBOT.delta_move_watch(delta, rate, 3, probe_watch)) {
