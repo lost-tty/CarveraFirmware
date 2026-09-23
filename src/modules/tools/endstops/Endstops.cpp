@@ -103,11 +103,6 @@ void Endstops::on_module_loaded()
     GcodeDispatch::add_handler(this);
 
 	service_timer.start();
-
-    // load g28 data from eeprom
-//    this->g28_position[0] = THEKERNEL->eeprom_data.G28[0];
-//    this->g28_position[1] = THEKERNEL->eeprom_data.G28[1];
-//    this->g28_position[2] = THEKERNEL->eeprom_data.G28[2];
 }
 
 // Get config using old deprecated syntax Does not support ABC
@@ -672,12 +667,6 @@ void Endstops::on_gcode_received(Gcode *argument)
                 // Not a standard Gcode and not to be relied on
                 if (gcode->has_letter('X')) g28_position[X_AXIS] = gcode->get_value('X');
                 if (gcode->has_letter('Y')) g28_position[Y_AXIS] = gcode->get_value('Y');
-
-                // save g28 data to eeprom
-//                THEKERNEL->eeprom_data.G28[0] = g28_position[X_AXIS];
-//                THEKERNEL->eeprom_data.G28[1] = g28_position[Y_AXIS];
-//                THEKERNEL->eeprom_data.G28[2] = g28_position[Z_AXIS];
-//                THEKERNEL->write_eeprom_data();
 
                 break;
 
