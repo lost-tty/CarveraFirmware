@@ -28,11 +28,21 @@ class MainButton : public Module, public Killable {
         {}
 
         void on_module_loaded();
-        void on_idle(void *argument);
-        void button_tick();
-        void on_second_tick(void *);
 
     private:
+        void button_tick();     // the polling timer, everything below runs from it
+        void check_12v();
+        void handle_button();
+        void update_power(uint8_t state);
+        void update_timeouts(uint8_t state);
+        void go_to_sleep();
+        void short_press(uint8_t state);
+        void long_press(uint8_t state);
+        void update_led(uint8_t state);
+        void e_stop_irq();
+        void switch_power_12(int state);
+        void switch_power_24(int state);
+
         SoftTimer timer;
 
         Pin main_button;
@@ -41,9 +51,9 @@ class MainButton : public Module, public Killable {
         Pin main_button_LED_B;
         enum BUTTON_STATE {
             NONE,
-			BUTTON_LONG_PRESSED,
-			BUTTON_SHORT_PRESSED,
-			BUTTON_LED_UPDATE
+            BUTTON_LONG_PRESSED,
+            BUTTON_SHORT_PRESSED,
+            BUTTON_LED_UPDATE
         };
 
         Pin e_stop;
@@ -55,6 +65,7 @@ class MainButton : public Module, public Killable {
 
         uint8_t hold_toggle;
         uint8_t led_update_timer;
+        uint32_t second_counter;
         uint32_t button_press_time;
         uint32_t long_press_time_ms;
         std::string long_press_enable;
@@ -69,18 +80,14 @@ class MainButton : public Module, public Killable {
 
         bool button_pressed;
         volatile BUTTON_STATE button_state;
-        
+
         bool stop_on_cover_open;
 
         uint32_t poll_frequency;
 
         bool using_12v;
-
-        void e_stop_irq();
-        void switch_power_12(int state);
-        void switch_power_24(int state);
 };
 
-#endif
-
 extern MainButton mainbutton;
+
+#endif
