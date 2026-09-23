@@ -475,6 +475,7 @@ void Kernel::clear_halt()
     feed_hold = false;
     Killable::restore_all();
     THEROBOT.reset_position_from_current_actuator_position();
+    THEROBOT.set_keepout(true);
 }
 
 void Kernel::halt(uint8_t reason, const char *msg)

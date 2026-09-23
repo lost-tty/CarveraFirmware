@@ -282,7 +282,7 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
     }
     for (size_t i= 0; i < words.size(); i++) {
         const gcode::Word &w= words[i];
-        if(!w.has_value && blocks[block_of[i]].motion && strchr("XYZABCIJKRF", w.letter)) {
+        if(!w.has_value && (blocks[block_of[i]].motion || blocks[block_of[i]].axis_code) && strchr("XYZABCIJKRF", w.letter)) {
             char buf[24];
             snprintf(buf, sizeof(buf), "%c needs a value", w.letter);
             return fail(stream, buf);
