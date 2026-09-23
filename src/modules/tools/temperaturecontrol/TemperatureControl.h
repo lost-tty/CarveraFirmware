@@ -10,7 +10,6 @@
 
 #include "Module.h"
 class Gcode;
-#include "Pwm.h"
 #include "TempSensor.h"
 #include "TemperatureControlPublicAccess.h"
 #include "SoftTimer.h"
@@ -25,20 +24,17 @@ class TemperatureControl : public Module {
         void get_status(struct pad_temperature *t);
         TemperatureControl(uint16_t name, int index)
         : thermistor_timer("ThermistorReading", 100, true, this, &TemperatureControl::thermistor_read_tick),
+        overheat_timer("OverheatCheck", 1000, true, this, &TemperatureControl::overheat_tick),
         name_checksum(name),
         pool_index(index),
-        temp_violated(false),
         sensor(nullptr)
         {}
 
         ~TemperatureControl();
 
         void on_module_loaded();
-        void on_main_loop(void* argument);
         void report_temperature(Gcode *);
         void sensor_settings_gcode(Gcode *);
-
-        void on_second_tick(void* argument);
 
         float get_temperature();
 
@@ -46,27 +42,22 @@ class TemperatureControl : public Module {
         void load_config();
         void thermistor_read_tick();
 
+        void overheat_tick();
+
         SoftTimer thermistor_timer;
+        SoftTimer overheat_timer;
 
         int pool_index;
 
-        float target_temperature;
         float max_temp, min_temp;
 
         TempSensor *sensor;
-        int o;
         float last_reading;
-        float readings_per_second;
 
         std::string designator;
 
-        // pack these to save memory
-        struct {
-            uint16_t name_checksum;
-            uint16_t get_m_code:10;
-            bool temp_violated:1;
-            bool sensor_settings:1;
-        };
+        uint16_t name_checksum;
+        uint16_t get_m_code;
 };
 
 #endif

@@ -5,29 +5,21 @@
       You should have received a copy of the GNU General Public License along with Smoothie. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "libs/Module.h"
 #include "libs/Kernel.h"
 #include <math.h>
 #include "TemperatureControl.h"
 #include "TemperatureControlPool.h"
-#include "libs/Pin.h"
-#include "modules/robot/Conveyor.h"
 
 #include "Logging.h"
 #include "Config.h"
 #include "checksumm.h"
 #include "Gcode.h"
 #include "ConfigValue.h"
-#include "SerialMessage.h"
 #include "utils.h"
 #include "StreamOutput.h"
 
 // Temp sensor implementations:
 #include "Thermistor.h"
-
-#include "MRI_Hooks.h"
-
-#define UNDEFINED -1
 
 #define readings_per_second_checksum       CHECKSUM("readings_per_second")
 #define max_temp_checksum                  CHECKSUM("max_temp")
@@ -45,25 +37,10 @@ TemperatureControl::~TemperatureControl()
 void TemperatureControl::on_module_loaded()
 {
 
-    // We start not desiring any temp
-    this->target_temperature = UNDEFINED;
-    this->sensor_settings= false; // set to true if sensor settings have been overriden
-
-    // Settings
     this->load_config();
 
-    this->register_for_event(ON_SECOND_TICK);
+    overheat_timer.start();
 
-}
-
-void TemperatureControl::on_main_loop(void *argument)
-{
-	if(THEKERNEL->is_halted()) return;
-    if (this->temp_violated) {
-        this->temp_violated = false;
-        printk("ERROR: Spindle overheated, max - %f°C, current - %f°C !\n", max_temp, get_temperature());
-        THEKERNEL->halt(SPINDLE_OVERHEATED, "spindle overheated");
-    }
 }
 
 // Get configuration from the config file
@@ -72,7 +49,7 @@ void TemperatureControl::load_config()
 
     // General config
     this->get_m_code          = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, get_m_code_checksum)->by_default(105)->as_number();
-    this->readings_per_second = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, readings_per_second_checksum)->by_default(20)->as_number();
+    float readings_per_second = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, readings_per_second_checksum)->by_default(20)->as_number();
 
     this->designator          = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, designator_checksum)->by_default(string("T"))->as_string();
 
@@ -84,11 +61,8 @@ void TemperatureControl::load_config()
     sensor = new Thermistor();
     sensor->UpdateConfig(temperature_control_checksum, this->name_checksum);
 
-    // sigma-delta output modulation
-    this->o = 0;
-
     // reading tick
-    thermistor_timer.setFrequency(this->readings_per_second);
+    thermistor_timer.setFrequency(readings_per_second);
     thermistor_timer.start();
 
     this->last_reading = 0.0;
@@ -97,7 +71,7 @@ void TemperatureControl::load_config()
 void TemperatureControl::report_temperature(Gcode *gcode)
 {
     char buf[32]; // should be big enough for any status
-    int n = snprintf(buf, sizeof(buf), "%s:%3.1f /%3.1f @%d ", this->designator.c_str(), this->get_temperature(), ((target_temperature <= 0) ? 0.0 : target_temperature), this->o);
+    int n = snprintf(buf, sizeof(buf), "%s:%3.1f /0.0 @0 ", this->designator.c_str(), this->get_temperature());
     gcode->txt_after_ok.append(buf, n);
 }
 
@@ -107,18 +81,9 @@ void TemperatureControl::sensor_settings_gcode(Gcode *gcode)
     if(gcode->has_letter('S')) {
         TempSensor::sensor_options_t args= gcode->get_args();
         args.erase('S'); // don't include the S
-        if(args.size() > 0) {
-            // set the new options
-            if(sensor->set_optional(args)) {
-                this->sensor_settings= true;
-            } else {
-                gcode->stream->printf("Unable to properly set sensor settings, make sure you specify all required values\n");
-            }
-        } else {
-            // don't override
-            this->sensor_settings= false;
+        if(args.size() > 0 && !sensor->set_optional(args)) {
+            gcode->stream->printf("Unable to properly set sensor settings, make sure you specify all required values\n");
         }
-
     } else {
         sensor->get_raw();
         TempSensor::sensor_options_t options;
@@ -133,8 +98,8 @@ void TemperatureControl::sensor_settings_gcode(Gcode *gcode)
 void TemperatureControl::get_status(struct pad_temperature *t)
 {
     t->current_temperature = this->get_temperature();
-    t->target_temperature = (target_temperature <= 0) ? 0 : this->target_temperature;
-    t->pwm = this->o;
+    t->target_temperature = 0;
+    t->pwm = 0;
     t->designator = this->designator;
     t->id = this->name_checksum;
 }
@@ -149,18 +114,21 @@ void TemperatureControl::thermistor_read_tick()
     last_reading = sensor->get_temperature();
 }
 
-/**
- * Based on https://github.com/br3ttb/Arduino-PID-Library
- */
-
-void TemperatureControl::on_second_tick(void *argument)
+// its own timer, not the second tick: a check that stops the spindle must not depend on some
+// task getting round to pumping an event
+void TemperatureControl::overheat_tick()
 {
     if(THEKERNEL->is_halted()) return;
 
-    float temperature = sensor->get_temperature();
-    if (isinf(temperature) || temperature < min_temp || temperature > max_temp) {
-        printk("ERROR: Spindle overheated, max - %1.1f, current - %1.1f\n", max_temp, temperature);
-        THEKERNEL->halt(SPINDLE_OVERHEATED, "spindle overheated");
-    }
+    // read here and not from last_reading: a stalled reading timer would hide the overheat
+    float t = sensor->get_temperature();
+    bool sane = isfinite(t);
+    if(sane && t >= min_temp && t <= max_temp) return;
+
+    // whole degrees: the halt message is printed from the main loop and floats are dear here
+    char msg[32];
+    if(sane) snprintf(msg, sizeof(msg), "%s at %dC, max %d", designator.c_str(), (int)t, (int)max_temp);
+    else snprintf(msg, sizeof(msg), "%s sensor open", designator.c_str());
+    THEKERNEL->halt(SPINDLE_OVERHEATED, msg);
 }
 
