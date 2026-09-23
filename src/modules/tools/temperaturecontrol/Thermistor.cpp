@@ -236,7 +236,11 @@ void Thermistor::calc_jk()
 float Thermistor::get_temperature()
 {
     if(bad_config) return infinityf();
-    float t= adc_value_to_temperature(new_thermistor_reading());
+
+    int adc_value= new_thermistor_reading();
+    if(adc_value == (int)Adc::not_ready) return infinityf();
+
+    float t= adc_value_to_temperature(adc_value);
     // keep track of min/max for M305
     if(t > max_temp) max_temp= t;
     if(t < min_temp) min_temp= t;

@@ -49,8 +49,11 @@ class TemperatureControl : public Module {
         float max_temp, min_temp;
 
         TempSensor *sensor;
-        float last_reading;      // the average, which is what everything but the halt reads
+        float last_reading;
         bool has_reading;
+
+        static const uint8_t k_settle_ticks= 4;   // ticks a missing reading is tolerated at startup
+        uint8_t bad_readings;
 
         // the fan follows a curve rather than a setpoint: this is a limit, not a temperature
         // the spindle is meant to hold

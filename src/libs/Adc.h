@@ -12,7 +12,6 @@
 
 #include "PinNames.h" // mbed.h lib
 
-#include <cmath>
 
 class Pin;
 namespace mbed {
@@ -32,25 +31,24 @@ public:
 
     void new_sample(int chan, uint32_t value);
     // return the maximum ADC value, base is 12bits 4095.
-#ifdef OVERSAMPLE
     int get_max_value() const { return 4095 << OVERSAMPLE;}
-#else
-    int get_max_value() const { return 4095;}
-#endif
+
+    // read() answers this until the channel has averaged its first samples
+    static const unsigned int not_ready= 0xFFFFFFFF;
 
 private:
     PinName _pin_to_pinname(Pin *pin);
     mbed::ADC *adc;
 
     static const int num_channels= 6;
-#ifdef OVERSAMPLE
-    // we need 4^n sample to oversample and we get double that to filter out spikes
-    static const int num_samples= powf(4, OVERSAMPLE)*2;
-#else
-    static const int num_samples= 8;
-#endif
-    // buffers storing the last num_samples readings for each channel
-    uint16_t sample_buffers[num_channels][num_samples];
+    static const int num_samples= 5;   // odd, so the median is one of the samples
+
+    // A median, not an average: a spindle starting up puts spikes on the thermistor line, and
+    // an average carries a share of every one of them into the reading. The median ignores
+    // them outright as long as they are the minority.
+    uint16_t samples[num_channels][num_samples];
+    uint8_t at[num_channels];       // where the next sample goes
+    uint8_t filled[num_channels];   // read() has nothing to say until the first ones are in
 };
 
 #endif

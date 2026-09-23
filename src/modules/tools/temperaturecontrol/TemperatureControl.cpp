@@ -80,6 +80,7 @@ void TemperatureControl::load_config()
     cooling_since= fan_cooldown_delay + 1;   // starts off
 
     has_reading= false;
+    bad_readings= 0;
     last_reading = 0.0;
 }
 
@@ -124,27 +125,35 @@ float TemperatureControl::get_temperature()
     return last_reading;
 }
 
-// One timer: the overheat check comes first, then the fan curve. Both work on the same
-// reading, but the halt uses the raw one so an average cannot delay it.
+// One timer: the overheat check comes first, then the fan curve. The ADC already averages,
+// so this works on the reading as it comes.
 void TemperatureControl::read_tick()
 {
     float t= sensor->get_temperature();
-    bool sane= isfinite(t);
 
-    if(!THEKERNEL->is_halted() && (!sane || t < min_temp || t > max_temp)) {
+    // the ADC says nothing until it has averaged its first samples, which looks the same as an
+    // open sensor: give it a few ticks to come up, then a reading that is still missing is a fault
+    if(!isfinite(t)) {
+        if(!THEKERNEL->is_halted() && ++bad_readings > k_settle_ticks) {
+            char msg[32];
+            snprintf(msg, sizeof(msg), "%s sensor open", designator.c_str());
+            THEKERNEL->halt(SPINDLE_OVERHEATED, msg);
+        }
+        return;
+    }
+    bad_readings= 0;
+
+    last_reading= t;
+    has_reading= true;
+
+    if(!THEKERNEL->is_halted() && (t < min_temp || t > max_temp)) {
         char msg[32];
-        if(sane) snprintf(msg, sizeof(msg), "%s at %dC, max %d", designator.c_str(), (int)t, (int)max_temp);
-        else snprintf(msg, sizeof(msg), "%s sensor open", designator.c_str());
+        snprintf(msg, sizeof(msg), "%s at %dC, max %d", designator.c_str(), (int)t, (int)max_temp);
         THEKERNEL->halt(SPINDLE_OVERHEATED, msg);
         return;
     }
-    if(!sane) return;
 
-    // a running average, so the fan and the reports do not follow every wobble
-    last_reading= has_reading ? last_reading + (t - last_reading) / 4 : t;
-    has_reading= true;
-
-    drive_fan(last_reading);
+    drive_fan(t);
 }
 
 // The fan is a limiter, not a controller: off below the threshold, rising with the temperature
