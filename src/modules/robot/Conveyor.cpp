@@ -65,7 +65,7 @@ void Conveyor::init()
 
 void Conveyor::on_module_loaded()
 {
-    register_for_event(ON_IDLE);
+    register_for_event(ON_MAIN_LOOP);
 
     // Attach to the end_of_move stepper event
     queue_delay_time_ms = THEKERNEL->config->value(queue_delay_time_ms_checksum)->by_default(100)->as_number();
@@ -83,24 +83,27 @@ void Conveyor::cleanup()
     flush_queue();
 }
 
-void Conveyor::on_idle(void*)
+void Conveyor::on_main_loop(void*)
 {
     if (running) {
         check_queue();
     }
+    collect();
+}
 
-    // we can garbage collect the block queue here
-    if (queue.tail_i != queue.isr_tail_i) {
-        if (queue.is_empty()) {
-            __debugbreak();
-        } else {
-            // Cleanly delete block
-            Block* block = queue.tail_ref();
-            //block->debug();
-            block->clear();
-            queue.consume_tail();
-        }
+// a block the step ticker has finished with is only freed here
+void Conveyor::collect()
+{
+    if (queue.tail_i == queue.isr_tail_i) return;
+
+    if (queue.is_empty()) {
+        __debugbreak();
+        return;
     }
+
+    Block* block = queue.tail_ref();
+    block->clear();
+    queue.consume_tail();
 }
 
 // see if we are idle
@@ -118,28 +121,26 @@ bool Conveyor::is_idle() const
 // Wait for the queue to be empty and for all the jobs to finish in step ticker
 bool Conveyor::wait_for_idle(bool wait_for_motors)
 {
+    bool halted= false;
+
     // wait for the job queue to empty, this means cycling everything on the block queue into the job queue
     // forcing them to be jobs
     running = false;
     while (!queue.is_empty()) {
-        watchdog.alive();
-        if(THEKERNEL->is_halted()) { running = true; return false; }
         check_queue(true); // forces queue to be made available to stepticker
-        THEKERNEL->call_event(ON_IDLE, this);
+        if(!wait_for_block(halted)) break;
     }
 
     if(wait_for_motors) {
         // now we wait for all motors to stop moving
-        while(!is_idle()) {
-            watchdog.alive();
-            if(THEKERNEL->is_halted()) { running = true; return false; }
-            THEKERNEL->call_event(ON_IDLE, this);
+        while(!halted && !is_idle()) {
+            if(!wait_for_block(halted)) break;
         }
     }
 
     running = true;
     // returning now means that everything has totally finished
-    return true;
+    return !halted;
 }
 
 /*
@@ -148,9 +149,10 @@ bool Conveyor::wait_for_idle(bool wait_for_motors)
 void Conveyor::queue_head_block()
 {
     // upstream caller will block on this until there is room in the queue
-    while (queue.is_full() && !THEKERNEL->is_halted()) {
-        //check_queue();
-        THEKERNEL->call_event(ON_IDLE, this); // will call check_queue();
+    bool halted= false;
+    while (queue.is_full()) {
+        check_queue();
+        if(!wait_for_block(halted)) break;
     }
 
     if(THEKERNEL->is_halted()) {
@@ -219,6 +221,34 @@ void Conveyor::block_finished()
 {
     // we increment the isr_tail_i so we can get the next block
     queue.isr_tail_i= queue.next(queue.isr_tail_i);
+
+    if(waiter != nullptr) {
+        BaseType_t woken= pdFALSE;
+        vTaskNotifyGiveIndexedFromISR(waiter, k_notify_index, &woken);
+        portYIELD_FROM_ISR(woken);
+    }
+}
+
+// the step ticker only notifies when a block ends, so the timeout is there to re-check whether
+// the motors have stopped
+bool Conveyor::wait_for_block(bool &halted)
+{
+    collect();
+    watchdog.alive();
+    if(THEKERNEL->is_halted()) {
+        halted= true;
+        return false;
+    }
+
+    waiter= xTaskGetCurrentTaskHandle();
+    // a block that ended while nobody was waiting must not make this return at once
+    xTaskNotifyStateClearIndexed(nullptr, k_notify_index);
+    ulTaskNotifyTakeIndexed(k_notify_index, pdTRUE, pdMS_TO_TICKS(10));
+    waiter= nullptr;
+    collect();
+
+    THEKERNEL->call_event(ON_IDLE, this);
+    return true;
 }
 
 /*
@@ -236,9 +266,10 @@ void Conveyor::flush_queue()
 
     // TODO force deceleration of last block
 
+    bool halted= false;
     while (!queue.is_empty()) {
         check_queue(true);
-        THEKERNEL->call_event(ON_IDLE, this);
+        if(!wait_for_block(halted)) break;
     }
 
     running = true;

@@ -9,6 +9,7 @@
 #define configUSE_TICK_HOOK             0
 #define configUSE_TIMERS                1
 #define configUSE_COUNTING_SEMAPHORES   1
+#define configTASK_NOTIFICATION_ARRAY_ENTRIES 2   // 0: the second tick, 1: a block finished
 #define configTIMER_TASK_STACK_DEPTH    120
 #define configTIMER_QUEUE_LENGTH        16
 #define configCPU_CLOCK_HZ              ( ( unsigned long ) SystemCoreClock )

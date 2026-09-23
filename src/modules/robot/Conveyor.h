@@ -11,6 +11,9 @@
 #include "libs/Killable.h"
 #include "BlockQueue.h"
 
+#include "FreeRTOS.h"
+#include "task.h"
+
 class Block;
 
 class Conveyor : public Module, public Killable
@@ -20,7 +23,7 @@ public:
     void start(uint8_t n_actuators);
 
     void on_module_loaded(void);
-    void on_idle(void *);
+    void on_main_loop(void *);
     void kill() override {}
     void cleanup() override;
 
@@ -42,10 +45,16 @@ public:
 
 private:
     void check_queue(bool force= false);
+    void collect();
     void queue_head_block(void);
+
+    static const UBaseType_t k_notify_index = 1;
+    bool wait_for_block(bool &halted);
 
     using Queue_t = BlockQueue<32>;
     Queue_t queue; // Queue of Blocks
+
+    volatile TaskHandle_t waiter{nullptr};
 
     uint32_t queue_delay_time_ms;
     float current_feedrate{0}; // actual nominal feedrate that current block is running at in mm/sec
