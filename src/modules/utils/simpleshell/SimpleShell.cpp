@@ -9,7 +9,6 @@
 #include "SimpleShell.h"
 
 #include "rtc_time.h"
-#include "../mainbutton/MainButtonPublicAccess.h"
 #include "libs/Kernel.h"
 #include "libs/nuts_bolts.h"
 #include "libs/utils.h"
@@ -23,7 +22,6 @@
 #include "AppendFileStream.h"
 #include "FileStream.h"
 #include "checksumm.h"
-#include "ScriptsPublicAccess.h"
 #include "Scripts.h"
 #include "Source.h"
 #include "Gcode.h"
@@ -33,14 +31,9 @@
 #include "StepperMotor.h"
 #include "Configurator.h"
 #include "Block.h"
-#include "SpindlePublicAccess.h"
-#include "ZProbePublicAccess.h"
-#include "LaserPublicAccess.h"
 #include "TemperatureControlPublicAccess.h"
 #include "TemperatureControlPool.h"
-#include "EndstopsPublicAccess.h"
 #include "Endstops.h"
-#include "ATCHandlerPublicAccess.h"
 #include "WirelessProbe.h"
 // #include "NetworkPublicAccess.h"
 #include "SwitchPublicAccess.h"
@@ -50,7 +43,6 @@
 #include "md5.h"
 #include "utils.h"
 #include "AutoPushPop.h"
-#include "MainButtonPublicAccess.h"
 #include "MainButton.h"
 #include "system_LPC17xx.h"
 #include "LPC17xx.h"
@@ -136,6 +128,7 @@ void SimpleShell::on_module_loaded()
 }
 
 SimpleShell::Registered *SimpleShell::registered = nullptr;
+std::string SimpleShell::current_path = "/";
 
 void SimpleShell::add_command(Registered &slot, const char *name, command_fn fn, void *context, const char *help)
 {
@@ -421,7 +414,7 @@ void SimpleShell::cd_command( string parameters, StreamOutput *stream )
     if (d == NULL) {
         stream->printf("Could not open directory %s \r\n", folder.c_str() );
     } else {
-        THEKERNEL->current_path = folder;
+        current_path = folder;
         closedir(d);
     }
 }
@@ -429,7 +422,7 @@ void SimpleShell::cd_command( string parameters, StreamOutput *stream )
 // Responds with the present working directory
 void SimpleShell::pwd_command( string parameters, StreamOutput *stream )
 {
-    stream->printf("%s\r\n", THEKERNEL->current_path.c_str());
+    stream->printf("%s\r\n", current_path.c_str());
 }
 
 // Output the contents of a file, first parameter is the filename, second is the limit ( in number of lines to output )

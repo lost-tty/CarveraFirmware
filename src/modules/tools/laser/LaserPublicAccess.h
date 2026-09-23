@@ -13,7 +13,6 @@
 #include <string>
 
 #define laser_checksum		         CHECKSUM("laser")
-#define get_laser_status_checksum    CHECKSUM("get_laser_status")
 
 struct laser_status {
 	bool mode;

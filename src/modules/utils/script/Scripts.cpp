@@ -8,7 +8,7 @@
 #include "utils/Gcode.h"
 #include "checksumm.h"
 #include "ScriptsPublicAccess.h"
-#include "ATCHandlerPublicAccess.h"
+#include "modules/tools/atc/ATCHandler.h"
 #include "utils/Parameters.h"
 #include "SimpleShell.h"
 #include "utils.h"
@@ -115,7 +115,7 @@ void Scripts::finish()
 {
     THEROBOT.pop_state();
     THEROBOT.set_keepout(true);
-    THEKERNEL->set_atc_state(ATC_NONE);
+    atc_handler.set_state(0);
     reply= nullptr;
 }
 

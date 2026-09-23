@@ -5,10 +5,8 @@
 #include "quicklz.h"
 #include "utils.h"
 #include "mbed.h"
-#include "ScriptsPublicAccess.h"
 #include "Scripts.h"
 #include "Source.h"
-#include "ATCHandlerPublicAccess.h"
 #include "md5.h"
 #include <cstring>
 

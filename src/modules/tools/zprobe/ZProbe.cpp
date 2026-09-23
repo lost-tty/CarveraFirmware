@@ -413,6 +413,9 @@ void ZProbe::calibrate_Z(Gcode *gcode)
         return;
     }
 
+    // a probe stuck on would look alive to M492.3 below, so remember whether it was quiet before the move
+    bool probe_idle= !this->probe_pin.get();
+
     probe_watch.inputs.clear();
     probe_watch.inputs.add(calibrate_pin);
     // a live wireless probe signals as the setter does, which M492.3 reads below
@@ -448,7 +451,7 @@ void ZProbe::calibrate_Z(Gcode *gcode)
     }
 
     // M492.3 reads this as "the wireless probe is alive": only a probe that signalled is
-    if (probe_watch.hit && probe_watch.witnessed) {
+    if (probe_watch.hit && probe_watch.witnessed && probe_idle) {
     	this->probe_trigger_time = us_ticker_read();
     }
 

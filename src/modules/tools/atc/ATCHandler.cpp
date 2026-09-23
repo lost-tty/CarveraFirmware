@@ -6,6 +6,7 @@
 */
 
 #include "ATCHandler.h"
+#include "checksumm.h"
 #include <cstring>
 #include "libs/Kernel.h"
 #include "GcodeDispatch.h"
@@ -18,12 +19,10 @@
 #include "WirelessProbe.h"
 #include "Gcode.h"
 #include "libs/Logging.h"
-#include "SwitchPublicAccess.h"
 #include "SwitchPool.h"
 #include "ATCHandlerPublicAccess.h"
 #include "utils/Parameters.h"
 #include "SimpleShell.h"
-#include "ZProbePublicAccess.h"
 #include "us_ticker_api.h"
 
 
@@ -141,7 +140,7 @@ void ATCHandler::on_config_reload(void *argument)
 
 void ATCHandler::cleanup()
 {
-    THEKERNEL->set_atc_state(ATC_NONE);
+    atc_state= 0;
     this->atc_home_info.clamp_status = UNHOMED;
 }
 
@@ -403,7 +402,7 @@ void ATCHandler::on_gcode_received(Gcode *argument)
 
         case 497:
             THECONVEYOR.wait_for_idle();
-            THEKERNEL->set_atc_state(sub);
+            atc_state= sub;
             break;
 
     }

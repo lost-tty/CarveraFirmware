@@ -17,7 +17,6 @@ using std::string;
 #include "libs/SerialMessage.h"
 #include "libs/StreamOutput.h"
 #include "libs/Logging.h"
-#include "ATCHandlerPublicAccess.h"
 
 // Serial reading module
 SerialConsole::SerialConsole( PinName rx_pin, PinName tx_pin, int baud_rate )

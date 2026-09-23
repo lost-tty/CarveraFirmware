@@ -30,7 +30,6 @@
 #include "modules/robot/Robot.h"
 #include "StepperMotor.h"
 #include "BaseSolution.h"
-#include "EndstopsPublicAccess.h"
 #include "SimpleShell.h"
 #include "TemperatureControlPublicAccess.h"
 #include "TemperatureControlPool.h"
@@ -40,8 +39,6 @@
 #include "SpindlePublicAccess.h"
 #include "SwitchPublicAccess.h"
 #include "SwitchPool.h"
-#include "ZProbePublicAccess.h"
-#include "MainButtonPublicAccess.h"
 #include "mbed.h"
 #include "utils.h"
 
@@ -81,7 +78,6 @@ void Kernel::init()
     waiting = false;
     suspending = false;
     halt_reason = MANUAL;
-    atc_state = 0;
 
     // serial first at fixed baud rate (DEFAULT_SERIAL_BAUD_RATE) so config can report errors to serial
     // Set to UART0, this will be changed to use the same UART as MRI if it's enabled
@@ -97,8 +93,6 @@ void Kernel::init()
     // now config is loaded we can do normal setup for serial based on config
     delete this->serial;
     this->serial = NULL;
-
-    this->current_path   = "/";
 
     // Configure UART depending on MRI config
     // Match up the SerialConsole to MRI UART. This makes it easy to use only one UART for both debug and actual commands.
@@ -328,8 +322,8 @@ std::string Kernel::get_query_string()
 	}
 
     // if doing atc
-    if (atc_state != ATC_NONE) {
-        n = snprintf(buf, sizeof(buf), "|A:%d", atc_state);
+    if (atc_handler.state() != 0) {
+        n = snprintf(buf, sizeof(buf), "|A:%d", atc_handler.state());
         if(n > sizeof(buf)) n = sizeof(buf);
         str.append(buf, n);
     }

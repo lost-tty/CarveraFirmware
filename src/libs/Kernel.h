@@ -72,17 +72,6 @@ enum HALT_REASON {
 	SPINDLE_ALARM			= 41
 };
 
-enum ATC_STATE {
-	ATC_NONE   		= 0,
-	ATC_DROP 		= 1,
-	ATC_PICK		= 2,
-	ATC_CALIBRATE	= 3,
-	ATC_MARGIN		= 4,
-	ATC_ZPROBE		= 5,
-	ATC_AUTOLEVEL   = 6,
-	ATC_DONE		= 9
-};
-
 typedef struct {
 	float TLO;
 	// int TOOL;
@@ -152,9 +141,6 @@ class Kernel {
 
         uint8_t get_halt_reason() const { return halt_reason; }
 
-        void set_atc_state(uint8_t state) { atc_state = state; }
-        uint8_t get_atc_state() const { return atc_state; }
-
         void read_eeprom_data();
         void write_eeprom_data();
         void erase_eeprom_data();
@@ -171,13 +157,11 @@ class Kernel {
         SlowTicker        slow_ticker;
         StepTicker        step_ticker;
         Adc               adc;
-        std::string       current_path;
         uint32_t          base_stepping_frequency;
 
         uint8_t get_state();
         uint8_t halt_reason;
         char halt_msg[32];
-        uint8_t atc_state;
         EEPROM_data eeprom_data;
 
     private:

@@ -7,6 +7,7 @@
 
 #include "libs/Kernel.h"
 #include "libs/utils.h"
+#include "SimpleShell.h"
 #include "system_LPC17xx.h"
 #include "LPC17xx.h"
 #include "utils.h"
@@ -201,14 +202,14 @@ void system_reset( bool dfu )
 // Convert a path indication ( absolute or relative ) into a path ( absolute )
 std::string absolute_from_relative( std::string path )
 {
-    string cwd = THEKERNEL->current_path;
+    string cwd = SimpleShell::cwd();
 
     if ( path.length() > 1 && path.back() == '/' ) {
         path.pop_back();
     }
 
     if ( path.empty() ) {
-        return THEKERNEL->current_path;
+        return cwd;
     }
 
     if ( path[0] == '/' ) {

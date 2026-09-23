@@ -14,6 +14,10 @@ class ATCHandler : public Module, public Killable
 {
 
 public:
+    // M497.<n> sets it, the macros pick the numbers, the status line reports it as |A:<n>
+    uint8_t state() const { return atc_state; }
+    void set_state(uint8_t s) { atc_state = s; }
+
     bool get_tool_status(struct tool_status *t) const;
     void get_pin_status(char *data) const;
     void set_ref_tool_mz();
@@ -38,6 +42,7 @@ private:
     void sub_state(std::string args, StreamOutput *stream);
     void sub_rack(std::string args, StreamOutput *stream);
     SimpleShell::Registered shell_slot;
+    volatile uint8_t atc_state{0};
 
 
     typedef enum {

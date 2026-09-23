@@ -22,7 +22,6 @@ using std::string;
 #include "libs/StreamOutput.h"
 #include "SwitchPublicAccess.h"
 #include "SwitchPool.h"
-#include "ATCHandlerPublicAccess.h"
 
 #define wp_checksum						CHECKSUM("wp")
 #define min_voltage_checksum			CHECKSUM("min_voltage")

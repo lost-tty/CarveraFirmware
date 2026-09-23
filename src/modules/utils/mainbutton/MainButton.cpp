@@ -9,16 +9,10 @@
 #include "ConfigValue.h"
 #include "Logging.h"
 #include "us_ticker_api.h"
-#include "EndstopsPublicAccess.h"
 #include "Endstops.h"
-#include "PlayerPublicAccess.h"
 #include "Player.h"
 #include "SwitchPublicAccess.h"
 #include "SwitchPool.h"
-#include "MainButtonPublicAccess.h"
-#include "TemperatureControlPublicAccess.h"
-#include "LaserPublicAccess.h"
-#include "PlayerPublicAccess.h"
 
 using namespace std;
 

@@ -19,7 +19,6 @@ Author: Michael Hackney, mhackney@eclecticangler.com
 #include "modules/tools/temperaturecontrol/TemperatureControlPublicAccess.h"
 #include "SwitchPublicAccess.h"
 #include "SwitchPool.h"
-#include "LaserPublicAccess.h"
 
 #include "utils.h"
 #include "Gcode.h"

@@ -19,7 +19,6 @@
 #include "Gcode.h"
 #include "libs/Logging.h"
 #include "libs/StreamOutput.h"
-#include "SwitchPublicAccess.h"
 #include "WifiPublicAccess.h"
 #include "libs/utils.h"
 #include "Logging.h"

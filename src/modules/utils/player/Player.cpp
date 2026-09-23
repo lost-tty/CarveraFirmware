@@ -25,11 +25,8 @@
 
 #include "modules/robot/Conveyor.h"
 #include "DirHandle.h"
-#include "ATCHandlerPublicAccess.h"
 #include "PlayerPublicAccess.h"
-#include "ScriptsPublicAccess.h"
 #include "Scripts.h"
-#include "TemperatureControlPublicAccess.h"
 #include "TemperatureControlPool.h"
 #include "Block.h"
 

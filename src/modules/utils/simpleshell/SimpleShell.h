@@ -48,6 +48,8 @@ public:
     }
 
     typedef void (*command_fn)(void *context, const char *name, std::string args, StreamOutput *stream);
+    static const std::string &cwd() { return current_path; }
+
     struct Registered { const char *name; command_fn command; void *context; const char *help; Registered *next; };
     static void add_command(Registered &slot, const char *name, command_fn fn, void *context, const char *help);
     static void run(const std::string &line, StreamOutput *stream);
@@ -128,6 +130,7 @@ private:
     static const ptentry_t commands_table[];
 
     static Registered *registered;
+    static std::string current_path;
 
     FileTransfer transfer;
     Configurator      configurator;

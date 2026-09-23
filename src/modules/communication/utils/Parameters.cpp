@@ -7,8 +7,6 @@
 #include "checksumm.h"
 #include "SpindlePublicAccess.h"
 #include "SpindleControl.h"
-#include "ATCHandlerPublicAccess.h"
-#include "PlayerPublicAccess.h"
 #include "Player.h"
 
 #include <cstring>

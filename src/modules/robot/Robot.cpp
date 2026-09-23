@@ -26,8 +26,6 @@
 #include "Logging.h"
 #include "GcodeDispatch.h"
 #include "ActuatorCoordinates.h"
-#include "EndstopsPublicAccess.h"
-#include "ATCHandlerPublicAccess.h"
 #include "SpindlePublicAccess.h"
 
 #include "mbed.h" // for us_ticker_read()
