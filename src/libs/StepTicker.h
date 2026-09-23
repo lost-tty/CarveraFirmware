@@ -39,6 +39,7 @@ class StepTicker{
         float get_trapezoid_rate(int m) const { return STEPTICKER_FROMFP(state[m].steps_per_tick) * frequency; } // steps/sec now
 
         void set_watch(Watch *w) { watch= w; }
+        bool watching() const { return watch != nullptr; }
 
         struct Limit { Pin pin; uint8_t motor; bool at_end; bool at_max; };
         void set_limits(const Limit *l, uint8_t count, uint16_t hyst);

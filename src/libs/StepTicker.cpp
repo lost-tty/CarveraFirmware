@@ -180,6 +180,7 @@ void StepTicker::check_watch()
 
     if(!watch->seen) {
         watch->seen= true;
+        watch->witnessed= watch->witness.any();
         for (uint8_t m = 0; m < num_motors; m++) watch->at_steps[m]= motor[m]->get_current_step();
     }
 

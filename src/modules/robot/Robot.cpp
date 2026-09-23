@@ -1724,7 +1724,7 @@ bool Robot::delta_move_sync(const float *delta, float rate_mm_s, uint8_t naxis)
 // refuse a target outside the soft limits of a homed axis
 bool Robot::within_soft_limits(const float transformed_target[], Gcode *gcode)
 {
-    if(!soft_endstop_enabled || THEKERNEL->is_zprobing()) return true;
+    if(!soft_endstop_enabled || THEKERNEL->step_ticker.watching()) return true;
     for (int i = 0; i <= Z_AXIS; ++i) {
         if(!is_homed(i)) continue;
         if(!(!isnan(soft_endstop_min[i]) && transformed_target[i] < soft_endstop_min[i]) &&
@@ -1745,7 +1745,7 @@ bool Robot::within_soft_limits(const float transformed_target[], Gcode *gcode)
 // the zones are for the tool tip, the lowest point of the spindle; a probe stops on contact, so it may enter
 bool Robot::clear_of_keepout(const float from[], const float to[], Gcode *gcode)
 {
-    if(!keepout_on || !is_homed_all_axes() || THEKERNEL->is_zprobing()) return true;
+    if(!keepout_on || !is_homed_all_axes() || THEKERNEL->step_ticker.watching()) return true;
 
     // the tool length is measured against the reference tool the zones were probed with
     float tlo= std::get<Z_AXIS>(tool_offset);

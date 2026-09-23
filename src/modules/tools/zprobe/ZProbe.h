@@ -50,7 +50,6 @@ private:
     void config_load();
     void probe_XYZ(Gcode *gc);
     void calibrate_Z(Gcode *gc);
-    void calibrate_pin_irq();
 
     float slow_feedrate;
     float fast_feedrate;
@@ -65,10 +64,7 @@ private:
 
     uint32_t probe_trigger_time;
 
-    volatile bool calibrating;
     Watch probe_watch;
-    volatile bool probe_seen_at_setter{false};
-    volatile bool calibrate_detected;
 
     struct {
         bool reverse_z:1;

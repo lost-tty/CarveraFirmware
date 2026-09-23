@@ -68,8 +68,6 @@ void ZProbe::on_module_loaded()
     // we read the probe in this timer
     this->probe_trigger_time = 0;
 
-    mbed::InterruptIn *calibrate_pin_interrupt = this->calibrate_pin.interrupt_pin();
-    calibrate_pin_interrupt->rise(this, &ZProbe::calibrate_pin_irq);
 }
 
 void ZProbe::config_load()
@@ -120,19 +118,6 @@ void ZProbe::config_load()
 
 }
 
-void ZProbe::calibrate_pin_irq() {
-    if (!calibrating || calibrate_detected) return;
-
-    // just check z Axis move
-    if (THEROBOT.motor_is_moving(Z_AXIS)) {
-        // we signal the motors to stop, which will preempt any moves on that axis
-        // we do all motors as it may be a delta
-        THEROBOT.stop_motors();
-        probe_seen_at_setter = this->probe_pin.get();
-        calibrate_detected = true;
-    }
-}
-
 // single probe in Z with custom feedrate
 // returns boolean value indicating if probe was triggered
 bool ZProbe::run_probe(float& mm, float feedrate, float max_dist, bool reverse)
@@ -147,6 +132,7 @@ bool ZProbe::run_probe(float& mm, float feedrate, float max_dist, bool reverse)
     float maxz= max_dist < 0 ? this->max_z*2 : max_dist;
 
     probe_watch.inputs.clear();
+    probe_watch.witness.clear();
     probe_watch.inputs.add(probe_pin, invert_probe);
     probe_watch.motors= (1<<X_AXIS)|(1<<Y_AXIS)|(1<<Z_AXIS);
 
@@ -156,10 +142,7 @@ bool ZProbe::run_probe(float& mm, float feedrate, float max_dist, bool reverse)
     bool dir= (!reverse_z != reverse); // xor
     float delta[3]= {0,0,0};
     delta[Z_AXIS]= dir ? -maxz : maxz;
-    THEKERNEL->set_zprobing(true);
-    bool ok= THEROBOT.delta_move_watch(delta, feedrate, 3, probe_watch);
-    THEKERNEL->set_zprobing(false);
-    if(!ok) return false;
+    if(!THEROBOT.delta_move_watch(delta, feedrate, 3, probe_watch)) return false;
 
     int32_t at= probe_watch.hit ? probe_watch.at_steps[Z_AXIS] : THEROBOT.motor_step(Z_AXIS);
     mm = (z_start_steps - at) / THEROBOT.motor_steps_per_mm(Z_AXIS);
@@ -376,11 +359,10 @@ void ZProbe::probe_XYZ(Gcode *gcode)
     probe_watch.inputs.add(probe_pin, invert_probe);
     probe_watch.motors= (1<<X_AXIS)|(1<<Y_AXIS)|(1<<Z_AXIS);
 
+    probe_watch.witness.clear();
+
     float delta[3]= {x, y, z};
-    THEKERNEL->set_zprobing(true);
-    bool ok= THEROBOT.delta_move_watch(delta, rate, 3, probe_watch);
-    THEKERNEL->set_zprobing(false);
-    if(!ok) {
+    if(!THEROBOT.delta_move_watch(delta, rate, 3, probe_watch)) {
         if(!THEKERNEL->is_halted()) {
             gcode->stream->printf("ERROR: Move too small,  %1.3f, %1.3f, %1.3f\n", x, y, z);
             THEKERNEL->halt(PROBE_FAIL, "probe failed");
@@ -431,26 +413,21 @@ void ZProbe::calibrate_Z(Gcode *gcode)
         return;
     }
 
-    // enable the probe checking in the timer
-    calibrating = true;
-    calibrate_detected = false;
+    probe_watch.inputs.clear();
+    probe_watch.inputs.add(calibrate_pin);
+    // a live wireless probe signals as the setter does, which M492.3 reads below
+    probe_watch.witness.clear();
+    probe_watch.witness.add(probe_pin);
+    probe_watch.motors= (1<<X_AXIS)|(1<<Y_AXIS)|(1<<Z_AXIS);
 
-    // do a delta move which will stop as soon as the probe is triggered, or the distance is reached
     float delta[3]= {0, 0, z};
-    THEKERNEL->set_zprobing(true);
-    if(!THEROBOT.delta_move(delta, rate, 3)) {
-        gcode->stream->printf("ERROR: Move too small,  %1.3f\n", z);
-        THEKERNEL->halt(PROBE_FAIL, "probe failed");
-        calibrating = false;
-        THEKERNEL->set_zprobing(false);
+    if(!THEROBOT.delta_move_watch(delta, rate, 3, probe_watch)) {
+        if(!THEKERNEL->is_halted()) {
+            gcode->stream->printf("ERROR: Move too small,  %1.3f\n", z);
+            THEKERNEL->halt(PROBE_FAIL, "probe failed");
+        }
         return;
     }
-    THEKERNEL->set_zprobing(false);
-
-    THECONVEYOR.wait_for_idle();
-
-    // disable probe checking
-    calibrating = false;
 
     // if the probe stopped the move we need to correct the last_milestone as it did not reach where it thought
     // this also sets last_milestone to the machine coordinates it stopped at
@@ -458,7 +435,7 @@ void ZProbe::calibrate_Z(Gcode *gcode)
     float pos[3];
     THEROBOT.get_axis_position(pos, 3);
 
-    uint8_t calibrateok = this->calibrate_detected ? 1 : 0;
+    uint8_t calibrateok = probe_watch.hit ? 1 : 0;
 
     // print results using the GRBL format
     gcode->stream->printf("[PRB:%1.3f,%1.3f,%1.3f:%d]\n", THEROBOT.from_millimeters(pos[X_AXIS]), THEROBOT.from_millimeters(pos[Y_AXIS]), THEROBOT.from_millimeters(pos[Z_AXIS]), calibrateok);
@@ -471,7 +448,7 @@ void ZProbe::calibrate_Z(Gcode *gcode)
     }
 
     // M492.3 reads this as "the wireless probe is alive": only a probe that signalled is
-    if (calibrate_detected && probe_seen_at_setter) {
+    if (probe_watch.hit && probe_watch.witnessed) {
     	this->probe_trigger_time = us_ticker_read();
     }
 

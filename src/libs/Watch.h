@@ -8,12 +8,14 @@
 // Terminates a move when an input asserts.
 struct Watch {
     PinGroup inputs;
+    PinGroup witness;         // sampled at the first edge into witnessed
     uint32_t motors{0};
     uint16_t hysteresis{0};   // steps a watched motor travels with the input held before it counts
 
     bool seen{false};
+    volatile bool    witnessed{false};
     volatile bool    hit{false};
     volatile int32_t at_steps[k_max_actuators]{};
 
-    void arm() { seen = false; hit = false; }
+    void arm() { seen = false; hit = false; witnessed = false; }
 };

@@ -13,12 +13,14 @@ static const int MOTORS = 3;
 
 struct Watch {
     bool     asserted{false};     // stands in for inputs.any()
+    bool     witness{false};      // stands in for witness.any()
     uint8_t  motors{0};
     uint16_t hysteresis{0};
     bool     seen{false};
+    bool     witnessed{false};
     bool     hit{false};
     int32_t  at_steps[MOTORS]{};
-    void arm() { seen = false; hit = false; }
+    void arm() { seen = false; hit = false; witnessed = false; }
 };
 
 static int32_t position[MOTORS];
@@ -33,6 +35,7 @@ static void tick(Watch *w)
         } else {
             if(!w->seen) {
                 w->seen = true;
+                w->witnessed = w->witness;
                 for (int m = 0; m < MOTORS; m++) w->at_steps[m] = position[m];
             }
             bool travelled = false;
@@ -146,11 +149,34 @@ int main()
         CHECK(!moving[0]);
     }
 
+    // the witness is sampled at the first edge, not later: a probe that signals after the setter
+    // did is not the same probe signalling with it
+    {
+        reset();
+        Watch w; w.motors = 1; w.hysteresis = 5; w.arm();
+        w.asserted = true;
+        tick(&w);
+        CHECK(!w.witnessed);
+        w.witness = true;                            // asserts a tick too late
+        for (int i = 0; i < 5; i++) tick(&w);
+        CHECK(w.hit);
+        CHECK(!w.witnessed);
+    }
+
+    // a witness held at the first edge is recorded with the hit
+    {
+        reset();
+        Watch w; w.motors = 1; w.hysteresis = 5; w.arm();
+        w.asserted = true; w.witness = true;
+        for (int i = 0; i < 6; i++) tick(&w);
+        CHECK(w.hit && w.witnessed);
+    }
+
     // arm() clears it for the next move
     {
-        Watch w; w.hit = true; w.seen = true;
+        Watch w; w.hit = true; w.seen = true; w.witnessed = true;
         w.arm();
-        CHECK(!w.hit && !w.seen);
+        CHECK(!w.hit && !w.seen && !w.witnessed);
     }
 
     // no watch at all is a plain move

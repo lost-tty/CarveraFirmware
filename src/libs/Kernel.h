@@ -150,12 +150,6 @@ class Kernel {
         void set_waiting(bool f) { waiting = f; }
         bool is_waiting() const { return waiting; }
 
-        void set_aborted(bool f) { aborted = f; }
-        bool is_aborted() const { return aborted; }
-
-        void set_zprobing(bool f) { zprobing = f; }
-        bool is_zprobing() const { return zprobing; }
-
         uint8_t get_halt_reason() const { return halt_reason; }
 
         void set_atc_state(uint8_t state) { atc_state = state; }
@@ -205,8 +199,6 @@ class Kernel {
             bool sleeping:1;
             bool suspending: 1;
             bool waiting: 1;
-            bool aborted: 1;
-            bool zprobing:1;
         };
         int iic_page_write(unsigned char u8PageNum, unsigned char u8len, unsigned char *pu8Array);
 
