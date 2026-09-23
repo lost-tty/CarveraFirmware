@@ -97,10 +97,10 @@ bool Persist::page_write(uint8_t page, uint8_t len, const uint8_t *from)
     unsigned int address = (unsigned int)page << 5;
 
     i2c->start();
-    bool ok= i2c->write(0xA0) == 1;
-    ok= i2c->write((unsigned char)(address >> 8)) == 1 && ok;
-    ok= i2c->write((unsigned char)address) == 1 && ok;
-    for (uint8_t i = 0; i < len; i++) ok= i2c->write(from[i]) == 1 && ok;
+    bool ok= i2c->write(0xA0) == 1
+          && i2c->write((unsigned char)(address >> 8)) == 1
+          && i2c->write((unsigned char)address) == 1;
+    for (uint8_t i = 0; ok && i < len; i++) ok= i2c->write(from[i]) == 1;
     i2c->stop();
     i2c->stop();
 
