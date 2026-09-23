@@ -161,7 +161,7 @@ Source::Result Scripts::next(SerialMessage &msg)
                 snprintf(buf, sizeof(buf), "line %u:", macros.source().line_of(runner->last_offset()));
                 printk("%s> %s\n", macros.located(buf, runner->last_offset()).c_str(), msg.message.c_str());
             }
-            msg.stream= &THEKERNEL->streams; // errors from the line must reach someone
+            msg.stream= &StreamOutput::NullStream;
             return LINE;
         case script::Runner::MESSAGE:
             printk("%s\n", msg.message.c_str());
