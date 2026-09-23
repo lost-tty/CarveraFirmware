@@ -111,3 +111,40 @@ DRESULT disk_ioctl (
 	return RES_PARERR;
 }
 
+
+// _FS_REENTRANT: one mutex per volume, so a read on one task cannot use the sector another
+// task just loaded into the shared buffer
+
+int ff_cre_syncobj(BYTE vol, _SYNC_t *sobj)
+{
+    (void)vol;
+    *sobj = xSemaphoreCreateMutex();
+    return *sobj != NULL;
+}
+
+int ff_del_syncobj(_SYNC_t sobj)
+{
+    vSemaphoreDelete(sobj);
+    return 1;
+}
+
+int ff_req_grant(_SYNC_t sobj)
+{
+    return xSemaphoreTake(sobj, _FS_TIMEOUT) == pdTRUE;
+}
+
+void ff_rel_grant(_SYNC_t sobj)
+{
+    xSemaphoreGive(sobj);
+}
+
+// _USE_LFN 3: the long name buffer comes from the heap rather than a shared static one
+void* ff_memalloc(UINT size)
+{
+    return malloc(size);
+}
+
+void ff_memfree(void *p)
+{
+    free(p);
+}

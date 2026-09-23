@@ -494,7 +494,7 @@ static WCHAR LfnBuf[_MAX_LFN+1];
 
 #elif _USE_LFN == 3         /* LFN with dynamic LFN working buffer on the heap */
 #define    DEF_NAMEBUF            BYTE sfn[12]; WCHAR *lfn
-#define INIT_BUF(dobj)        { lfn = ff_memalloc((_MAX_LFN + 1) * 2); \
+#define INIT_BUF(dobj)        { lfn = (WCHAR*)ff_memalloc((_MAX_LFN + 1) * 2); \
                               if (!lfn) LEAVE_FF((dobj).fs, FR_NOT_ENOUGH_CORE); \
                               (dobj).lfn = lfn;    (dobj).fn = sfn; }
 #define    FREE_BUF()            ff_memfree(lfn)

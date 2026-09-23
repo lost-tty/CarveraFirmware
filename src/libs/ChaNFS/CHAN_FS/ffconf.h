@@ -90,7 +90,7 @@
 */
 
 
-#define    _USE_LFN    1        /* 0 to 3 */
+#define    _USE_LFN    3        /* 0 to 3 */   /* 3: on the heap, a static one cannot be shared */
 #define    _MAX_LFN    255        /* Maximum LFN length to handle (12 to 255) */
 /* The _USE_LFN option switches the LFN support.
 /
@@ -169,9 +169,14 @@
 /* A header file that defines sync object types on the O/S, such as
 /  windows.h, ucos_ii.h and semphr.h, must be included prior to ff.h. */
 
-#define _FS_REENTRANT    0        /* 0:Disable or 1:Enable */
+/* the player reads a job on one task while an upload or a levelling grid writes on another,
+   and FatFs keeps one sector buffer per volume: without this they read each other's sector */
+#include "FreeRTOS.h"
+#include "semphr.h"
+
+#define _FS_REENTRANT    1        /* 0:Disable or 1:Enable */
 #define _FS_TIMEOUT        1000    /* Timeout period in unit of time ticks */
-#define    _SYNC_t            HANDLE    /* O/S dependent type of sync object. e.g. HANDLE, OS_EVENT*, ID and etc.. */
+#define    _SYNC_t            SemaphoreHandle_t
 
 /* The _FS_REENTRANT option switches the reentrancy (thread safe) of the FatFs module.
 /
