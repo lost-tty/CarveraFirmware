@@ -5,6 +5,7 @@
 #include "Logging.h"
 
 #include <cstring>
+#include <cmath>
 
 #define EEP_MAX_PAGE_SIZE     32
 #define EEPROM_DATA_STARTPAGE 1
@@ -34,31 +35,37 @@ void Persist::init(mbed::I2C *bus)
     written = record;
 }
 
-void Persist::set_work_offset(float x, float y, float z)
+// a chip written before this field existed reads as NaN there, which is no offset at all
+float Persist::work_offset(uint8_t wcs, uint8_t axis) const
 {
-    record.work_offset[0]= x;
-    record.work_offset[1]= y;
-    record.work_offset[2]= z;
+    if(wcs >= k_work_offsets || axis > 2) return 0;
+    float v= wcs == 0 ? record.work_offset[axis] : record.more_work_offsets[wcs - 1][axis];
+    return std::isnan(v) ? 0 : v;
+}
+
+void Persist::set_work_offset(uint8_t wcs, float x, float y, float z)
+{
+    if(wcs >= k_work_offsets) return;
+    float *o= wcs == 0 ? record.work_offset : record.more_work_offsets[wcs - 1];
+    o[0]= x;
+    o[1]= y;
+    o[2]= z;
     save();
 }
 
-// the chip is only written when a value actually changed: a write blocks for a few hundred ms
 void Persist::save()
 {
-    if(memcmp(&record, &written, sizeof(Record)) == 0) return;
-    if(store(&record)) written = record;
+    store(&record);
 }
 
-void Persist::erase()
+bool Persist::erase()
 {
     Record zero{};
-    if(store(&zero)) {
-        record = zero;
-        written = zero;
-        printk("EEPROM data erase finished.\n");
-    }
+    record = zero;
+    return store(&record);
 }
 
+// each page costs a tenth of a second, so only the ones that differ from the chip are written
 bool Persist::store(const void *from)
 {
     size_t size = sizeof(Record);
@@ -66,13 +73,18 @@ bool Persist::store(const void *from)
     memcpy(buf, from, size);
 
     const uint8_t *p = (const uint8_t *)buf;
+    uint8_t *cached = (uint8_t *)&written;
+
     for (size_t done = 0, page = 0; done < size; page++) {
         uint8_t len = size - done >= EEP_MAX_PAGE_SIZE ? EEP_MAX_PAGE_SIZE : size - done;
-        if(!page_write(EEPROM_DATA_STARTPAGE + page, len, p)) {
-            printk("ALARM: EEPROM write failed at page %u\n", (unsigned)page);
-            return false;
+        if(memcmp(p, cached + done, len) != 0) {
+            if(!page_write(EEPROM_DATA_STARTPAGE + page, len, p)) {
+                printk("ALARM: EEPROM write failed at page %u\n", (unsigned)page);
+                return false;
+            }
+            wait(0.1);
+            memcpy(cached + done, p, len);
         }
-        wait(0.1);
         done += len;
         p += len;
     }

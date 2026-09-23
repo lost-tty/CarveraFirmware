@@ -859,7 +859,11 @@ void SimpleShell::eeprom_show( string parameters, StreamOutput *stream)
     stream->printf("tool: %d\r\n", persist.tool());
     stream->printf("tool length offset: %1.3f\r\n", persist.tool_length());
     stream->printf("reference tool Z: %1.3f, current tool Z: %1.3f\r\n", persist.reference_z(), persist.tool_z());
-    stream->printf("G54: %1.3f, %1.3f, %1.3f\r\n", persist.work_offset(0), persist.work_offset(1), persist.work_offset(2));
+    static const char *wcs_name[Persist::k_work_offsets] = {"G54","G55","G56","G57","G58","G59","G59.1","G59.2","G59.3"};
+    for (uint8_t n = 0; n < Persist::k_work_offsets; n++) {
+        stream->printf("%s: %1.3f, %1.3f, %1.3f\r\n", wcs_name[n],
+                       persist.work_offset(n, 0), persist.work_offset(n, 1), persist.work_offset(n, 2));
+    }
     for (uint8_t i = 0; i < Persist::k_user_vars; i++) {
         if (!std::isnan(persist.user_var(i))) stream->printf("#%u: %1.4f\r\n", 501 + i, persist.user_var(i));
     }
@@ -869,11 +873,14 @@ void SimpleShell::eeprom_show( string parameters, StreamOutput *stream)
 void SimpleShell::eeprom_clear( string parameters, StreamOutput *stream)
 {
     if (shift_parameter(parameters) != "yes") {
-        stream->printf("error:this loses the tool number, the tool length and the G54 offset; say: eeprom clear yes\r\n");
+        stream->printf("error:this loses the tool number, the tool length, every work offset and #501-#520; say: eeprom clear yes\r\n");
         return;
     }
-    persist.erase();
-    stream->printf("ok\r\n");
+    if(!persist.erase()) {
+        stream->printf("error:erase failed\r\n");
+        return;
+    }
+    stream->printf("erased\r\nok\r\n");
 }
 
 void SimpleShell::reset_command( string parameters, StreamOutput *stream)

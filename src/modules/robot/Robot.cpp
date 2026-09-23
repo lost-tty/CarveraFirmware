@@ -137,10 +137,9 @@ void Robot::on_module_loaded()
     this->loadToolOffset(tlo);
 
     // load wcs data from eeprom
-	float x = persist.work_offset(0);
-	float y = persist.work_offset(1);
-	float z = persist.work_offset(2);
-    wcs_offsets[0] = wcs_t(x, y, z);
+    for (uint8_t n = 0; n < MAX_WCS; n++) {
+        wcs_offsets[n] = wcs_t(persist.work_offset(n, 0), persist.work_offset(n, 1), persist.work_offset(n, 2));
+    }
 }
 
 #define ACTUATOR_CHECKSUMS(X) {     \
@@ -636,10 +635,7 @@ void Robot::on_gcode_received(Gcode *argument)
                         }
                         wcs_offsets[n] = wcs_t(x, y, z);
 
-                		// save wcs data to eeprom
-                        if (n == 0) {
-                    	    persist.set_work_offset(x, y, z);
-                        }
+                        persist.set_work_offset(n, x, y, z);
                     }
                 }
                 break;
