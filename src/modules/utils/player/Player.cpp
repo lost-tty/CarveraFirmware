@@ -363,7 +363,8 @@ Source::Result Player::next(SerialMessage &msg)
             this->current_stream->printf("%lu: %s", file.lines(), buf);
         }
         msg.message = buf;
-        msg.stream = this->current_stream == nullptr ? &(StreamOutput::NullStream) : this->current_stream;
+        // playing a file: suppress the per line replies, the trace above is the output
+        msg.stream = &(StreamOutput::NullStream);
         msg.line = file.lines();
         return LINE;
     }
