@@ -92,8 +92,14 @@ bool GcodeDispatch::run_mcode(Gcode &gcode)
     const McodeRegistry::Mcode *m= McodeRegistry::find(gcode.m, gcode.subcode);
     if(m == nullptr) return false;
 
-    // ACTION belongs in the queue; until a block can carry one it waits like a barrier
-    if((m->when & ~McodeRegistry::MID_JOB) != McodeRegistry::IMMEDIATE) {
+    uint8_t when= m->when & ~McodeRegistry::MID_JOB;
+
+    // an ACTION runs where it was written, after the queued moves, without stopping for it
+    if(when == McodeRegistry::ACTION && THECONVEYOR.hold_action(m, gcode))
+        return true;
+
+    // an ACTION lands here only when it could not be held, and then it waits like a BARRIER
+    if(when != McodeRegistry::IMMEDIATE) {
         if(!THECONVEYOR.wait_for_idle()) return true;   // a halt cut the drain short
     }
 

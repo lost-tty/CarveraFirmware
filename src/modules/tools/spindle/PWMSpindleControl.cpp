@@ -208,13 +208,10 @@ void PWMSpindleControl::on_update_speed()
         pwm_pin->write(current_pwm_value);
 }
 
+// the wait is the spindle reaching speed, so it is a sleep and not a dwell in the path
 void PWMSpindleControl::turn_on() {
     spindle_on = true;
-    if (delay_s > 0) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "G4P%d", delay_s);
-        gcode_dispatch.run_line(buf, &StreamOutput::NullStream);
-    }
+    if (delay_s > 0) safe_delay_ms(delay_s * 1000);
 }
 
 void PWMSpindleControl::kill() {
@@ -225,11 +222,7 @@ void PWMSpindleControl::kill() {
 
 void PWMSpindleControl::turn_off() {
     spindle_on = false;
-    if (delay_s > 0) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "G4P%d", delay_s);
-        gcode_dispatch.run_line(buf, &StreamOutput::NullStream);
-    }
+    if (delay_s > 0) safe_delay_ms(delay_s * 1000);
 }
 
 

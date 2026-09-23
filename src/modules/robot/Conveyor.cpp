@@ -104,6 +104,15 @@ void Conveyor::collect()
     Block* block = queue.tail_ref();
     block->clear();
     queue.consume_tail();
+
+    // a halt has already stopped the outputs: an action now would switch one back on
+    if(THEKERNEL->is_halted()) pending_actions.clear();
+
+    // an action handler reaches the conveyor again through its own calls; it must not recurse here
+    if(running_actions) return;
+    running_actions= true;
+    pending_actions.run_upto(finished);
+    running_actions= false;
 }
 
 // see if we are idle
@@ -121,6 +130,9 @@ bool Conveyor::is_idle() const
 // Wait for the queue to be empty and for all the jobs to finish in step ticker
 bool Conveyor::wait_for_idle(bool wait_for_motors)
 {
+    // an action already runs at its place in the path, so draining from one would undo that
+    if(running_actions) return !THEKERNEL->is_halted();
+
     bool halted= false;
 
     // wait for the job queue to empty, this means cycling everything on the block queue into the job queue
@@ -163,6 +175,7 @@ void Conveyor::queue_head_block()
     }
 
     queue.produce_head();
+    queued++;
 
     // not sure if this is the correct place but we need to turn on the motors if they were not already on
     THEROBOT.enable_motors(true);
@@ -221,6 +234,7 @@ void Conveyor::block_finished()
 {
     // we increment the isr_tail_i so we can get the next block
     queue.isr_tail_i= queue.next(queue.isr_tail_i);
+    finished++;
 
     if(waiter != nullptr) {
         BaseType_t woken= pdFALSE;
@@ -258,11 +272,19 @@ bool Conveyor::wait_for_block(bool &halted)
     gcode gets stuck in the queue, this is bad. Current work around is to call
     this when the queue in not full and streaming has stopped
 */
+bool Conveyor::hold_action(const McodeRegistry::Mcode *code, const Gcode &gcode)
+{
+    if(queued == finished) return false;
+    return pending_actions.hold(code, gcode, queued);
+}
+
 void Conveyor::flush_queue()
 {
     allow_fetch = false;
     flush= true;
     running = false;
+
+    pending_actions.clear();
 
     // TODO force deceleration of last block
 

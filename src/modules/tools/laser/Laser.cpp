@@ -183,7 +183,6 @@ void Laser::get_status(struct laser_status *t)
 
 void Laser::start(Gcode *gcode)
 {
-    THECONVEYOR.wait_for_idle();
     if(gcode->has_letter('S')) THEROBOT.set_s_value(gcode->get_value('S'));
     this->laser_on = true;
     this->testing = false;
@@ -191,7 +190,6 @@ void Laser::start(Gcode *gcode)
 
 void Laser::stop(Gcode *gcode)
 {
-    THECONVEYOR.wait_for_idle();
     this->laser_on = false;
     this->testing = false;
 }

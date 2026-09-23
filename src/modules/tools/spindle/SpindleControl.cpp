@@ -35,8 +35,6 @@ void SpindleControl::start(Gcode *gcode)
         return;
     }
 
-    THECONVEYOR.wait_for_idle();
-
     if(THEKERNEL->get_vacuum_mode()) {
         bool b = true;
         SwitchPool::set_state(vacuum_checksum, b);
@@ -48,8 +46,6 @@ void SpindleControl::start(Gcode *gcode)
 
 void SpindleControl::stop(Gcode *gcode)
 {
-    THECONVEYOR.wait_for_idle();
-
     if(THEKERNEL->get_vacuum_mode()) {
         bool b = false;
         SwitchPool::set_state(vacuum_checksum, b);

@@ -9,6 +9,7 @@
 
 #include "libs/Module.h"
 #include "libs/Killable.h"
+#include "BlockActions.h"
 #include "BlockQueue.h"
 
 #include "FreeRTOS.h"
@@ -38,6 +39,9 @@ public:
 
     void dump_queue(void);
     void flush_queue(void);
+
+    // false: nothing is queued to wait on, so the caller runs it now
+    bool hold_action(const McodeRegistry::Mcode *code, const Gcode &gcode);
     float get_current_feedrate() const { return current_feedrate; }
     void force_queue() { check_queue(true); }
 
@@ -55,6 +59,11 @@ private:
     Queue_t queue; // Queue of Blocks
 
     volatile TaskHandle_t waiter{nullptr};
+
+    BlockActions pending_actions;
+    bool running_actions{false};
+    uint32_t queued{0};
+    volatile uint32_t finished{0};
 
     uint32_t queue_delay_time_ms;
     float current_feedrate{0}; // actual nominal feedrate that current block is running at in mm/sec
