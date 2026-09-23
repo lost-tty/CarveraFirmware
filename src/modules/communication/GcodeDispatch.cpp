@@ -31,6 +31,7 @@ enum Flag : uint8_t {
     AXIS_WORDS = 1,   // takes the axis words itself, so it cannot share a block with a motion word
     NEEDS_HOMED = 2,  // probing, tool change and the ATC moves: refused on an unhomed machine
     WHEN_HALTED = 4,  // still runs while halted: status queries and things that turn stuff off
+    DRAINS = 8,       // reads or sets where the machine is, so the queue has to be empty first
 };
 
 struct Class { uint8_t group; Rank rank; uint8_t flags; };  // group 0: may be combined freely
@@ -42,23 +43,23 @@ static Class classify(const gcode::Word &w)
     unsigned n= w.value;
     if(w.letter == 'G') {
         if(n <= 3 || n == 73 || (n >= 80 && n <= 89)) return {1, MOTION, 0};
-        if(n == 38) return {1, MOTION, NEEDS_HOMED};
+        if(n == 38) return {1, MOTION, uint8_t(NEEDS_HOMED | DRAINS)};
         switch(n) {
-            case 4: return {0, DWELL, 0};
+            case 4: return {0, DWELL, DRAINS};
             case 10: return {0, NON_MODAL, AXIS_WORDS};
             case 17: case 18: case 19: return {2, PLANE, 0};
             case 20: case 21: return {6, UNITS, 0};
             case 22: return {16, STROKE, AXIS_WORDS};
             case 23: return {16, STROKE, 0};
-            case 28: return {0, NON_MODAL, AXIS_WORDS};
-            case 30: return {0, NON_MODAL, uint8_t(AXIS_WORDS | NEEDS_HOMED)};
-            case 31: case 32: return {0, NON_MODAL, AXIS_WORDS};
+            case 28: return {0, NON_MODAL, uint8_t(AXIS_WORDS | DRAINS)};
+            case 30: return {0, NON_MODAL, uint8_t(AXIS_WORDS | NEEDS_HOMED | DRAINS)};
+            case 31: case 32: return {0, NON_MODAL, uint8_t(AXIS_WORDS | DRAINS)};
             case 40: case 41: case 42: return {7, CUTTER_COMP, 0};
             case 43: case 49: return {8, TOOL_OFFSET, 0};
             case 54: case 55: case 56: case 57: case 58: case 59: return {12, WCS, 0};
             case 61: case 64: return {13, PATH, 0};
             case 90: case 91: return {uint8_t(w.subcode == 0 ? 3 : 4), DISTANCE, 0};
-            case 92: return {0, NON_MODAL, uint8_t(w.subcode == 0 ? AXIS_WORDS : 0)};
+            case 92: return {0, NON_MODAL, uint8_t((w.subcode == 0 ? AXIS_WORDS : 0) | DRAINS)};
             case 93: case 94: case 95: return {5, FEED_MODE, 0};
             case 98: case 99: return {10, RETRACT, 0};
         }
@@ -369,7 +370,13 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
 
         bool claimed= true;
         if(gcode.has_m) claimed= run_mcode(gcode);
-        else for (Module *m = handlers; m != nullptr; m = m->next_gcode_handler) m->on_gcode_received(&gcode);
+        else {
+            // the handler reads or sets where the machine is, so it must see it standing still
+            if(c.index < words.size() && (classify(words[c.index]).flags & DRAINS)) {
+                if(!THECONVEYOR.wait_for_idle()) return true;
+            }
+            for (Module *m = handlers; m != nullptr; m = m->next_gcode_handler) m->on_gcode_received(&gcode);
+        }
 
         // a scripted code runs its sub after the modules have seen it, so their handlers still apply;
         // the ok follows when the sub is done, which is the last block of the line by rank

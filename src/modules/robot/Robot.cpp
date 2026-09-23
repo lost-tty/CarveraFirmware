@@ -671,11 +671,7 @@ void Robot::on_gcode_received(Gcode *argument)
                     float f= gcode->get_value('P');
                     if(f > 0.0F) delay_ms= f * 1000.0F;
                 }
-                if (delay_ms > 0) {
-                    // drain queue
-                    THECONVEYOR.wait_for_idle();
-                    safe_delay_ms(delay_ms);
-                }
+                if (delay_ms > 0) safe_delay_ms(delay_ms);
             }
             break;
 
@@ -787,7 +783,6 @@ void Robot::on_gcode_received(Gcode *argument)
                     if(gcode->has_letter('Z')){ THEROBOT.reset_axis_position(gcode->get_value('Z'), Z_AXIS); }
 
                     if(gcode->has_letter('A')){
-                    	THECONVEYOR.wait_for_idle(); // the actuator position below is only valid once the queue has drained
                     	if (gcode->has_letter('S')) {
                     		// shrink A value
                     		float ma = actuators[A_AXIS]->get_current_position();
@@ -1652,13 +1647,6 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode
 			}
 		}
 	}
-
-    // if we are in feed hold wait here until it is released, this means that even segmented lines will pause
-    while(THEKERNEL->get_feed_hold()) {
-        if(THEKERNEL->is_halted()) return false;
-        THEKERNEL->call_event(ON_IDLE, this);
-        vTaskDelay(pdMS_TO_TICKS(1));
-    }
 
     // Append the block to the planner
     // NOTE that distance here should be either the distance travelled by the XYZ axis, or the E mm travel if a solo E move
