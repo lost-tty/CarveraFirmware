@@ -134,6 +134,7 @@ bool FileTransfer::upload(const std::string& filename, StreamOutput* stream)
         md5_filename = md5_filename.substr(0, md5_filename.find(".lz"));
     }
     bool want_md5_file = filename.find("firmware.bin") == string::npos;
+    bool hash_on_wire = !is_lz;
 
     FILE* fd = fopen(datafile.c_str(), "wb");
     FILE* fd_md5 = want_md5_file ? fopen(md5_filename.c_str(), "wb") : NULL;
@@ -211,7 +212,7 @@ bool FileTransfer::upload(const std::string& filename, StreamOutput* stream)
                 stream->printf("Error: file write error\r\n");
                 goto done;
             }
-            md5.update(xbuff, dlen);
+            if (hash_on_wire) md5.update(xbuff, dlen);
 
             retries = 0;
             file_size += dlen;
@@ -220,11 +221,13 @@ bool FileTransfer::upload(const std::string& filename, StreamOutput* stream)
                 send_seq(stream, Frame::FILE_DATA, seq);
             } else {
                 fflush(fd);
-                computed_md5 = md5.finalize().hexdigest();
-                if (received_md5 != computed_md5) {
-                    stream->send(Frame::FILE_CAN, "ok\r\n", 4);
-                    stream->printf("Error: MD5 verification failed\r\n");
-                    goto done;
+                if (hash_on_wire) {
+                    computed_md5 = md5.finalize().hexdigest();
+                    if (received_md5 != computed_md5) {
+                        stream->send(Frame::FILE_CAN, "ok\r\n", 4);
+                        stream->printf("Error: MD5 verification failed\r\n");
+                        goto done;
+                    }
                 }
                 stream->send(Frame::FILE_END, "ok\r\n", 4);
                 ok = true;
@@ -273,19 +276,26 @@ bool FileTransfer::upload(const std::string& filename, StreamOutput* stream)
 
 done:
     if (fd != NULL) fclose(fd);
-    if (fd_md5 != NULL) {
-        if (ok) fwrite(computed_md5.c_str(), 1, computed_md5.size(), fd_md5);
-        fclose(fd_md5);
-        if (!ok) remove(md5_filename.c_str());
-    }
     if (!ok) remove(datafile.c_str());
 
     claim.release(); // decompression is slow and reads nothing from the stream
 
     if (ok && is_lz) {
         string dest = filename.substr(0, filename.find(".lz"));
-        ok = decompress(datafile, dest, file_size, stream);
+        ok = decompress(datafile, dest, file_size, stream, computed_md5);
+        if (ok && received_md5 != computed_md5) {
+            stream->printf("Error: MD5 verification failed\r\n");
+            ok = false;
+        }
+        if (!ok) remove(dest.c_str());
     }
+
+    if (fd_md5 != NULL) {
+        if (ok) fwrite(computed_md5.c_str(), 1, computed_md5.size(), fd_md5);
+        fclose(fd_md5);
+        if (!ok) remove(md5_filename.c_str());
+    }
+
     if (ok) scripts.file_changed(filename.c_str());
     return ok;
 }
@@ -428,8 +438,9 @@ done:
     return ok;
 }
 
-bool FileTransfer::decompress(const std::string& sfilename, const std::string& dfilename, uint32_t sfilesize, StreamOutput* stream)
+bool FileTransfer::decompress(const std::string& sfilename, const std::string& dfilename, uint32_t sfilesize, StreamOutput* stream, std::string& md5_out)
 {
+    MD5 md5;
     uint16_t u16Sum = 0;
     uint8_t u8ReadBuffer_hdr[BLOCK_HEADER_SIZE] = { 0 };
     uint32_t u32DcmprsSize = 0, u32BlockSize = 0, u32BlockNum = 0, u32TotalDcmprsSize = 0, i = 0, j = 0, k = 0;
@@ -463,6 +474,7 @@ bool FileTransfer::decompress(const std::string& sfilename, const std::string& d
             u16Sum += lzbuff[j];
         }
 
+        md5.update((const unsigned char *)lzbuff, u32DcmprsSize);
         fwrite(lzbuff, sizeof(char), u32DcmprsSize, f_out);
         u32TotalDcmprsSize += u32DcmprsSize;
         u32BlockNum += 1;
@@ -482,6 +494,7 @@ bool FileTransfer::decompress(const std::string& sfilename, const std::string& d
     fclose(f_in);
     fclose(f_out);
 
+    md5_out = md5.finalize().hexdigest();
     stream->printf("#Info: decompart = %lu\r\n", u32BlockNum);
     return true;
 
