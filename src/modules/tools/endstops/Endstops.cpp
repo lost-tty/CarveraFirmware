@@ -126,6 +126,7 @@ bool Endstops::load_old_config()
 
         // init homing struct
         hinfo.home_offset = 0;
+        hinfo.past_edge = 0;
         hinfo.homed = false;
         hinfo.axis = 'X'+i;
         hinfo.axis_index = i;
@@ -286,6 +287,7 @@ bool Endstops::load_config()
 
         // init homing struct
         hinfo.home_offset= 0;
+        hinfo.past_edge= 0;
         hinfo.homed= false;
         hinfo.axis= toupper(axis[0]);
         hinfo.axis_index= i;
@@ -475,6 +477,7 @@ bool Endstops::approach(uint8_t axis, float distance, float rate)
     if(h.pin_info == nullptr) return false;
 
     approach_watch.inputs.clear();
+    approach_watch.witness.clear();
     approach_watch.inputs.add(h.pin_info->pin);
     approach_watch.motors= 1 << axis;
     approach_watch.hysteresis= hysteresis_steps(axis);
@@ -491,6 +494,14 @@ bool Endstops::approach(uint8_t axis, float distance, float rate)
     return ok && hit;
 }
 
+// distance from the latched switch edge to where the axis stopped
+float Endstops::past_edge_mm(uint8_t axis) const
+{
+    float steps_per_mm= THEROBOT.motor_steps_per_mm(axis);
+    if(steps_per_mm == 0) return 0;
+    return (THEROBOT.motor_step(axis) - approach_watch.at_steps[axis]) / steps_per_mm;
+}
+
 // the fast pass finds the switch, the slow pass sets the position
 bool Endstops::home_axis(uint8_t axis)
 {
@@ -502,7 +513,10 @@ bool Endstops::home_axis(uint8_t axis)
     delta[axis]= h.home_direction ? h.retract : -h.retract;
     if(!THEROBOT.delta_move_sync(delta, h.slow_rate, homing_axis.size())) return false;
 
-    return approach(axis, h.retract * 2, h.slow_rate);
+    if(!approach(axis, h.retract * 2, h.slow_rate)) return false;
+
+    h.past_edge= past_edge_mm(axis);
+    return true;
 }
 
 void Endstops::home(axis_bitmap_t a)
@@ -593,7 +607,8 @@ void Endstops::process_home_command(Gcode* gcode)
     // so XY are at a known consistent position.  (especially true if using a proximity probe)
     for (auto &p : homing_axis) {
         if (haxis[p.axis_index]) { // if we requested this axis to home
-            THEROBOT.reset_axis_position(p.homing_position + p.home_offset, p.axis_index);
+            // the switch closed where the position is defined; the axis stands a little past it
+            THEROBOT.reset_axis_position(p.homing_position + p.home_offset + p.past_edge, p.axis_index);
             // set flag indicating axis was homed, it stays set once set until H/W reset or unhomed
             p.homed= true;
         }
