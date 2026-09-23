@@ -211,6 +211,9 @@ bool Conveyor::get_next_block(Block **block)
 
     if(THEKERNEL->is_halted() || queue.isr_tail_i == queue.head_i) return false; // we do not have anything to give
 
+    // a feed hold stops at the block boundary: the one running finishes, the next one waits
+    if(THEKERNEL->get_feed_hold()) return false;
+
     // wait for queue to fill up, optimizes planning
     if(!allow_fetch) return false;
 
@@ -272,6 +275,27 @@ bool Conveyor::wait_for_block(bool &halted)
     gcode gets stuck in the queue, this is bad. Current work around is to call
     this when the queue in not full and streaming has stopped
 */
+// false: nothing is queued ahead of it, so the caller stops the job itself
+bool Conveyor::refuse_after_queued(unsigned int line)
+{
+    if(queued == finished) return false;
+    if(refusal_pending) return true;   // the first refusal is the one that stopped the job
+
+    refused_after= queued;
+    refused_line= line;
+    refusal_pending= true;
+    return true;
+}
+
+// the moves written before the refused line have run, so the job can be stopped now
+bool Conveyor::refusal_due(unsigned int &line)
+{
+    if(!refusal_pending || finished < refused_after) return false;
+    line= refused_line;
+    refusal_pending= false;
+    return true;
+}
+
 bool Conveyor::hold_action(const McodeRegistry::Mcode *code, const Gcode &gcode)
 {
     if(queued == finished) return false;
@@ -285,6 +309,7 @@ void Conveyor::flush_queue()
     running = false;
 
     pending_actions.clear();
+    refusal_pending= false;
 
     // TODO force deceleration of last block
 

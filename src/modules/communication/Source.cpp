@@ -6,6 +6,7 @@
 #include "libs/StreamOutput.h"
 #include "GcodeDispatch.h"
 #include "SimpleShell.h"
+#include "Conveyor.h"
 #include "utils.h"
 
 #include <algorithm>
@@ -42,12 +43,24 @@ void SourceStack::on_main_loop(void *)
 {
     if(stack.empty() || THEKERNEL->is_halted() || THEKERNEL->is_waiting() || frozen_all()) return;
 
+    // a line refused while earlier moves are still queued stops the job once they have run
+    unsigned int refused;
+    if(THECONVEYOR.refusal_due(refused)) {
+        printk("job stopped at line %u\n", refused);
+        THECONVEYOR.flush_queue();
+        clear();
+        return;
+    }
+
+    if(THECONVEYOR.refused()) return;   // the job is over, it just has to finish moving
+
     Source *s= stack.back();
     SerialMessage msg{&StreamOutput::NullStream, "", 0};
     switch(s->next(msg)) {
         case Source::LINE:
             // a halt inside clears the stack, s is not touched after this
             if(!gcode_dispatch.run_line(msg) && !stack.empty()) {
+                if(THECONVEYOR.refuse_after_queued(msg.line)) break;
                 printk("job stopped at line %u\n", msg.line);
                 clear();
             }
