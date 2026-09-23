@@ -46,6 +46,8 @@ class StepTicker{
         bool limit_hit() const { return limit_tripped; }
         void clear_limit() { limit_tripped= false; limit_seen= false; }
 
+        void stop_motor(uint8_t m);
+
         void step_tick (void);
         void handle_finish (void);
         void start();
@@ -85,8 +87,10 @@ class StepTicker{
             int64_t acceleration_change;
             int64_t deceleration_change;
             int64_t plateau_rate;
+            int64_t decel_per_tick;
             uint32_t steps_to_move; // 0: not moving in this block, or done
             uint32_t step_count;
+            bool stopping;
         } state[k_max_actuators];
 
         volatile bool running;

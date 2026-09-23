@@ -170,6 +170,12 @@ void StepTicker::check_limits()
     THEKERNEL->halt(HARD_LIMIT, "hard limit");
 }
 
+// the motor ramps down under its own acceleration; cutting the pulses is what a halt does
+void StepTicker::stop_motor(uint8_t m)
+{
+    if(m < num_motors) state[m].stopping= true;
+}
+
 // at_steps is taken on the first asserted tick, so the hysteresis does not bias it
 void StepTicker::check_watch()
 {
@@ -191,7 +197,7 @@ void StepTicker::check_watch()
     if(!travelled) return;
 
     for (uint8_t m = 0; m < num_motors; m++) {
-        if(watch->motors & (1 << m)) motor[m]->stop_moving();
+        if(watch->motors & (1 << m)) stop_motor(m);
     }
     watch->hit= true;
 }
@@ -229,22 +235,32 @@ void StepTicker::step_tick (void)
     for (uint8_t m = 0; m < num_motors; m++) {
         if(state[m].steps_to_move == 0) continue; // not active
 
-        state[m].steps_per_tick += state[m].acceleration_change;
-
-        if(accel_end) { // done accelerating: plateau, unless deceleration starts right here
-            state[m].acceleration_change = 0;
-            if(current_block->decelerate_after < current_block->total_move_ticks && !decel_start) {
-                state[m].steps_per_tick = state[m].plateau_rate;
+        if(state[m].stopping) {
+            state[m].steps_per_tick -= state[m].decel_per_tick;
+            if(state[m].steps_per_tick <= 0) {
+                state[m].steps_to_move = 0;
+                motor[m]->stop_moving();
+                continue;
             }
-        }
-        if(decel_start) {
-            state[m].acceleration_change = state[m].deceleration_change;
-        }
 
-        // protect against rounding errors and such
-        if(state[m].steps_per_tick <= 0) {
-            state[m].counter = STEPTICKER_FPSCALE; // we force completion this step by setting to 1.0
-            state[m].steps_per_tick = 0;
+        } else {
+            state[m].steps_per_tick += state[m].acceleration_change;
+
+            if(accel_end) { // done accelerating: plateau, unless deceleration starts right here
+                state[m].acceleration_change = 0;
+                if(current_block->decelerate_after < current_block->total_move_ticks && !decel_start) {
+                    state[m].steps_per_tick = state[m].plateau_rate;
+                }
+            }
+            if(decel_start) {
+                state[m].acceleration_change = state[m].deceleration_change;
+            }
+
+            // protect against rounding errors and such
+            if(state[m].steps_per_tick <= 0) {
+                state[m].counter = STEPTICKER_FPSCALE; // we force completion this step by setting to 1.0
+                state[m].steps_per_tick = 0;
+            }
         }
 
         state[m].counter += state[m].steps_per_tick;
@@ -329,6 +345,8 @@ bool StepTicker::start_next_block()
         state[m].acceleration_change= scale(current_block->ramp.acceleration_change, ratio);
         state[m].deceleration_change= scale(current_block->ramp.deceleration_change, ratio);
         state[m].plateau_rate= scale(current_block->ramp.plateau_rate, ratio);
+        state[m].decel_per_tick= (int64_t)round(motor[m]->decel_steps_per_s2() * Block::ticks_squared());
+        state[m].stopping= false;
 
         ok= true; // mark at least one motor is moving
         // set direction bit here

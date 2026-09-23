@@ -29,6 +29,8 @@ class Block {
         uint32_t steps_event_count() const; // steps of the longest axis
         float nominal_rate() const { return steps_event_count() * nominal_speed / millimeters; } // steps per second
 
+        static double ticks_squared() { return fp_scale; }
+
     private:
         float max_allowable_speed( float acceleration, float target_velocity, float distance);
         void prepare(float initial_rate, float maximum_rate, float acceleration_in_steps, float deceleration_in_steps);

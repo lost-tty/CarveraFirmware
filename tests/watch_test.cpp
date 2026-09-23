@@ -25,6 +25,10 @@ struct Watch {
 
 static int32_t position[MOTORS];
 static bool    moving[MOTORS];
+static bool    stopping[MOTORS];
+
+// a motor told to stop ramps down instead of stopping dead, so it runs on for a few more steps
+static int stopping_steps[MOTORS];
 
 // StepTicker::step_tick's watch block, transcribed
 static void tick(Watch *w)
@@ -43,15 +47,20 @@ static void tick(Watch *w)
                 if((w->motors & (1 << m)) && abs(position[m] - w->at_steps[m]) >= w->hysteresis) travelled = true;
             }
             if(travelled) {
-                for (int m = 0; m < MOTORS; m++) if(w->motors & (1 << m)) moving[m] = false;
+                for (int m = 0; m < MOTORS; m++) if(w->motors & (1 << m)) stopping[m] = true;
                 w->hit = true;
             }
         }
     }
-    for (int m = 0; m < MOTORS; m++) if(moving[m]) position[m]++;   // one step per tick
+    for (int m = 0; m < MOTORS; m++) {
+        if(stopping[m]) {
+            if(stopping_steps[m]-- <= 0) moving[m] = false;
+        }
+        if(moving[m]) position[m]++;   // one step per tick
+    }
 }
 
-static void reset() { for (int m = 0; m < MOTORS; m++) { position[m] = 0; moving[m] = true; } }
+static void reset() { for (int m = 0; m < MOTORS; m++) { position[m] = 0; moving[m] = true; stopping[m] = false; stopping_steps[m] = 0; } }
 
 int main()
 {
@@ -170,6 +179,23 @@ int main()
         w.asserted = true; w.witness = true;
         for (int i = 0; i < 6; i++) tick(&w);
         CHECK(w.hit && w.witnessed);
+    }
+
+    // the axis ramps down after the hit, and the recorded position is still the edge
+    {
+        reset();
+        stopping_steps[0] = 6;                       // this motor needs six more steps to stop
+        Watch w; w.motors = (1 << 0); w.hysteresis = 0; w.arm();
+        for (int i = 0; i < 10; i++) tick(&w);       // run up to the switch
+        w.asserted = true;
+        tick(&w);
+        CHECK(w.hit);
+        CHECK(w.at_steps[0] == 10);
+        CHECK(moving[0]);                            // still moving: it is decelerating
+        for (int i = 0; i < 10; i++) tick(&w);
+        CHECK(!moving[0]);
+        CHECK(position[0] > 10);                     // it ran on
+        CHECK(w.at_steps[0] == 10);                  // but the measurement did not move
     }
 
     // arm() clears it for the next move

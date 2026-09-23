@@ -49,6 +49,7 @@ class StepperMotor : public Killable {
         void set_max_rate(float mr) { max_rate= mr; }
         void set_acceleration(float a) { acceleration= a; }
         float get_acceleration() const { return acceleration; }
+        float decel_steps_per_s2() const;
         bool is_selected() const { return selected; }
         void set_selected(bool b) { selected= b; }
 

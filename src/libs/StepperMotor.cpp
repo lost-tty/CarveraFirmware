@@ -7,6 +7,8 @@
 #include "StepperMotor.h"
 
 #include "Kernel.h"
+#include "Robot.h"
+#include "Block.h"
 #include "MRI_Hooks.h"
 
 #include <math.h>
@@ -36,6 +38,14 @@ StepperMotor::StepperMotor(Pin &step, Pin &dir, Pin &en) : step_pin(step), dir_p
 
 StepperMotor::~StepperMotor()
 {
+}
+
+// an axis without one of its own decelerates at the machine default
+float StepperMotor::decel_steps_per_s2() const
+{
+    float a= acceleration;
+    if(isnan(a) || a <= 0) a= THEROBOT.get_default_acceleration();
+    return a * steps_per_mm;
 }
 
 void StepperMotor::change_steps_per_mm(float new_steps)
