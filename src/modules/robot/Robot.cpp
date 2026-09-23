@@ -1173,7 +1173,7 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
     }
 
     // calculate target in machine coordinates (less compensation transform which needs to be done after segmentation)
-    float target[n_motors];
+    float target[k_max_actuators];
     memcpy(target, machine_position, n_motors*sizeof(float));
 
     if(!gcode->mcs) {
@@ -1465,8 +1465,8 @@ void Robot::reset_position_from_current_actuator_position()
 // all transforms and is what we actually convert to actuator positions
 bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode)
 {
-    float deltas[n_motors];
-    float transformed_target[n_motors]; // adjust target for bed compensation
+    float deltas[k_max_actuators];
+    float transformed_target[k_max_actuators]; // adjust target for bed compensation
     float unit_vec[N_PRIMARY_AXIS];
 
     // unity transform by default
@@ -1677,7 +1677,7 @@ bool Robot::delta_move(const float *delta, float rate_mm_s, uint8_t naxis)
     }
 
     // get the absolute target position, default is current machine_position
-    float target[n_motors];
+    float target[k_max_actuators];
     memcpy(target, machine_position, n_motors*sizeof(float));
 
     // add in the deltas to get new target
@@ -1769,7 +1769,7 @@ bool Robot::clear_of_keepout(const float from[], const float to[], Gcode *gcode)
 bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s)
 {
     // checked before segmenting, otherwise the segments inside the limit run before the refusal
-    float transformed_target[n_motors];
+    float transformed_target[k_max_actuators];
     memcpy(transformed_target, target, n_motors*sizeof(float));
     if(compensationTransform) compensationTransform(transformed_target, false, false);
     if(!within_soft_limits(transformed_target, gcode)) return false;
@@ -1825,8 +1825,8 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s)
     bool moved= false;
     if (segments > 1) {
         // A vector to keep track of the endpoint of each segment
-        float segment_delta[n_motors];
-        float segment_end[n_motors];
+        float segment_delta[k_max_actuators];
+        float segment_end[k_max_actuators];
         memcpy(segment_end, machine_position, n_motors*sizeof(float));
 
         // How far do we move each segment?
@@ -1956,7 +1956,7 @@ bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[]
         float sin_T = theta_per_segment;
 
         // TODO we need to handle the ABC axis here by segmenting them
-        float arc_target[n_motors];
+        float arc_target[k_max_actuators];
         float sin_Ti;
         float cos_Ti;
         float r_axisi;
