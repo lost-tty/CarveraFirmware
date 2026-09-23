@@ -7,6 +7,7 @@
 
 
 #include "SimpleShell.h"
+#include "Persist.h"
 
 #include "rtc_time.h"
 #include "libs/Kernel.h"
@@ -855,13 +856,12 @@ void SimpleShell::eeprom_command( string parameters, StreamOutput *stream)
 
 void SimpleShell::eeprom_show( string parameters, StreamOutput *stream)
 {
-    const EEPROM_data &e = THEKERNEL->eeprom_data;
-    stream->printf("tool: %d\r\n", e.TOOL);
-    stream->printf("tool length offset: %1.3f\r\n", e.TLO);
-    stream->printf("reference tool Z: %1.3f, current tool Z: %1.3f\r\n", e.REFMZ, e.TOOLMZ);
-    stream->printf("G54: %1.3f, %1.3f, %1.3f\r\n", e.G54[0], e.G54[1], e.G54[2]);
-    for (unsigned i = 0; i < 20; i++) {
-        if (!std::isnan(e.perm_vars[i])) stream->printf("#%u: %1.4f\r\n", 501 + i, e.perm_vars[i]);
+    stream->printf("tool: %d\r\n", persist.tool());
+    stream->printf("tool length offset: %1.3f\r\n", persist.tool_length());
+    stream->printf("reference tool Z: %1.3f, current tool Z: %1.3f\r\n", persist.reference_z(), persist.tool_z());
+    stream->printf("G54: %1.3f, %1.3f, %1.3f\r\n", persist.work_offset(0), persist.work_offset(1), persist.work_offset(2));
+    for (uint8_t i = 0; i < Persist::k_user_vars; i++) {
+        if (!std::isnan(persist.user_var(i))) stream->printf("#%u: %1.4f\r\n", 501 + i, persist.user_var(i));
     }
     stream->printf("ok\r\n");
 }
@@ -872,7 +872,7 @@ void SimpleShell::eeprom_clear( string parameters, StreamOutput *stream)
         stream->printf("error:this loses the tool number, the tool length and the G54 offset; say: eeprom clear yes\r\n");
         return;
     }
-    THEKERNEL->erase_eeprom_data();
+    persist.erase();
     stream->printf("ok\r\n");
 }
 
@@ -1065,7 +1065,7 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
             THEROBOT.get_distance_code(),
             get_switch_state("spindle") ? '3' : '5',
             get_switch_state("mist") ? '7' : get_switch_state("flood") ? '8' : '9',
-            THEKERNEL->eeprom_data.TOOL,
+            persist.tool(),
             THEROBOT.from_millimeters(THEROBOT.get_feed_rate()),
             THEROBOT.get_s_value());
 

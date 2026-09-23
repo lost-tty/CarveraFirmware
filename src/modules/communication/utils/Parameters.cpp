@@ -1,4 +1,5 @@
 #include "Parameters.h"
+#include "Persist.h"
 
 #include "libs/Kernel.h"
 #include "Robot.h"
@@ -25,15 +26,15 @@ bool Parameters::get(int n, float &v) const
         return true;
     }
     if (n >= 501 && n <= 520) {
-        v = THEKERNEL->eeprom_data.perm_vars[n - 501];
+        v = persist.user_var(n - 501);
         return !std::isnan(v); // blank EEPROM reads as NaN
     }
 
     if (n >= 5021 && n <= 5044) THECONVEYOR.wait_for_idle(); // positions are where the machine is, not where it is going
     float mpos[3];
     switch (n) {
-        case 2000: v = THEKERNEL->eeprom_data.TLO; return true;
-        case 3026: v = THEKERNEL->eeprom_data.TOOL; return true;
+        case 2000: v = persist.tool_length(); return true;
+        case 3026: v = persist.tool(); return true;
         case 3027: {
             struct spindle_status ss;
             v = 0;
@@ -99,7 +100,7 @@ static const struct { const char *name; Parameters::getter get; } BUILTIN[] = {
     {"_homed",       [](void *) { return (float)THEROBOT.is_homed_all_axes(); }},
     {"_spindle_on",  [](void *) { return (float)spindle_on(); }},
     {"_playing",     [](void *) { return (float)player_playing(); }},
-    {"_tlo",         [](void *) { return THEKERNEL->eeprom_data.TLO; }},
+    {"_tlo",         [](void *) { return persist.tool_length(); }},
     {"_probe_x",     [](void *) { return probe_axis(0); }},
     {"_probe_y",     [](void *) { return probe_axis(1); }},
     {"_probe_z",     [](void *) { return probe_axis(2); }},
@@ -137,9 +138,7 @@ bool Parameters::set(int n, float v)
         return true;
     }
     if (n >= 501 && n <= 520) {
-        if (THEKERNEL->eeprom_data.perm_vars[n - 501] == v) return true; // the write blocks the main loop for ~0.4 s
-        THEKERNEL->eeprom_data.perm_vars[n - 501] = v;
-        THEKERNEL->write_eeprom_data();
+        persist.set_user_var(n - 501, v);
         return true;
     }
     return false;

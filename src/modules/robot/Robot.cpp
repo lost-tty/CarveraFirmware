@@ -6,6 +6,7 @@
 */
 
 #include "libs/Module.h"
+#include "Persist.h"
 #include "SwitchPool.h"
 #include "libs/Kernel.h"
 
@@ -132,13 +133,13 @@ void Robot::on_module_loaded()
     this->load_config();
 
     // load tlo data from eeprom
-    float tlo[3] = {0, 0, THEKERNEL->eeprom_data.TLO};
+    float tlo[3] = {0, 0, persist.tool_length()};
     this->loadToolOffset(tlo);
 
     // load wcs data from eeprom
-	float x = THEKERNEL->eeprom_data.G54[0];
-	float y = THEKERNEL->eeprom_data.G54[1];
-	float z = THEKERNEL->eeprom_data.G54[2];
+	float x = persist.work_offset(0);
+	float y = persist.work_offset(1);
+	float z = persist.work_offset(2);
     wcs_offsets[0] = wcs_t(x, y, z);
 }
 
@@ -637,10 +638,7 @@ void Robot::on_gcode_received(Gcode *argument)
 
                 		// save wcs data to eeprom
                         if (n == 0) {
-                    	    THEKERNEL->eeprom_data.G54[0] = x;
-                    	    THEKERNEL->eeprom_data.G54[1] = y;
-                    	    THEKERNEL->eeprom_data.G54[2] = z;
-                    	    THEKERNEL->write_eeprom_data();
+                    	    persist.set_work_offset(x, y, z);
                         }
                     }
                 }
@@ -2053,7 +2051,7 @@ void Robot::clearToolOffset()
 {
     this->tool_offset= wcs_t(0,0,0);
 
-    THEKERNEL->eeprom_data.TLO = 0;
+    persist.set_tool_length(0);
 
 }
 
@@ -2066,9 +2064,8 @@ void Robot::loadToolOffset(const float offset[N_PRIMARY_AXIS]) {
 void Robot::saveToolOffset(const float offset[N_PRIMARY_AXIS], const float cur_tool_mz) {
 	this->loadToolOffset(offset);
     // save data to eeprom
-    THEKERNEL->eeprom_data.TLO = offset[2];
-    THEKERNEL->eeprom_data.TOOLMZ = cur_tool_mz;
-    THEKERNEL->write_eeprom_data();
+    persist.set_tool_length(offset[2]);
+    persist.set_tool_z(cur_tool_mz);
 }
 
 void Robot::setLaserOffset()

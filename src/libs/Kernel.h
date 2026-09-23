@@ -72,18 +72,6 @@ enum HALT_REASON {
 	SPINDLE_ALARM			= 41
 };
 
-typedef struct {
-	float TLO;
-	// int TOOL;
-	float G54[3];
-//	float G54[5*MAX_WCS];
-	float REFMZ;
-	float TOOLMZ;
-	float reserve;
-	int TOOL;
-    float perm_vars[20];
-} EEPROM_data;
-
 class Kernel {
     public:
         Kernel() {};
@@ -104,8 +92,6 @@ class Kernel {
         bool kernel_has_event(_EVENT_ENUM id_event, Module *module);
         void unregister_for_event(_EVENT_ENUM id_event, Module *module);
 
-        float get_user_var(int var_num);
-
         bool is_using_leds() const { return use_leds; }
         // safe from an interrupt
         void halt(uint8_t reason, const char *msg = nullptr);
@@ -119,7 +105,6 @@ class Kernel {
         bool is_feed_hold_enabled() const { return enable_feed_hold; }
         void set_bad_mcu(bool b) { bad_mcu= b; }
         bool is_bad_mcu() const { return bad_mcu; }
-
 
         void set_laser_mode(bool f) { laser_mode = f; }
         bool get_laser_mode() const { return laser_mode; }
@@ -141,10 +126,6 @@ class Kernel {
 
         uint8_t get_halt_reason() const { return halt_reason; }
 
-        void read_eeprom_data();
-        void write_eeprom_data();
-        void erase_eeprom_data();
-
         std::string get_query_string();
 
         std::string get_diagnose_string();
@@ -162,7 +143,6 @@ class Kernel {
         uint8_t get_state();
         uint8_t halt_reason;
         char halt_msg[32];
-        EEPROM_data eeprom_data;
 
     private:
         // When a module asks to be called for a specific event ( a hook ), this is where that request is remembered
@@ -184,7 +164,6 @@ class Kernel {
             bool suspending: 1;
             bool waiting: 1;
         };
-        int iic_page_write(unsigned char u8PageNum, unsigned char u8len, unsigned char *pu8Array);
 
 };
 

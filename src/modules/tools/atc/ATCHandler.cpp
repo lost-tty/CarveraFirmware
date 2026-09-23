@@ -6,6 +6,7 @@
 */
 
 #include "ATCHandler.h"
+#include "Persist.h"
 #include "checksumm.h"
 #include <cstring>
 #include "libs/Kernel.h"
@@ -325,7 +326,7 @@ void ATCHandler::set_tool_offset()
     std::tie(px, py, pz, ps) = THEROBOT.get_last_probe_position();
     if (ps != 1) return;
 
-    float ref = THEKERNEL->eeprom_data.REFMZ;
+    float ref = persist.reference_z();
     const float offset[3] = {0.0, 0.0, ref < 0 ? pz - ref : 0.0};
     THEROBOT.saveToolOffset(offset, pz);
 }
@@ -379,10 +380,7 @@ void ATCHandler::on_gcode_received(Gcode *argument)
                         halt(ATC_NO_TOOL, "No tool was set!");
                     } else {
                         int tool = gcode->get_value('T');
-                        if (THEKERNEL->eeprom_data.TOOL != tool) { // the write blocks the main loop for ~0.4 s
-                            THEKERNEL->eeprom_data.TOOL = tool;
-                            THEKERNEL->write_eeprom_data();
-                        }
+                        persist.set_tool(tool);
                     }
                     break;
             }
@@ -411,7 +409,7 @@ void ATCHandler::on_gcode_received(Gcode *argument)
 const ATCHandler::Param ATCHandler::PARAMS[] = {
     {"_clamp_state", [](void *c) { return (float)((ATCHandler *)c)->atc_home_info.clamp_status; }},
     {"_tool_detected", [](void *c) { return (float)((ATCHandler *)c)->tool_detected; }},
-    {"_active_tool", [](void *) { return (float)THEKERNEL->eeprom_data.TOOL; }},
+    {"_active_tool", [](void *) { return (float)persist.tool(); }},
     {"_anchor1_x", [](void *c) { return (float)((ATCHandler *)c)->anchor1_x; }},
     {"_anchor1_y", [](void *c) { return (float)((ATCHandler *)c)->anchor1_y; }},
     {"_anchor2_offset_x", [](void *c) { return (float)((ATCHandler *)c)->anchor2_offset_x; }},
@@ -453,8 +451,8 @@ void ATCHandler::shell(void *self, const char *cmd, std::string args, StreamOutp
 
 void ATCHandler::sub_state(std::string, StreamOutput *stream)
 {
-    stream->printf("tool %d, length offset %1.3f\r\n", THEKERNEL->eeprom_data.TOOL, THEKERNEL->eeprom_data.TLO);
-    stream->printf("reference tool z %1.3f, current tool z %1.3f\r\n", THEKERNEL->eeprom_data.REFMZ, THEKERNEL->eeprom_data.TOOLMZ);
+    stream->printf("tool %d, length offset %1.3f\r\n", persist.tool(), persist.tool_length());
+    stream->printf("reference tool z %1.3f, current tool z %1.3f\r\n", persist.reference_z(), persist.tool_z());
     stream->printf("clamp %s, slot %s\r\n", atc_home_info.clamp_status == CLAMPED ? "clamped" :
                    atc_home_info.clamp_status == LOOSED ? "loosed" : "unhomed",
                    tool_detected ? "occupied" : "empty");
@@ -479,11 +477,11 @@ void ATCHandler::register_params()
 
 bool ATCHandler::get_tool_status(struct tool_status *t) const
 {
-    if(THEKERNEL->eeprom_data.TOOL < 0) return false;
-    t->active_tool = THEKERNEL->eeprom_data.TOOL;
-    t->ref_tool_mz = THEKERNEL->eeprom_data.REFMZ;
-    t->cur_tool_mz = THEKERNEL->eeprom_data.TOOLMZ;
-    t->tool_offset = THEKERNEL->eeprom_data.TLO;
+    if(persist.tool() < 0) return false;
+    t->active_tool = persist.tool();
+    t->ref_tool_mz = persist.reference_z();
+    t->cur_tool_mz = persist.tool_z();
+    t->tool_offset = persist.tool_length();
     return true;
 }
 
@@ -496,8 +494,6 @@ void ATCHandler::get_pin_status(char *data) const
 // the current tool becomes the reference, so its offset is zero
 void ATCHandler::set_ref_tool_mz()
 {
-    if(THEKERNEL->eeprom_data.REFMZ == THEKERNEL->eeprom_data.TOOLMZ && THEKERNEL->eeprom_data.TLO == 0) return;
-    THEKERNEL->eeprom_data.REFMZ = THEKERNEL->eeprom_data.TOOLMZ;
-    THEKERNEL->eeprom_data.TLO = 0;
-    THEKERNEL->write_eeprom_data();
+    persist.set_reference_z(persist.tool_z());
+    persist.set_tool_length(0);
 }

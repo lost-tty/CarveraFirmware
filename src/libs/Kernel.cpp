@@ -27,6 +27,7 @@
 #include "modules/tools/endstops/Endstops.h"
 #include "modules/utils/mainbutton/MainButton.h"
 #include "modules/tools/atc/ATCHandler.h"
+#include "Persist.h"
 #include "modules/robot/Robot.h"
 #include "StepperMotor.h"
 #include "BaseSolution.h"
@@ -60,9 +61,6 @@
 #define disable_leds_checksum                       CHECKSUM("leds_disable")
 #define feed_hold_enable_checksum                   CHECKSUM("enable_feed_hold")
 #define ok_per_line_checksum                        CHECKSUM("ok_per_line")
-
-#define	EEP_MAX_PAGE_SIZE	32
-#define EEPROM_DATA_STARTPAGE	1
 
 // The kernel is the central point in Smoothie : it stores modules, and handles event calls
 void Kernel::init()
@@ -98,7 +96,6 @@ void Kernel::init()
     // Match up the SerialConsole to MRI UART. This makes it easy to use only one UART for both debug and actual commands.
     NVIC_SetPriorityGrouping(0);
 
-
     // default
     if(this->serial == NULL) {
         // this->serial = new SerialConsole(P2_8, P2_9, this->config->value(uart_checksum, baud_rate_setting_checksum)->by_default(DEFAULT_SERIAL_BAUD_RATE)->as_number());
@@ -107,7 +104,6 @@ void Kernel::init()
 
     //some boards don't have leds.. TOO BAD!
     this->use_leds = !this->config->value( disable_leds_checksum )->by_default(false)->as_bool();
-
 
     this->enable_feed_hold = this->config->value( feed_hold_enable_checksum )->by_default(true)->as_bool();
 
@@ -155,12 +151,10 @@ void Kernel::init()
     // Initialize slow ticker
     this->add_module(&slow_ticker);
 
-    // init EEPROM data
     this->i2c = new mbed::I2C(P0_27, P0_28);
     this->i2c->frequency(200000);
 
-    // read eeprom data
-    this->read_eeprom_data();
+    persist.init(this->i2c);
 
     this->planner.init();
 }
@@ -346,7 +340,6 @@ std::string Kernel::get_query_string()
     return str;
 }
 
-
 // return a Diagnose string
 std::string Kernel::get_diagnose_string()
 {
@@ -417,7 +410,6 @@ std::string Kernel::get_diagnose_string()
         if(n > sizeof(buf)) n = sizeof(buf);
         str.append(buf, n);
     }
-
 
     // get states
     char data[11];
@@ -520,147 +512,5 @@ void Kernel::unregister_for_event(_EVENT_ENUM id_event, Module *mod)
             return;
         }
     }
-}
-
-void Kernel::read_eeprom_data()
-{
-	size_t size = sizeof(EEPROM_data);
-	char i2c_buffer[size];
-
-    short address = EEPROM_DATA_STARTPAGE*EEP_MAX_PAGE_SIZE;
-    i2c_buffer[0] = (unsigned char)(address >> 8);
-    i2c_buffer[1] = (unsigned char)((unsigned char)address & 0xff);
-
-    this->i2c->start();
-    this->i2c->write(0xA0);
-    this->i2c->write(i2c_buffer[0]);
-    this->i2c->write(i2c_buffer[1]);
-    this->i2c->start();
-    this->i2c->write(0xA1);
-
-    for (size_t i = 0; i < size; i ++) {
-    	i2c_buffer[i] = this->i2c->read(1);
-    }
-
-	this->i2c->stop();
-	this->i2c->stop();
-
-    wait(0.05);
-
-    memcpy(&this->eeprom_data, i2c_buffer, size);
-}
-
-void Kernel::write_eeprom_data()
-{
-	size_t size = sizeof(EEPROM_data);
-	char Data_buffer[size];
-	unsigned int writenum = 0;
-	unsigned int result = 0;
-	unsigned int pagenum = 0;
-	unsigned int bytenum =0;
-	unsigned char * writeptr = 0;
-	unsigned int u8Pagebegin=EEPROM_DATA_STARTPAGE;
-
-	memcpy(Data_buffer, &this->eeprom_data, size);
-
-	writeptr = (unsigned char *)Data_buffer;
-	while(writenum < size)
-	{
-		bytenum = (size-pagenum*EEP_MAX_PAGE_SIZE) >= EEP_MAX_PAGE_SIZE ? EEP_MAX_PAGE_SIZE : size-pagenum*EEP_MAX_PAGE_SIZE;
-		result = iic_page_write(u8Pagebegin+pagenum, bytenum, (unsigned char *)writeptr);
-		wait(0.1);
-		if(result == 0)
-		{
-			pagenum ++;
-			writenum += bytenum;
-			writeptr += bytenum;
-		}
-		else
-		{
-			break;
-		}
-	}
-	if (result != 0) {
-		printk("ALARM: EEPROM data write error:%d\n", pagenum);
-	} else {
-//		printk("EEPROM data write finished.\n");
-	}
-}
-
-void Kernel::erase_eeprom_data()
-{
-	size_t size = sizeof(EEPROM_data);
-	char Data_buffer[size];
-	unsigned int writenum = 0;
-	unsigned int result = 0;
-	unsigned int pagenum = 0;
-	unsigned int bytenum =0;
-	unsigned char * writeptr = 0;
-	unsigned int u8Pagebegin=EEPROM_DATA_STARTPAGE;
-
-	memset(Data_buffer, 0, sizeof(Data_buffer));
-
-
-	writeptr = (unsigned char *)Data_buffer;
-	while(writenum < size)
-	{
-		bytenum = (size-pagenum*EEP_MAX_PAGE_SIZE) >= EEP_MAX_PAGE_SIZE ? EEP_MAX_PAGE_SIZE : size-pagenum*EEP_MAX_PAGE_SIZE;
-		result = iic_page_write(u8Pagebegin+pagenum, bytenum, (unsigned char *)writeptr);
-		wait(0.05);
-		if(result == 0)
-		{
-			pagenum ++;
-			writenum += bytenum;
-			writeptr += bytenum;
-		}
-		else
-		{
-			break;
-		}
-	}
-	if (result != 0) {
-		printk("ALARM: EEPROM data erase error.\n");
-	} else {
-		printk("EEPROM data erase finished.\n");
-	}
-}
-int Kernel::iic_page_write(unsigned char u8PageNum, unsigned char u8len, unsigned char *pu8Array)
-{
-	unsigned char   i;
-	unsigned int  	u16ByteAdd;
-	unsigned char   u8HighAdd;
-	unsigned char   u8LowAdd;
-	unsigned char   *pu8ByteArray;
-
-	u16ByteAdd = (unsigned int)u8PageNum;
-	u16ByteAdd = (u16ByteAdd<<5);
-	u8LowAdd = (unsigned char)u16ByteAdd;
-	u8HighAdd = (unsigned char)(u16ByteAdd>>8);
-
-	if (u8len == 0)
-	{
-		return 1;
-	}
-
-
-	this->i2c->start();
-	this->i2c->write(0xA0);
-
-	this->i2c->write(u8HighAdd);
-	this->i2c->write(u8LowAdd);
-
-	pu8ByteArray = pu8Array;
-
-	/* write the array to eeprom */
-	for(i=0;i<u8len;i++)
-	{
-		this->i2c->write(*pu8ByteArray);
-		pu8ByteArray++;
-	}
-
-	this->i2c->stop();
-	this->i2c->stop();
-
-	return 0;
 }
 
