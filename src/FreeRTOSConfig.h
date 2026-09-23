@@ -21,7 +21,15 @@
 #define configUSE_CO_ROUTINES           0
 #define configUSE_MUTEXES               1
 #define configUSE_RECURSIVE_MUTEXES     0
-#define configCHECK_FOR_STACK_OVERFLOW  1
+#define configCHECK_FOR_STACK_OVERFLOW  2
+
+// without this every internal check is off, and a bad handle or index runs on until something
+// unrelated crashes
+#ifdef __cplusplus
+extern "C"
+#endif
+void vAssertCalled(const char *file, int line);
+#define configASSERT(x) if((x) == 0) vAssertCalled(__FILE__, __LINE__)
 #define configTICK_TYPE_WIDTH_IN_BITS   TICK_TYPE_WIDTH_32_BITS
 #define configSUPPORT_STATIC_ALLOCATION 1
 

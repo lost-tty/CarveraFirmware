@@ -238,6 +238,15 @@ void init() {
     THEKERNEL->slow_ticker.start();
 }
 
+// no printf: this can run on the 512 byte main stack with interrupts off, and vfprintf
+// needs more than that. the file and line are in the registers for the debugger to read
+extern "C" void vAssertCalled(const char *file, int line) {
+    volatile const char *f= file;
+    volatile int l= line;
+    (void)f; (void)l;
+    __debugbreak();
+}
+
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
     /* Log or print the overflow information */
     printk("Stack overflow detected in task: %s\n", pcTaskName);
