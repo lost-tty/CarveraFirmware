@@ -414,13 +414,13 @@ void ZProbe::calibrate_Z(Gcode *gcode)
     }
 
     // a probe stuck on would look alive to M492.3 below, so remember whether it was quiet before the move
-    bool probe_idle= !this->probe_pin.get();
+    bool probe_idle= this->probe_pin.get() == invert_probe;
 
     probe_watch.inputs.clear();
     probe_watch.inputs.add(calibrate_pin);
     // a live wireless probe signals as the setter does, which M492.3 reads below
     probe_watch.witness.clear();
-    probe_watch.witness.add(probe_pin);
+    probe_watch.witness.add(probe_pin, invert_probe);
     probe_watch.motors= (1<<X_AXIS)|(1<<Y_AXIS)|(1<<Z_AXIS);
 
     float delta[3]= {0, 0, z};
