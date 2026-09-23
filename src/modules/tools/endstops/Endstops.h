@@ -49,7 +49,6 @@ class Endstops : public Module{
         void service();
         void check_motor_alarms();
         bool approach(uint8_t axis, float distance, float rate);
-        float past_edge_mm(uint8_t axis) const;
         bool home_axis(uint8_t axis);
         uint16_t hysteresis_steps(uint8_t axis) const;
 

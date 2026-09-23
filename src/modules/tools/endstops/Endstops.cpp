@@ -482,17 +482,11 @@ bool Endstops::approach(uint8_t axis, float distance, float rate)
 
     bool ok= THEROBOT.delta_move_watch(delta, rate, homing_axis.size(), approach_watch);
     bool hit= approach_watch.hit;
+    float steps_per_mm= THEROBOT.motor_steps_per_mm(axis);
+    h.past_edge= hit && steps_per_mm != 0 ? (THEROBOT.motor_step(axis) - approach_watch.at_steps[axis]) / steps_per_mm : 0;
     approach_watch.inputs.clear();
     arm_limits();
     return ok && hit;
-}
-
-// distance from the latched switch edge to where the axis stopped
-float Endstops::past_edge_mm(uint8_t axis) const
-{
-    float steps_per_mm= THEROBOT.motor_steps_per_mm(axis);
-    if(steps_per_mm == 0) return 0;
-    return (THEROBOT.motor_step(axis) - approach_watch.at_steps[axis]) / steps_per_mm;
 }
 
 // the fast pass finds the switch, the slow pass sets the position
@@ -506,10 +500,7 @@ bool Endstops::home_axis(uint8_t axis)
     delta[axis]= h.home_direction ? h.retract : -h.retract;
     if(!THEROBOT.delta_move_sync(delta, h.slow_rate, homing_axis.size())) return false;
 
-    if(!approach(axis, h.retract * 2, h.slow_rate)) return false;
-
-    h.past_edge= past_edge_mm(axis);
-    return true;
+    return approach(axis, h.retract * 2, h.slow_rate);
 }
 
 void Endstops::home(axis_bitmap_t a)
