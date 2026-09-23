@@ -10,9 +10,10 @@
 
 int SoftSerial::_putc(int c)
 {
-    while(!writeable()){
-        THEKERNEL->call_event(ON_IDLE, this);
-    };
+    // the bit ticker finishes the previous byte in well under a tick, so yielding beats sleeping
+    while(!writeable()) {
+        taskYIELD();
+    }
     prepare_tx(c);
     tx_bit = 0;
     txticker.prime();
