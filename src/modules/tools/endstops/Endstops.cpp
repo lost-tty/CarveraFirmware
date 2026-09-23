@@ -395,7 +395,9 @@ void Endstops::back_off_home(axis_bitmap_t axis)
         for( auto& e : homing_axis) {
             if(!axis[e.axis_index]) continue; // only for axes we asked to move
             if(e.pin_info == nullptr) continue;
-            delta[e.axis_index]= e.retract * (e.home_direction ? 1 : -1);
+            // the position was set at the switch edge and the axis stands past_edge beyond
+            // it; the retract is measured from the edge
+            delta[e.axis_index]= e.retract * (e.home_direction ? 1 : -1) - e.past_edge;
             moving= true;
             // select slowest of them all
             slow_rate= isnan(slow_rate) ? e.slow_rate : std::min(slow_rate, e.slow_rate);
