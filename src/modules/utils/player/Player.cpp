@@ -18,6 +18,7 @@
 #include "libs/StreamOutput.h"
 #include "Gcode.h"
 #include "GcodeDispatch.h"
+#include "modules/tools/ToolHead.h"
 #include "checksumm.h"
 #include "Config.h"
 #include "ConfigValue.h"
@@ -59,6 +60,10 @@ void Player::on_module_loaded()
 
     for (unsigned i= 0; COMMANDS[i].name != nullptr; i++) SimpleShell::add_command(shell_slots[i], COMMANDS[i].name, &Player::shell, this, COMMANDS[i].help);
     GcodeDispatch::add_handler(this);
+    ADD_MCODE(m0, 0, BARRIER, Player::program_stop);
+    ADD_MCODE(m1, 1, BARRIER, Player::optional_stop);
+    ADD_MCODE(m600, 600, BARRIER, Player::suspend_gcode);
+    ADD_MCODE(m601, 601, IMMEDIATE, Player::resume_gcode);
 
     this->leave_heaters_on = THEKERNEL->config->value(leave_heaters_on_suspend_checksum)->by_default(false)->as_bool();
 
@@ -100,28 +105,41 @@ string Player::extract_options(string& args)
     return opts;
 }
 
+// only G codes come through here; the M codes are registered
 void Player::on_gcode_received(Gcode *argument)
 {
     Gcode *gcode = argument;
-    string args = get_arguments(gcode->get_command());
-    if (gcode->has_m) {
-        if (gcode->m == 1) { //optiional stop
-            if (THEKERNEL->get_optional_stop_mode()){
-                this->suspend_command((gcode->subcode == 1)?"h":"", gcode->stream);
-            }
-        } else if (gcode->m == 600) { // suspend, M600.1 leaves the spindle on
-            this->suspend_command((gcode->subcode == 1)?"h":"", gcode->stream);
-        } else if (gcode->m == 601) { // resume
-            this->resume_command("", gcode->stream);
-        }
-    } else if(gcode->has_g) {
-        if (gcode->g == 28) { // homing cancels suspend
-            if (THEKERNEL->is_suspending()) {
-                sources.resume();
-                THEROBOT.pop_state();
-            }
-        }
+    if(!gcode->has_g || gcode->g != 28) return;
+
+    // homing cancels suspend
+    if (THEKERNEL->is_suspending()) {
+        sources.resume();
+        THEROBOT.pop_state();
     }
+}
+
+// M0: stop the program until the operator resumes it
+void Player::program_stop(Gcode *gcode)
+{
+    this->suspend_command((gcode->subcode == 1) ? "h" : "", gcode->stream);
+}
+
+// M1: the same, obeyed only when the optional stop mode is on
+void Player::optional_stop(Gcode *gcode)
+{
+    if(!THEKERNEL->get_optional_stop_mode()) return;
+    this->suspend_command((gcode->subcode == 1) ? "h" : "", gcode->stream);
+}
+
+// M600: suspend, M600.1 leaves the spindle on
+void Player::suspend_gcode(Gcode *gcode)
+{
+    this->suspend_command((gcode->subcode == 1) ? "h" : "", gcode->stream);
+}
+
+void Player::resume_gcode(Gcode *gcode)
+{
+    this->resume_command("", gcode->stream);
 }
 
 // When a new line is received, check if it is a command, and if it is, act upon it
@@ -299,8 +317,7 @@ void Player::abort()
     bool finished= THECONVEYOR.wait_for_idle();
     THEKERNEL->set_waiting(false);
     if(!finished) return;
-    gcode_dispatch.run_line("M5", &StreamOutput::NullStream);
-    gcode_dispatch.run_line("M9", &StreamOutput::NullStream);
+    tool_head.stop_all();
 }
 
 void Player::abort_command( string parameters, StreamOutput *stream )

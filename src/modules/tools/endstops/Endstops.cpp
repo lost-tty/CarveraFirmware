@@ -24,6 +24,7 @@
 #include "libs/StreamOutput.h"
 #include "Scripts.h"
 #include "Logging.h"
+#include "ZProbe.h"
 #include "BaseSolution.h"
 #include "SerialMessage.h"
 
@@ -101,6 +102,10 @@ void Endstops::on_module_loaded()
     }
 
     GcodeDispatch::add_handler(this);
+    Settings::add(settings_slot, &Endstops::report_settings, this);
+    ADD_MCODE(m119, 119, IMMEDIATE, Endstops::report_switches);
+    ADD_MCODE(m206, 206, IMMEDIATE, Endstops::set_home_offset);
+    ADD_MCODE(m306, 306, BARRIER, Endstops::set_home_offset_here);
 
 	service_timer.start();
 }
@@ -642,6 +647,21 @@ void Endstops::set_homing_offset(Gcode *gcode)
 
 
 // parse gcodes
+void Endstops::report_settings(void *self, StreamOutput *stream)
+{
+    Endstops *e= (Endstops *)self;
+    stream->printf(";Home offset (mm):\nM206 ");
+    for (auto &p : e->homing_axis) {
+        if(p.pin_info == nullptr) continue; // ignore if not a homing endstop
+        stream->printf("%c%1.2f ", p.axis, p.home_offset);
+    }
+    stream->printf("\n");
+
+    if(e->g28_position[X_AXIS] != 0 || e->g28_position[Y_AXIS] != 0) {
+        stream->printf(";predefined position:\nG28.1 X%1.4f Y%1.4f\n", e->g28_position[X_AXIS], e->g28_position[Y_AXIS]);
+    }
+}
+
 void Endstops::on_gcode_received(Gcode *argument)
 {
     Gcode *gcode = argument;
@@ -719,61 +739,48 @@ void Endstops::on_gcode_received(Gcode *argument)
                 break;
         }
 
-    } else if (gcode->has_m) {
-
-        switch (gcode->m) {
-            case 119: {
-                for(auto& h : homing_axis) {
-                    if(h.pin_info == nullptr) continue; // ignore if not a homing endstop
-                    string name;
-                    name.append(1, h.axis).append(h.home_direction ? "_min" : "_max");
-                    gcode->stream->printf("%s:%d ", name.c_str(), h.pin_info->pin.get());
-                }
-                gcode->stream->printf("pins- ");
-                for(auto& p : endstops) {
-                    string str(1, p->axis);
-                    if(p->limit_enable) str.append("L");
-                    gcode->stream->printf("(%s)P%d.%d:%d ", str.c_str(), p->pin.port_number, p->pin.pin, p->pin.get());
-                }
-                gcode->add_nl = true;
-            }
-            break;
-
-            case 206: // M206 - set homing offset
-                for (auto &p : homing_axis) {
-                    if(p.pin_info == nullptr) continue; // ignore if not a homing endstop
-                    if (gcode->has_letter(p.axis)) p.home_offset= gcode->get_value(p.axis);
-                }
-
-                for (auto &p : homing_axis) {
-                    if(p.pin_info == nullptr) continue; // ignore if not a homing endstop
-                    gcode->stream->printf("%c: %5.3f ", p.axis, p.home_offset);
-                }
-
-                gcode->stream->printf(" will take effect next home\n");
-                break;
-
-            case 306: // set homing offset based on current position
-
-                set_homing_offset(gcode);
-                break;
-
-            case 500: // save settings
-            case 503: // print settings
-                gcode->stream->printf(";Home offset (mm):\nM206 ");
-                for (auto &p : homing_axis) {
-                    if(p.pin_info == nullptr) continue; // ignore if not a homing endstop
-                    gcode->stream->printf("%c%1.2f ", p.axis, p.home_offset);
-                }
-                gcode->stream->printf("\n");
-
-                if(g28_position[X_AXIS] != 0 || g28_position[Y_AXIS] != 0) {
-                    gcode->stream->printf(";predefined position:\nG28.1 X%1.4f Y%1.4f\n", g28_position[X_AXIS], g28_position[Y_AXIS]);
-                }
-                break;
-
-        }
     }
+}
+
+// M119: every switch this machine has, homing ones by name and the rest by pin
+void Endstops::report_switches(Gcode *gcode)
+{
+    for(auto& h : homing_axis) {
+        if(h.pin_info == nullptr) continue; // ignore if not a homing endstop
+        string name;
+        name.append(1, h.axis).append(h.home_direction ? "_min" : "_max");
+        gcode->stream->printf("%s:%d ", name.c_str(), h.pin_info->pin.get());
+    }
+    gcode->stream->printf("pins- ");
+    for(auto& p : endstops) {
+        string str(1, p->axis);
+        if(p->limit_enable) str.append("L");
+        gcode->stream->printf("(%s)P%d.%d:%d ", str.c_str(), p->pin.port_number, p->pin.pin, p->pin.get());
+    }
+    gcode->stream->printf(" Probe: %d", zprobe.getProbeStatus());
+    gcode->add_nl = true;
+}
+
+// M206: the offset applied at the next home
+void Endstops::set_home_offset(Gcode *gcode)
+{
+    for (auto &p : homing_axis) {
+        if(p.pin_info == nullptr) continue; // ignore if not a homing endstop
+        if (gcode->has_letter(p.axis)) p.home_offset= gcode->get_value(p.axis);
+    }
+
+    for (auto &p : homing_axis) {
+        if(p.pin_info == nullptr) continue; // ignore if not a homing endstop
+        gcode->stream->printf("%c: %5.3f ", p.axis, p.home_offset);
+    }
+
+    gcode->stream->printf(" will take effect next home\n");
+}
+
+// M306: the same offset, from where the machine stands now
+void Endstops::set_home_offset_here(Gcode *gcode)
+{
+    set_homing_offset(gcode);
 }
 
 bool Endstops::is_homing() const

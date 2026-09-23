@@ -8,6 +8,7 @@
 
 class ZProbe;
 class Gcode;
+class StreamOutput;
 
 class LevelingStrategy
 {
@@ -15,6 +16,8 @@ public:
     LevelingStrategy(ZProbe* zprobe) : zprobe(zprobe){};
     virtual ~LevelingStrategy(){};
     virtual bool handleGcode(Gcode* gcode)= 0;
+    virtual void report_settings(StreamOutput *stream) {}
+    virtual void register_mcodes() {}
     virtual bool handleConfig()= 0;
 
 protected:

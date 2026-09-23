@@ -64,6 +64,9 @@ void ZProbe::on_module_loaded()
     this->config_load();
     // register event-handlers
     GcodeDispatch::add_handler(this);
+    Settings::add(settings_slot, &ZProbe::report_settings, this);
+    for(auto s : strategies) s->register_mcodes();
+    ADD_MCODE(m670, 670, IMMEDIATE, ZProbe::set_probe_settings);
 
     // we read the probe in this timer
     this->probe_trigger_time = 0;
@@ -96,7 +99,11 @@ void ZProbe::config_load()
                     break;
             }
             if(found) {
-                if(ls->handleConfig()) {
+                // both strategies claim M561 and M565, so only one can be loaded
+                if(!this->strategies.empty()) {
+                    printk("WARNING: leveling strategy already loaded, ignoring the rest\n");
+                    delete ls;
+                } else if(ls->handleConfig()) {
                     this->strategies.push_back(ls);
                 }else{
                     delete ls;
@@ -185,6 +192,15 @@ bool ZProbe::doProbeAt(float &mm, float x, float y)
     // move to xy
     coordinated_move(x, y, NAN, getFastFeedrate() * 4);
     return run_probe_return(mm, slow_feedrate);
+}
+
+void ZProbe::report_settings(void *self, StreamOutput *stream)
+{
+    ZProbe *z= (ZProbe *)self;
+    stream->printf(";Probe feedrates Slow/fast(K)/Return (mm/sec) max_z (mm) height (mm) dwell (s):\nM670 S%1.2f K%1.2f R%1.2f Z%1.2f H%1.2f D%1.2f\n",
+        z->slow_feedrate, z->fast_feedrate, z->return_feedrate, z->max_z, z->probe_height, z->dwell_before_probing);
+
+    for(auto s : z->strategies) s->report_settings(stream);
 }
 
 void ZProbe::on_gcode_received(Gcode *argument)
@@ -288,39 +304,18 @@ void ZProbe::on_gcode_received(Gcode *argument)
 
         return;
 
-    } else if(gcode->has_m) {
-        // M code processing here
-        int c;
-        switch (gcode->m) {
-            case 119:
-                c = this->probe_pin.get();
-                gcode->stream->printf(" Probe: %d", c);
-                gcode->add_nl = true;
-                break;
-
-            case 670:
-                if (gcode->has_letter('S')) this->slow_feedrate = gcode->get_value('S');
-                if (gcode->has_letter('K')) this->fast_feedrate = gcode->get_value('K');
-                if (gcode->has_letter('R')) this->return_feedrate = gcode->get_value('R');
-                if (gcode->has_letter('Z')) this->max_z = gcode->get_value('Z');
-                if (gcode->has_letter('H')) this->probe_height = gcode->get_value('H');
-                if (gcode->has_letter('D')) this->dwell_before_probing = gcode->get_value('D');
-                break;
-
-            case 500: // save settings
-            case 503: // print settings
-                gcode->stream->printf(";Probe feedrates Slow/fast(K)/Return (mm/sec) max_z (mm) height (mm) dwell (s):\nM670 S%1.2f K%1.2f R%1.2f Z%1.2f H%1.2f D%1.2f\n",
-                    this->slow_feedrate, this->fast_feedrate, this->return_feedrate, this->max_z, this->probe_height, this->dwell_before_probing);
-                
-                // fall through
-            default:
-                for(auto s : strategies){
-                    if(s->handleGcode(gcode)) {
-                        return;
-                    }
-                }
-        }
     }
+}
+
+// M670: the probe feedrates and limits
+void ZProbe::set_probe_settings(Gcode *gcode)
+{
+    if (gcode->has_letter('S')) this->slow_feedrate = gcode->get_value('S');
+    if (gcode->has_letter('K')) this->fast_feedrate = gcode->get_value('K');
+    if (gcode->has_letter('R')) this->return_feedrate = gcode->get_value('R');
+    if (gcode->has_letter('Z')) this->max_z = gcode->get_value('Z');
+    if (gcode->has_letter('H')) this->probe_height = gcode->get_value('H');
+    if (gcode->has_letter('D')) this->dwell_before_probing = gcode->get_value('D');
 }
 
 // special way to probe in the X or Y or Z direction using planned moves, should work with any kinematics

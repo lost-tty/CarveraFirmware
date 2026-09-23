@@ -15,6 +15,8 @@ class Gcode;
 #include "TemperatureControlPublicAccess.h"
 #include "SoftTimer.h"
 
+#include "GcodeDispatch.h"
+
 class TemperatureControl : public Module {
 
     public:
@@ -32,7 +34,10 @@ class TemperatureControl : public Module {
 
         void on_module_loaded();
         void on_main_loop(void* argument);
-        void on_gcode_received(Gcode *argument);
+        void report_temperature(Gcode *);
+        void sensor_settings_gcode(Gcode *);
+
+        GcodeDispatch::Mcode m_get, m305;
         void on_second_tick(void* argument);
 
         float get_temperature();

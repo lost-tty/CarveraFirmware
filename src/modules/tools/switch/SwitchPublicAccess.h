@@ -10,6 +10,7 @@
 #define vacuum_checksum              CHECKSUM("vacuum")
 #define light_checksum               CHECKSUM("light")
 #define probecharger_checksum        CHECKSUM("probecharger")
+#define air_checksum                 CHECKSUM("air")
 
 struct pad_switch {
     int name;

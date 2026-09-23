@@ -368,6 +368,63 @@ bool CartGridStrategy::load_grid(StreamOutput *stream)
     return true;
 }
 
+void CartGridStrategy::report_settings(StreamOutput *stream)
+{
+    float x, y, z;
+    std::tie(x, y, z) = probe_offsets;
+    stream->printf(";Probe offsets:\nM565 X%1.5f Y%1.5f Z%1.5f\n", x, y, z);
+    if(save && !isnan(grid[0])) stream->printf(";Load saved grid\nM375\n");
+}
+
+void CartGridStrategy::register_mcodes()
+{
+    ADD_MCODE(m370, 370, BARRIER, CartGridStrategy::clear_bed);
+    ADD_MCODE(m561, 561, BARRIER, CartGridStrategy::clear_bed);
+    ADD_MCODE(m374, 374, BARRIER, CartGridStrategy::save_grid_gcode);
+    ADD_MCODE(m375, 375, BARRIER, CartGridStrategy::load_grid_gcode);
+    ADD_MCODE(m565, 565, IMMEDIATE, CartGridStrategy::set_probe_offsets);
+}
+
+// M370, M561: clear the bed
+void CartGridStrategy::clear_bed(Gcode *gcode)
+{
+    setAdjustFunction(false);
+    reset_bed_level();
+    gcode->stream->printf("grid cleared and disabled\n");
+}
+
+// M374: save the grid, M374.1: delete the saved one
+void CartGridStrategy::save_grid_gcode(Gcode *gcode)
+{
+    if(gcode->subcode == 1) {
+        // we use a different file format depending on whether it is square or not
+        const char *filename= (this->new_file_format) ? GRIDFILE_NM : GRIDFILE;
+        remove(filename);
+        gcode->stream->printf("%s deleted\n", filename);
+        return;
+    }
+
+    __disable_irq();
+    save_grid(gcode->stream);
+    __enable_irq();
+}
+
+// M375: load the grid, M375.1: show it
+void CartGridStrategy::load_grid_gcode(Gcode *gcode)
+{
+    if(gcode->subcode == 1) print_bed_level(gcode->stream);
+    else if(load_grid(gcode->stream)) setAdjustFunction(true);
+}
+
+void CartGridStrategy::set_probe_offsets(Gcode *gcode)
+{
+    float x = 0, y = 0, z = 0;
+    if(gcode->has_letter('X')) x = gcode->get_value('X');
+    if(gcode->has_letter('Y')) y = gcode->get_value('Y');
+    if(gcode->has_letter('Z')) z = gcode->get_value('Z');
+    probe_offsets = std::make_tuple(x, y, z);
+}
+
 bool CartGridStrategy::handleGcode(Gcode *gcode)
 {
     if(gcode->has_g) {
@@ -423,53 +480,6 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
             return true;
         }
 
-    } else if(gcode->has_m) {
-        if(gcode->m == 370 || gcode->m == 561) { // M370, M561: Clear bed
-            setAdjustFunction(false);
-            reset_bed_level();
-            gcode->stream->printf("grid cleared and disabled\n");
-            return true;
-
-        } else if(gcode->m == 374) { // M374: Save grid, M374.1: delete saved grid
-            if(gcode->subcode == 1) {
-                // we use a different file format depending on whether it is square or not
-                const char *filename= (this->new_file_format) ? GRIDFILE_NM : GRIDFILE;
-                remove(filename);
-                gcode->stream->printf("%s deleted\n", filename);
-            } else {
-                __disable_irq();
-                save_grid(gcode->stream);
-                __enable_irq();
-            }
-
-            return true;
-
-        } else if(gcode->m == 375) { // M375: load grid, M375.1 display grid
-            if(gcode->subcode == 1) {
-                print_bed_level(gcode->stream);
-            } else {
-                if (load_grid(gcode->stream)) setAdjustFunction(true);
-            }
-            return true;
-
-        } else if(gcode->m == 565) { // M565: Set Z probe offsets
-            float x = 0, y = 0, z = 0;
-            if(gcode->has_letter('X')) x = gcode->get_value('X');
-            if(gcode->has_letter('Y')) y = gcode->get_value('Y');
-            if(gcode->has_letter('Z')) z = gcode->get_value('Z');
-            probe_offsets = std::make_tuple(x, y, z);
-            return true;
-
-        } else if(gcode->m == 500 || gcode->m == 503) { // M500 save, M503 display
-            float x, y, z;
-            std::tie(x, y, z) = probe_offsets;
-            gcode->stream->printf(";Probe offsets:\nM565 X%1.5f Y%1.5f Z%1.5f\n", x, y, z);
-            if(save) {
-                if(!isnan(grid[0])) gcode->stream->printf(";Load saved grid\nM375\n");
-                else if(gcode->m == 503) gcode->stream->printf(";WARNING No grid to save\n");
-            }
-            return true;
-        }
     }
 
     return false;

@@ -8,6 +8,7 @@
 #include "libs/Kernel.h"
 
 #include "modules/tools/laser/Laser.h"
+#include "modules/tools/ToolHead.h"
 #include "modules/tools/spindle/SpindleMaker.h"
 #include "modules/tools/temperaturecontrol/TemperatureControlPool.h"
 #include "modules/tools/endstops/Endstops.h"
@@ -201,6 +202,7 @@ void init() {
     #ifndef NO_TOOLS_LASER
     THEKERNEL->add_module(&laser);
     #endif
+    THEKERNEL->add_module(&tool_head);
 
     #ifndef NO_TOOLS_SPINDLE
     SpindleMaker *sm = new SpindleMaker();

@@ -80,7 +80,11 @@ void ATCHandler::on_module_loaded()
     detector_info.triggered = false;
 
 
-    GcodeDispatch::add_handler(this);
+    ADD_MCODE(m490, 490, BARRIER, ATCHandler::clamp_gcode);
+    ADD_MCODE(m492, 492, BARRIER, ATCHandler::detect_gcode);
+    ADD_MCODE(m493, 493, BARRIER, ATCHandler::tool_gcode);
+    ADD_MCODE(m494, 494, IMMEDIATE, ATCHandler::probe_laser_gcode);
+    ADD_MCODE(m497, 497, BARRIER, ATCHandler::state_gcode);
 
     this->on_config_reload(this);
 
@@ -336,74 +340,72 @@ static void halt(int reason, const char *msg)
     THEKERNEL->halt(reason, msg);
 }
 
-void ATCHandler::on_gcode_received(Gcode *argument)
+// M490: home the clamp, M490.1 clamp, M490.2 loosen
+void ATCHandler::clamp_gcode(Gcode *gcode)
 {
-    Gcode *gcode = argument;
-    if (!gcode->has_m) return;
-    uint8_t sub = gcode->subcode;
-
-    switch (gcode->m) {
-        case 490: // clamp
-            switch (sub) {
-                case 0: home_clamp(); break;
-                case 1: clamp_tool(); break;
-                case 2: loose_tool(); break;
-            }
-            break;
-
-        case 492: // is the slot occupied, is the probe alive
-            switch (sub) {
-                case 0: case 1:
-                    tool_detected = laser_detect();
-                    if (!tool_detected) halt(ATC_NO_TOOL, "Tool confliction occured, please check tool rack!");
-                    break;
-                case 2:
-                    tool_detected = laser_detect();
-                    if (tool_detected) halt(ATC_HAS_TOOL, "Tool confliction occured, please check tool rack!");
-                    break;
-                case 3:
-                    if (!probe_detect()) halt(PROBE_INVALID, "Wireless probe dead or not set, please charge or set first!");
-                    break;
-                case 4:
-                    tool_detected = laser_detect(); // a script decides what a wrong result means
-                    break;
-            }
-            break;
-
-        case 493: // tool length offset, active tool
-            switch (sub) {
-                case 0: case 1:
-                    set_tool_offset();
-                    break;
-                case 2:
-                    if (!gcode->has_letter('T')) {
-                        halt(ATC_NO_TOOL, "No tool was set!");
-                    } else {
-                        int tool = gcode->get_value('T');
-                        persist.set_tool(tool);
-                    }
-                    break;
-            }
-            break;
-
-        case 494: // probe laser
-            switch (sub) {
-                case 0: case 1:
-                    probe_laser_countdown = 120;
-                    probe_laser_timer.start();
-                    break;
-                case 2:
-                    probe_laser_timer.stop();
-                    break;
-            }
-            break;
-
-        case 497:
-            THECONVEYOR.wait_for_idle();
-            atc_state= sub;
-            break;
-
+    switch (gcode->subcode) {
+        case 0: home_clamp(); break;
+        case 1: clamp_tool(); break;
+        case 2: loose_tool(); break;
     }
+}
+
+// M492: is the slot occupied (.0 .1 expect a tool, .2 expects none, .4 only reports), M492.3 is the probe alive
+void ATCHandler::detect_gcode(Gcode *gcode)
+{
+    switch (gcode->subcode) {
+        case 0: case 1:
+            tool_detected = laser_detect();
+            if (!tool_detected) halt(ATC_NO_TOOL, "Tool confliction occured, please check tool rack!");
+            break;
+        case 2:
+            tool_detected = laser_detect();
+            if (tool_detected) halt(ATC_HAS_TOOL, "Tool confliction occured, please check tool rack!");
+            break;
+        case 3:
+            if (!probe_detect()) halt(PROBE_INVALID, "Wireless probe dead or not set, please charge or set first!");
+            break;
+        case 4:
+            tool_detected = laser_detect(); // a script decides what a wrong result means
+            break;
+    }
+}
+
+// M493: measure the tool length, M493.2 T<n> say which tool is in the spindle
+void ATCHandler::tool_gcode(Gcode *gcode)
+{
+    switch (gcode->subcode) {
+        case 0: case 1:
+            set_tool_offset();
+            break;
+        case 2:
+            if (!gcode->has_letter('T')) {
+                halt(ATC_NO_TOOL, "No tool was set!");
+                return;
+            }
+            persist.set_tool(gcode->get_value('T'));
+            break;
+    }
+}
+
+// M494: light the probe for two minutes, M494.2 turn it off
+void ATCHandler::probe_laser_gcode(Gcode *gcode)
+{
+    switch (gcode->subcode) {
+        case 0: case 1:
+            probe_laser_countdown = 120;
+            probe_laser_timer.start();
+            break;
+        case 2:
+            probe_laser_timer.stop();
+            break;
+    }
+}
+
+// M497.<n>: what the status line reports as |A:<n> while a macro runs
+void ATCHandler::state_gcode(Gcode *gcode)
+{
+    atc_state= gcode->subcode;
 }
 
 const ATCHandler::Param ATCHandler::PARAMS[] = {

@@ -16,6 +16,7 @@ class StreamOutput;
 
 #include "libs/Module.h"
 #include "libs/Killable.h"
+#include "GcodeDispatch.h"
 #include "SoftTimer.h"
 
 #include <stdint.h>
@@ -34,7 +35,15 @@ class Laser : public Module, public Killable {
         {}
 
         void on_module_loaded();
-        void on_gcode_received(Gcode *argument);
+        void enter_laser_mode(Gcode *);
+        void enter_cnc_mode(Gcode *);
+        void test_mode_on(Gcode *);
+        void test_mode_off(Gcode *);
+        void set_scale(Gcode *);
+
+        GcodeDispatch::Mcode m321, m322, m323, m324, m325;
+        void start(Gcode *gcode);
+        void stop(Gcode *gcode);
         static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
         static const SimpleShell::Sub<Laser> SUBS[];
         void sub_on(std::string args, StreamOutput *stream);

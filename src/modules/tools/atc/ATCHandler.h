@@ -9,6 +9,7 @@ class Gcode;
 
 #include "SoftTimer.h"
 #include "SimpleShell.h"
+#include "GcodeDispatch.h"
 
 class ATCHandler : public Module, public Killable
 {
@@ -29,7 +30,13 @@ public:
     {}
 
     void on_module_loaded();
-    void on_gcode_received(Gcode *argument);
+    void clamp_gcode(Gcode *);
+    void detect_gcode(Gcode *);
+    void tool_gcode(Gcode *);
+    void probe_laser_gcode(Gcode *);
+    void state_gcode(Gcode *);
+
+    GcodeDispatch::Mcode m490, m492, m493, m494, m497;
     void kill() override {}
     void cleanup() override;
     void on_config_reload(void *argument);

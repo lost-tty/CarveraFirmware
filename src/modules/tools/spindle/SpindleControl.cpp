@@ -18,99 +18,64 @@
 
 SpindleControl *spindle_control = nullptr;
 
-void SpindleControl::on_gcode_received(Gcode *argument) 
+void SpindleControl::register_mcodes()
 {
-    
-    Gcode *gcode = argument;
-        
-    if (gcode->has_m)
-    {
-        if (gcode->m == 957)
-        {
-            // M957: report spindle speed
-            report_speed();
-        }
-        else if (gcode->m == 958)
-        {
-            THECONVEYOR.wait_for_idle();
-            // M958: set spindle PID parameters
-            if (gcode->has_letter('P'))
-                set_p_term( gcode->get_value('P') );
-            if (gcode->has_letter('I'))
-                set_i_term( gcode->get_value('I') );
-            if (gcode->has_letter('D'))
-                set_d_term( gcode->get_value('D') );
-            // report PID settings
-            report_settings();
-          
-        }
-        else if (gcode->m == 3)
-        {
-        	if (!THEKERNEL->get_laser_mode()) {
-                // current tool number and tool offset
-                struct tool_status tool;
-                bool tool_ok = atc_handler.get_tool_status(&tool);
-                if (tool_ok) {
-                	tool_ok = tool.active_tool > 0;
-                }
-            	// check if is tool -1 or tool 0
-            	if (!tool_ok) {
-        			THEKERNEL->halt(MANUAL, "no tool set");
-        			printk("ERROR: No tool or probe tool!\n");
-        			return;
-            	}
-
-                THECONVEYOR.wait_for_idle();
-                // open vacuum if set
-            	if (THEKERNEL->get_vacuum_mode()) {
-            		// open vacuum
-            		bool b = true;
-                    SwitchPool::set_state(vacuum_checksum, b);
-            	}
-
-                // M3 with S value provided: set speed
-                if (gcode->has_letter('S'))
-                {
-                    set_speed(gcode->get_value('S'));
-                }
-                // M3: Spindle on
-                if (!spindle_on) {
-                    turn_on();
-                }
-        	}
-        }
-        else if (gcode->m == 5)
-        {
-        	if (!THEKERNEL->get_laser_mode()) {
-                THECONVEYOR.wait_for_idle();
-
-                // close vacuum if set
-            	if (THEKERNEL->get_vacuum_mode()) {
-            		// close vacuum
-            		bool b = false;
-                    SwitchPool::set_state(vacuum_checksum, b);
-            	}
-
-                // M5: spindle off
-                if (spindle_on) {
-                    turn_off();
-                }
-        	}
-        }
-        else if (gcode->m == 223)
-        {	// M222 - rpm override percentage
-            if (gcode->has_letter('S')) {
-                float factor = gcode->get_value('S');
-                // enforce minimum 50% speed
-                if (factor < 50.0F)
-                    factor = 50.0F;
-                // enforce maximum 2x speed
-                if (factor > 200.0F)
-                    factor = 200.0F;
-                set_factor(factor);
-            }
-        }
-    }
-
+    ADD_MCODE(m223, 223, IMMEDIATE, SpindleControl::handle_override);
+    ADD_MCODE(m957, 957, IMMEDIATE, SpindleControl::handle_report);
+    ADD_MCODE(m958, 958, BARRIER, SpindleControl::handle_pid);
 }
 
+void SpindleControl::start(Gcode *gcode)
+{
+    struct tool_status tool;
+    bool tool_ok = atc_handler.get_tool_status(&tool) && tool.active_tool > 0;
+    if(!tool_ok) {
+        THEKERNEL->halt(MANUAL, "no tool set");
+        printk("ERROR: No tool or probe tool!\n");
+        return;
+    }
+
+    THECONVEYOR.wait_for_idle();
+
+    if(THEKERNEL->get_vacuum_mode()) {
+        bool b = true;
+        SwitchPool::set_state(vacuum_checksum, b);
+    }
+
+    if(gcode->has_letter('S')) set_speed(gcode->get_value('S'));
+    if(!spindle_on) turn_on();
+}
+
+void SpindleControl::stop(Gcode *gcode)
+{
+    THECONVEYOR.wait_for_idle();
+
+    if(THEKERNEL->get_vacuum_mode()) {
+        bool b = false;
+        SwitchPool::set_state(vacuum_checksum, b);
+    }
+
+    if(spindle_on) turn_off();
+}
+
+void SpindleControl::handle_override(Gcode *gcode)
+{
+    if(!gcode->has_letter('S')) return;
+    float factor = gcode->get_value('S');
+    if(factor < 50.0F) factor = 50.0F;
+    if(factor > 200.0F) factor = 200.0F;
+    set_factor(factor);
+}
+
+void SpindleControl::handle_report(Gcode *gcode)
+{
+    report_speed();
+}
+
+void SpindleControl::handle_pid(Gcode *gcode)
+{
+    if(gcode->has_letter('P')) set_p_term(gcode->get_value('P'));
+    if(gcode->has_letter('I')) set_i_term(gcode->get_value('I'));
+    if(gcode->has_letter('D')) set_d_term(gcode->get_value('D'));
+    report_settings();
+}

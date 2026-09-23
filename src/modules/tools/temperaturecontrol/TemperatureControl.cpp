@@ -54,7 +54,8 @@ void TemperatureControl::on_module_loaded()
     this->load_config();
 
     // Register for events
-    GcodeDispatch::add_handler(this);
+    ADD_MCODE(m_get, this->get_m_code, IMMEDIATE, TemperatureControl::report_temperature);
+    ADD_MCODE(m305, 305, IMMEDIATE, TemperatureControl::sensor_settings_gcode);
     this->register_for_event(ON_SECOND_TICK);
 
 }
@@ -97,48 +98,39 @@ void TemperatureControl::load_config()
     this->last_reading = 0.0;
 }
 
-void TemperatureControl::on_gcode_received(Gcode *argument)
+void TemperatureControl::report_temperature(Gcode *gcode)
 {
-    Gcode *gcode = argument;
-    if (gcode->has_m) {
+    char buf[32]; // should be big enough for any status
+    int n = snprintf(buf, sizeof(buf), "%s:%3.1f /%3.1f @%d ", this->designator.c_str(), this->get_temperature(), ((target_temperature <= 0) ? 0.0 : target_temperature), this->o);
+    gcode->txt_after_ok.append(buf, n);
+}
 
-        if( gcode->m == this->get_m_code ) {
-            char buf[32]; // should be big enough for any status
-            int n = snprintf(buf, sizeof(buf), "%s:%3.1f /%3.1f @%d ", this->designator.c_str(), this->get_temperature(), ((target_temperature <= 0) ? 0.0 : target_temperature), this->o);
-            gcode->txt_after_ok.append(buf, n);
-            return;
-        }
-
-        if (gcode->m == 305) { // set or get sensor settings
-            if (gcode->has_letter('S') && (gcode->get_value('S') == this->pool_index)) {
-                TempSensor::sensor_options_t args= gcode->get_args();
-                args.erase('S'); // don't include the S
-                if(args.size() > 0) {
-                    // set the new options
-                    if(sensor->set_optional(args)) {
-                        this->sensor_settings= true;
-                    }else{
-                        gcode->stream->printf("Unable to properly set sensor settings, make sure you specify all required values\n");
-                    }
-                }else{
-                    // don't override
-                    this->sensor_settings= false;
-                }
-
-            }else if(!gcode->has_letter('S')) {
-                sensor->get_raw();
-                TempSensor::sensor_options_t options;
-                if(sensor->get_optional(options)) {
-                    for(auto &i : options) {
-                        // foreach optional value
-                        gcode->stream->printf("%s(S%d): %c %1.18f\n", this->designator.c_str(), this->pool_index, i.first, i.second);
-                    }
-                }
+// M305 S<n> addresses one controller, so each checks the index against its own
+void TemperatureControl::sensor_settings_gcode(Gcode *gcode)
+{
+    if(gcode->has_letter('S') && (gcode->get_value('S') == this->pool_index)) {
+        TempSensor::sensor_options_t args= gcode->get_args();
+        args.erase('S'); // don't include the S
+        if(args.size() > 0) {
+            // set the new options
+            if(sensor->set_optional(args)) {
+                this->sensor_settings= true;
+            } else {
+                gcode->stream->printf("Unable to properly set sensor settings, make sure you specify all required values\n");
             }
-
-            return;
+        } else {
+            // don't override
+            this->sensor_settings= false;
         }
 
+    } else if(!gcode->has_letter('S')) {
+        sensor->get_raw();
+        TempSensor::sensor_options_t options;
+        if(sensor->get_optional(options)) {
+            for(auto &i : options) {
+                gcode->stream->printf("%s(S%d): %c %1.18f\n", this->designator.c_str(), this->pool_index, i.first, i.second);
+            }
+        }
     }
 }
 

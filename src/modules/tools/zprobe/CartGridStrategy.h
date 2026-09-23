@@ -11,6 +11,8 @@
 class StreamOutput;
 class Gcode;
 
+#include "GcodeDispatch.h"
+
 class CartGridStrategy : public LevelingStrategy
 {
 public:
@@ -18,8 +20,17 @@ public:
     ~CartGridStrategy();
     bool handleGcode(Gcode* gcode);
     bool handleConfig();
+    void report_settings(StreamOutput *stream) override;
+    void register_mcodes() override;
+
+    void clear_bed(Gcode *);
+    void save_grid_gcode(Gcode *);
+    void load_grid_gcode(Gcode *);
+    void set_probe_offsets(Gcode *);
 
 private:
+    GcodeDispatch::Mcode m370, m374, m375, m561, m565;
+
 
     bool doProbe(Gcode *gc);
     bool scan_bed(Gcode *gc);

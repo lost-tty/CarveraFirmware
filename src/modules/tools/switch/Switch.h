@@ -11,6 +11,7 @@
 #include "Pwm.h"
 #include "SoftPWM.h"
 #include "SoftTimer.h"
+#include "GcodeDispatch.h"
 
 #include <math.h>
 #include <string>
@@ -50,6 +51,8 @@ class Switch : public Module, public Killable {
         void on_main_loop(void *argument);
         void on_config_reload(void* argument);
         void on_gcode_received(Gcode *argument);
+        void on_gcode(Gcode *);
+        void off_gcode(Gcode *);
 
         void pinpoll_tick();
         enum OUTPUT_TYPE {NONE, SIGMADELTA, DIGITAL, HWPWM, SWPWM, DIGITALPWM};
@@ -62,6 +65,7 @@ class Switch : public Module, public Killable {
         void turn_off_switch();
 
         SoftTimer pinpoll_timer;
+        GcodeDispatch::Mcode m_on, m_off;
         SoftTimer pwm_timer;
 
         float switch_value;

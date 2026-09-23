@@ -295,6 +295,9 @@ void Switch::on_config_reload(void *argument)
     }
 
 
+    if(input_on_command_letter == 'M') ADD_MCODE(m_on, input_on_command_code, ACTION, Switch::on_gcode);
+    if(input_off_command_letter == 'M') ADD_MCODE(m_off, input_off_command_code, ACTION, Switch::off_gcode);
+
     if(this->output_type == SIGMADELTA) {
         // SIGMADELTA
 	    pwm_timer.start();
@@ -409,21 +412,26 @@ void Switch::turn_off_switch()
 
 }
 
+// only the G code form comes through here; the M code form is registered
 void Switch::on_gcode_received(Gcode *argument)
 {
     Gcode *gcode = argument;
-    // Add the gcode to the queue ourselves if we need it
-    if (!(match_input_on_gcode(gcode) || match_input_off_gcode(gcode))) {
-        return;
-    }
-    // we need to sync this with the queue, so we need to wait for queue to empty, however due to certain slicers
-    // issuing redundant swicth on calls regularly we need to optimize by making sure the value is actually changing
-    // hence we need to do the wait for queue in each case rather than just once at the start
-    if(match_input_on_gcode(gcode)) {
-    	this->turn_on_switch(gcode->has_letter('S') ? gcode->get_value('S') : -1);
-    } else if (match_input_off_gcode(gcode)) {
-    	this->turn_off_switch();
-    }
+    if(gcode->has_m) return;
+
+    if(match_input_on_gcode(gcode)) on_gcode(gcode);
+    else if(match_input_off_gcode(gcode)) off_gcode(gcode);
+}
+
+void Switch::on_gcode(Gcode *gcode)
+{
+    if(gcode->subcode != this->subcode) return;
+    this->turn_on_switch(gcode->has_letter('S') ? gcode->get_value('S') : -1);
+}
+
+void Switch::off_gcode(Gcode *gcode)
+{
+    if(gcode->subcode != this->subcode) return;
+    this->turn_off_switch();
 }
 
 // every output goes to the configured failsafe state, not to whatever it was last set to

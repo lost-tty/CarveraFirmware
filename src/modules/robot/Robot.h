@@ -19,6 +19,8 @@ using std::string;
 #include "ActuatorCoordinates.h"
 #include "libs/Watch.h"
 #include "libs/KeepOut.h"
+#include "libs/Settings.h"
+#include "GcodeDispatch.h"
 #include "nuts_bolts.h"
 
 class Gcode;
@@ -35,6 +37,24 @@ class Robot : public Module {
         void init();
         void on_module_loaded();
         void on_gcode_received(Gcode *argument);
+        static void report_settings(void *self, StreamOutput *stream);
+        void end_of_program(Gcode *);
+        void motors_on(Gcode *);
+        void motors_off(Gcode *);
+        void steps_per_mm(Gcode *);
+        void report_position(Gcode *);
+        void push_state_gcode(Gcode *);
+        void pop_state_gcode(Gcode *);
+        void max_feedrates(Gcode *);
+        void set_acceleration(Gcode *);
+        void set_planner_limits(Gcode *);
+        void soft_endstops_gcode(Gcode *);
+        void speed_override(Gcode *);
+        void vacuum_mode(Gcode *);
+        void optional_stop_mode(Gcode *);
+        void wait_for_moves(Gcode *);
+        void arm_solution_gcode(Gcode *);
+        void report_settings(StreamOutput *stream);
 
         void reset_axis_position(float position, int axis);
         void reset_axis_position(float x, float y, float z);
@@ -226,6 +246,9 @@ class Robot : public Module {
         float max_speed;                                     // Setting : maximum feedrate in mm/s as specified by F parameter
 
         float soft_endstop_min[3], soft_endstop_max[3];
+        Settings::Sink settings_slot;
+        GcodeDispatch::Mcode m2, m30, m17, m18, m84, m92, m114, m120, m121;
+        GcodeDispatch::Mcode m203, m204, m205, m211, m220, m331, m332, m333, m334, m400, m665;
         static const uint8_t k_keepout_zones= 4;
         KeepOut keepout[k_keepout_zones];
         bool keepout_on= true;

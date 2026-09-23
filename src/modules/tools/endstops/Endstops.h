@@ -12,6 +12,8 @@
 #include "SoftTimer.h"
 #include "libs/PinGroup.h"
 #include "libs/Watch.h"
+#include "libs/Settings.h"
+#include "GcodeDispatch.h"
 
 #include <bitset>
 #include <array>
@@ -24,6 +26,10 @@ class Pin;
 class Endstops : public Module{
 
     public:
+        static void report_settings(void *self, StreamOutput *stream);
+        void report_switches(Gcode *);
+        void set_home_offset(Gcode *);
+        void set_home_offset_here(Gcode *);
         bool is_homing() const;
         bool is_homed(uint8_t axis) const { return homing_axis[axis].homed; }
         bool cover_closed() const { return cover_endstop_pin.get(); }
@@ -118,6 +124,8 @@ class Endstops : public Module{
         enum Status : char { NOT_HOMING, HOMING, BACK_OFF_HOME, LIMIT_TRIGGERED };
         volatile Status status{NOT_HOMING};
         PinGroup alarm_pins;
+        Settings::Sink settings_slot;
+        GcodeDispatch::Mcode m119, m206, m306;
         Watch    approach_watch;   // the isr holds a pointer to this, so it outlives the move
 
         // Global state

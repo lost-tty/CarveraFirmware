@@ -11,6 +11,8 @@
 #include "Module.h"
 #include "Pin.h"
 #include "libs/Watch.h"
+#include "libs/Settings.h"
+#include "GcodeDispatch.h"
 
 #include <vector>
 
@@ -30,6 +32,8 @@ class ZProbe: public Module
 public:
     void on_module_loaded();
     void on_gcode_received(Gcode *argument);
+    static void report_settings(void *self, StreamOutput *stream);
+    void set_probe_settings(Gcode *);
 
     bool run_probe(float& mm, float feedrate, float max_dist= -1, bool reverse= false);
     bool run_probe_return(float& mm, float feedrate, float max_dist= -1, bool reverse= false);
@@ -63,6 +67,8 @@ private:
     std::vector<LevelingStrategy*> strategies;
 
     uint32_t probe_trigger_time;
+    Settings::Sink settings_slot;
+    GcodeDispatch::Mcode m670;
 
     Watch probe_watch;
 

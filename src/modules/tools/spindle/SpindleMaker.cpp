@@ -58,7 +58,7 @@ void SpindleMaker::load_spindle(){
     if( spindle != NULL) {
 
         spindle_control = spindle;
-        GcodeDispatch::add_handler(spindle);
+        spindle->register_mcodes();
 
         THEKERNEL->add_module( spindle );
     }

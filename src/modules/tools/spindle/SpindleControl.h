@@ -10,6 +10,7 @@
 
 #include "libs/Module.h"
 #include "libs/Killable.h"
+#include "GcodeDispatch.h"
 class Gcode;
 
 struct spindle_status;
@@ -17,16 +18,23 @@ struct spindle_status;
 class SpindleControl: public Module, public Killable {
     public:
         SpindleControl() {};
+        void start(Gcode *gcode);
+        void stop(Gcode *gcode);
         virtual void get_status(struct spindle_status *t) {};
         void kill() override = 0;
         virtual ~SpindleControl() {};
         virtual void on_module_loaded() {};
+        void register_mcodes();
 
     protected:
         bool spindle_on;
 
     private:
-        void on_gcode_received(Gcode *argument);
+        void handle_override(Gcode *);
+        void handle_report(Gcode *);
+        void handle_pid(Gcode *);
+
+        GcodeDispatch::Mcode m223, m957, m958;
         
         virtual void turn_on(void) {};
         virtual void turn_off(void) {};

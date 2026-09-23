@@ -49,7 +49,11 @@ void WirelessProbe::on_module_loaded() {
 
     // We only call the command dispatcher in the main loop, nowhere else
     this->register_for_event(ON_MAIN_LOOP);
-    GcodeDispatch::add_handler(this);
+    ADD_MCODE(m470, 470, IMMEDIATE, WirelessProbe::set_address);
+    ADD_MCODE(m471, 471, IMMEDIATE, WirelessProbe::pair);
+    ADD_MCODE(m472, 472, IMMEDIATE, WirelessProbe::laser_on);
+    ADD_MCODE(m881, 881, IMMEDIATE, WirelessProbe::set_channel);
+    ADD_MCODE(m882, 882, IMMEDIATE, WirelessProbe::stop_transmission);
 }
 
 
@@ -153,35 +157,39 @@ bool WirelessProbe::has_char(char letter){
 
 
 
-void WirelessProbe::on_gcode_received(Gcode *argument)
+void WirelessProbe::set_address(Gcode *gcode)
 {
-    Gcode *gcode = argument;
+    if(!gcode->has_letter('S')) return;
+    uint16_t new_addr = gcode->get_value('S');
+    printk("Change WP address to: [%d]\n", new_addr);
+    this->putc('S');
+    this->putc(new_addr & 0xff);
+    this->putc(new_addr >> 8);
+    this->putc('#');
+}
 
-    if (gcode->has_m) {
-    	if (gcode->m == 470) {
-    		if (gcode->has_letter('S')) {
-        		uint16_t new_addr = gcode->get_value('S');
-        		printk("Change WP address to: [%d]\n", new_addr);
-        		this->putc('S');
-                this->putc(new_addr & 0xff);
-                this->putc(new_addr >> 8);
-                this->putc('#');
-    		}
-    	} else if (gcode->m == 471) {
-    		printk("Set WP into pairing mode...\n");
-    		this->putc('P');
-    	} else if (gcode->m == 472) {
-    		printk("Open WP Laser...\n");
-    		this->putc('L');
-    	} else if (gcode->m == 881) {
-    		if (gcode->has_letter('S')) {
-        		uint16_t channel = gcode->get_value('S');
-        		printk("Set 2.4G Channel to: [%d] and start trans...\n", channel);
-        		this->putc(channel);
-    		}
-    	} else if (gcode->m == 882) {
-    		printk("Stop 2.4G transmission...\n");
-    		this->putc(27);
-    	}
-    }
+void WirelessProbe::pair(Gcode *gcode)
+{
+    printk("Set WP into pairing mode...\n");
+    this->putc('P');
+}
+
+void WirelessProbe::laser_on(Gcode *gcode)
+{
+    printk("Open WP Laser...\n");
+    this->putc('L');
+}
+
+void WirelessProbe::set_channel(Gcode *gcode)
+{
+    if(!gcode->has_letter('S')) return;
+    uint16_t channel = gcode->get_value('S');
+    printk("Set 2.4G Channel to: [%d] and start trans...\n", channel);
+    this->putc(channel);
+}
+
+void WirelessProbe::stop_transmission(Gcode *gcode)
+{
+    printk("Stop 2.4G transmission...\n");
+    this->putc(27);
 }

@@ -90,6 +90,9 @@ void WifiProvider::on_module_loaded()
 
     // Register for events
     this->register_for_event(ON_IDLE);
+    ADD_MCODE(m482, 482, IMMEDIATE, WifiProvider::query_sta_param);
+    ADD_MCODE(m483, 483, IMMEDIATE, WifiProvider::query_ap_param);
+    ADD_MCODE(m489, 489, IMMEDIATE, WifiProvider::report_status);
     this->register_for_event(ON_MAIN_LOOP);
     this->register_for_event(ON_SECOND_TICK);
 }
@@ -148,6 +151,89 @@ void WifiProvider::get_broadcast_from_ip_and_netmask(char* broadcast_addr, char*
     uint32_t i_mask = ip_to_int(netmask);
     uint32_t i_broadcast = i_ip | (~i_mask);
     int_to_ip(i_broadcast, broadcast_addr);
+}
+
+// M482.<n>: what the module knows about the network it joined
+void WifiProvider::query_sta_param(Gcode *gcode)
+{
+    static const struct { STA_PARAM_TYPE type; const char *name; } params[]= {
+        {STA_PARAM_TYPE_SSID,         "ssid"},
+        {STA_PARAM_TYPE_PASSWORD,     "password"},
+        {STA_PARAM_TYPE_CHANNEL,      "channel"},
+        {STA_PARAM_TYPE_HOSTNAME,     "hostname"},
+        {STA_PARAM_TYPE_MAC,          "mac"},
+        {STA_PARAM_TYPE_IP_ADDR,      "ip"},
+        {STA_PARAM_TYPE_GATEWAY_ADDR, "gateway"},
+        {STA_PARAM_TYPE_NETMASK_ADDR, "netmask"},
+    };
+    const unsigned n= sizeof(params) / sizeof(params[0]);
+
+    if(gcode->subcode >= n) {
+        gcode->stream->printf("error:M482 takes a subcode 0 to %u\r\n", n - 1);
+        return;
+    }
+
+    u8 value[64]{};
+    u8 len= 0;
+    u16 status= 0;
+    if(M8266WIFI_SPI_Query_STA_Param(params[gcode->subcode].type, value, &len, &status) == 0) {
+        gcode->stream->printf("error:wifi query failed, status %u\r\n", status);
+        return;
+    }
+
+    const char *name= params[gcode->subcode].name;
+    if(params[gcode->subcode].type == STA_PARAM_TYPE_MAC) {
+        gcode->stream->printf("%s: %02X:%02X:%02X:%02X:%02X:%02X\r\n",
+                              name, value[0], value[1], value[2], value[3], value[4], value[5]);
+    } else if(params[gcode->subcode].type == STA_PARAM_TYPE_CHANNEL) {
+        gcode->stream->printf("%s: %u\r\n", name, value[0]);
+    } else {
+        value[sizeof(value) - 1]= 0;
+        gcode->stream->printf("%s: %s\r\n", name, (const char *)value);
+    }
+}
+
+// M483.<n>: the same for the hotspot this machine offers
+void WifiProvider::query_ap_param(Gcode *gcode)
+{
+    static const struct { AP_PARAM_TYPE type; const char *name; } params[]= {
+        {AP_PARAM_TYPE_SSID,         "ssid"},
+        {AP_PARAM_TYPE_PASSWORD,     "password"},
+        {AP_PARAM_TYPE_CHANNEL,      "channel"},
+        {AP_PARAM_TYPE_AUTHMODE,     "authmode"},
+        {AP_PARAM_TYPE_IP_ADDR,      "ip"},
+        {AP_PARAM_TYPE_GATEWAY_ADDR, "gateway"},
+        {AP_PARAM_TYPE_NETMASK_ADDR, "netmask"},
+        {AP_PARAM_TYPE_PHY_MODE,     "phymode"},
+    };
+    const unsigned n= sizeof(params) / sizeof(params[0]);
+
+    if(gcode->subcode >= n) {
+        gcode->stream->printf("error:M483 takes a subcode 0 to %u\r\n", n - 1);
+        return;
+    }
+
+    u8 value[64]{};
+    u8 len= 0;
+    u16 status= 0;
+    if(M8266WIFI_SPI_Query_AP_Param(params[gcode->subcode].type, value, &len, &status) == 0) {
+        gcode->stream->printf("error:wifi query failed, status %u\r\n", status);
+        return;
+    }
+
+    AP_PARAM_TYPE type= params[gcode->subcode].type;
+    const char *name= params[gcode->subcode].name;
+    if(type == AP_PARAM_TYPE_CHANNEL || type == AP_PARAM_TYPE_AUTHMODE || type == AP_PARAM_TYPE_PHY_MODE) {
+        gcode->stream->printf("%s: %u\r\n", name, value[0]);
+    } else {
+        value[sizeof(value) - 1]= 0;
+        gcode->stream->printf("%s: %s\r\n", name, (const char *)value);
+    }
+}
+
+void WifiProvider::report_status(Gcode *gcode)
+{
+    query_wifi_status();
 }
 
 void WifiProvider::int_to_ip(uint32_t i_ip, char* ip_addr)

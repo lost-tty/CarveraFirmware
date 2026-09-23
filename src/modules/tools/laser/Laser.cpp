@@ -105,7 +105,11 @@ void Laser::on_module_loaded()
     set_laser_power(0);
 
     //register for events
-    GcodeDispatch::add_handler(this);
+    ADD_MCODE(m321, 321, BARRIER, Laser::enter_laser_mode);
+    ADD_MCODE(m322, 322, BARRIER, Laser::enter_cnc_mode);
+    ADD_MCODE(m323, 323, IMMEDIATE, Laser::test_mode_on);
+    ADD_MCODE(m324, 324, IMMEDIATE, Laser::test_mode_off);
+    ADD_MCODE(m325, 325, IMMEDIATE, Laser::set_scale);
     SimpleShell::add_command(shell_slot, "laser", &Laser::shell, this, "laser on|off|status|test - laser mode");
 
     // no point in updating the power more than the PWM frequency, but not faster than 1KHz
@@ -177,55 +181,60 @@ void Laser::get_status(struct laser_status *t)
 }
 
 
-void Laser::on_gcode_received(Gcode *argument)
+void Laser::start(Gcode *gcode)
 {
-    Gcode *gcode = argument;
+    THECONVEYOR.wait_for_idle();
+    if(gcode->has_letter('S')) THEROBOT.set_s_value(gcode->get_value('S'));
+    this->laser_on = true;
+    this->testing = false;
+}
 
-    // M codes execute immediately
-    if (gcode->has_m) {
-    	if (gcode->m == 3 && THEKERNEL->get_laser_mode())
-		{
-    		THECONVEYOR.wait_for_idle();
-            // M3 with S value provided: set speed
-            if (gcode->has_letter('S'))
-            {
-            	THEROBOT.set_s_value(gcode->get_value('S'));
-            }
-    		this->laser_on = true;
-    		this->testing = false;
-    		// printk("Laser on, S: %1.4f\n", THEROBOT.get_s_value());
-		} else if (gcode->m == 5) {
-    		THECONVEYOR.wait_for_idle();
-			this->laser_on = false;
-			this->testing = false;
-		} else if (gcode->m == 321 && !THEKERNEL->get_laser_mode()) { // change to laser mode
-			THECONVEYOR.wait_for_idle();
-        	THEKERNEL->set_laser_mode(true);
-        	// turn on laser pin
-        	this->laser_pin->set(true);
-            printk("turning laser mode on\n"); // the laser_on script empties the spindle and moves the Z origin
-        } else if (gcode->m == 322) { // change to CNC mode
-        	THECONVEYOR.wait_for_idle();
-        	THEKERNEL->set_laser_mode(false);
-        	this->laser_pin->set(false);
-        	this->testing = false;
-            printk("turning laser mode off and return to CNC mode\n");
-        } else if (gcode->m == 323) {
-        	this->testing = true;
-			// turn on test mode
-        	printk("turning laser test mode on\n");
-        } else if (gcode->m == 324) {
-        	this->testing = false;
-			// turn off test mode
-        	printk("turning laser test mode off\n");
-        } else if (gcode->m == 325) { // M223 S100 change laser power by percentage S
-            if(gcode->has_letter('S')) {
-                this->scale = gcode->get_value('S') / 100.0F;
-            } else {
-            	printk("Laser power scale at %6.2f %%\n", this->scale * 100.0F);
-            }
-        }
+void Laser::stop(Gcode *gcode)
+{
+    THECONVEYOR.wait_for_idle();
+    this->laser_on = false;
+    this->testing = false;
+}
+
+// M321: into laser mode. The laser_on script empties the spindle and moves the Z origin.
+void Laser::enter_laser_mode(Gcode *gcode)
+{
+    if(THEKERNEL->get_laser_mode()) return;
+    THEKERNEL->set_laser_mode(true);
+    this->laser_pin->set(true);
+    printk("turning laser mode on\n");
+}
+
+void Laser::enter_cnc_mode(Gcode *gcode)
+{
+    THEKERNEL->set_laser_mode(false);
+    this->laser_pin->set(false);
+    this->laser_on = false;
+    this->testing = false;
+    printk("turning laser mode off and return to CNC mode\n");
+}
+
+// M323, M324: test mode fires the laser without a move
+void Laser::test_mode_on(Gcode *gcode)
+{
+    this->testing = true;
+    printk("turning laser test mode on\n");
+}
+
+void Laser::test_mode_off(Gcode *gcode)
+{
+    this->testing = false;
+    printk("turning laser test mode off\n");
+}
+
+// M325 S<percent>: scale every power the program asks for
+void Laser::set_scale(Gcode *gcode)
+{
+    if(!gcode->has_letter('S')) {
+        printk("Laser power scale at %6.2f %%\n", this->scale * 100.0F);
+        return;
     }
+    this->scale = gcode->get_value('S') / 100.0F;
 }
 
 // calculates the current speed ratio from the currently executing block

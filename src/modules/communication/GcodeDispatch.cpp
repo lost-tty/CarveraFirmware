@@ -9,6 +9,7 @@
 
 #include "libs/Kernel.h"
 #include "libs/Logging.h"
+#include "libs/Settings.h"
 #include "Robot.h"
 #include "Conveyor.h"
 #include "utils/Gcode.h"
@@ -86,6 +87,40 @@ static bool is_modal_setting(Class c) {
 
 Module *GcodeDispatch::handlers = nullptr;
 
+GcodeDispatch::Mcode *GcodeDispatch::mcodes= nullptr;
+
+void GcodeDispatch::add_mcode(Mcode &slot, uint16_t number, When when, void *owner, McodeFn handler)
+{
+    for (const Mcode *m = mcodes; m != nullptr; m = m->next) {
+        if(m == &slot) return;   // re-registering a slot would make the list point at itself
+    }
+
+    slot = Mcode{number, when, owner, handler, mcodes};
+    mcodes = &slot;
+}
+
+// one number may have several owners when they are instances that pick themselves by a parameter,
+// as each temperature controller does for M105
+bool GcodeDispatch::run_mcode(Gcode &gcode)
+{
+    bool claimed= false;
+    for (const Mcode *m = mcodes; m != nullptr; m = m->next) {
+        if(m->number != gcode.m) continue;
+        claimed= true;
+        // ACTION belongs in the queue; until a block can carry one it waits like a barrier
+        if(m->when != IMMEDIATE) {
+            if(!THECONVEYOR.wait_for_idle()) return true;   // a halt cut the drain short
+            break;
+        }
+    }
+    if(!claimed) return false;
+
+    for (const Mcode *m = mcodes; m != nullptr; m = m->next) {
+        if(m->number == gcode.m) m->handler(m->owner, &gcode);
+    }
+    return true;
+}
+
 void GcodeDispatch::add_handler(Module *module)
 {
     module->next_gcode_handler = handlers;
@@ -97,6 +132,15 @@ void GcodeDispatch::init()
     Parameters::init();
     modal_group_1= 0;
     homed_check= true;
+
+    ADD_MCODE(m500, 500, IMMEDIATE, GcodeDispatch::report_settings);
+    ADD_MCODE(m503, 503, IMMEDIATE, GcodeDispatch::report_settings);
+}
+
+// no module writes the config, so M500 has always only reported, like M503
+void GcodeDispatch::report_settings(Gcode *gcode)
+{
+    Settings::report_all(gcode->stream);
 }
 
 // an error goes to every console: a job's lines reply to the null stream
@@ -315,13 +359,22 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
             if(depth == 1 && gcode.g == 80) modal_group_1= 0;
         }
 
-        for (Module *m = handlers; m != nullptr; m = m->next_gcode_handler) m->on_gcode_received(&gcode);
+        bool claimed= true;
+        if(gcode.has_m) claimed= run_mcode(gcode);
+        else for (Module *m = handlers; m != nullptr; m = m->next_gcode_handler) m->on_gcode_received(&gcode);
 
         // a scripted code runs its sub after the modules have seen it, so their handlers still apply;
         // the ok follows when the sub is done, which is the last block of the line by rank
         std::string err;
         if(scripts != nullptr && depth == 1 && scripts->trigger(gcode, stream, err)) {
             return err.empty() || fail(stream, err.c_str());
+        }
+
+        // a macro may claim a code no module does, and a nested line never reaches the trigger
+        if(!claimed && depth == 1) {
+            char buf[24];
+            snprintf(buf, sizeof(buf), "unsupported M%u", gcode.m);
+            return fail(stream, buf);
         }
 
         if(gcode.is_error) return fail(stream, gcode.txt_after_ok.empty() ? "unknown" : gcode.txt_after_ok.c_str());
