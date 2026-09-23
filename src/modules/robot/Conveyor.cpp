@@ -242,7 +242,7 @@ bool Conveyor::wait_for_block(bool &halted)
 
     waiter= xTaskGetCurrentTaskHandle();
     // a block that ended while nobody was waiting must not make this return at once
-    xTaskNotifyStateClearIndexed(nullptr, k_notify_index);
+    ulTaskNotifyValueClearIndexed(nullptr, k_notify_index, UINT32_MAX);
     ulTaskNotifyTakeIndexed(k_notify_index, pdTRUE, pdMS_TO_TICKS(10));
     waiter= nullptr;
     collect();
