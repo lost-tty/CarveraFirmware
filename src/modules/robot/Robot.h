@@ -251,6 +251,7 @@ class Robot : public Module {
         McodeRegistry::Mcode m203, m204, m205, m211, m220, m331, m332, m333, m334, m400, m665;
         static const uint8_t k_keepout_zones= 4;
         KeepOut keepout[k_keepout_zones];
+        float keepout_tool_z;
         bool keepout_on= true;
 
         uint8_t n_motors;                                    //count of the motors/axis registered

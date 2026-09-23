@@ -80,6 +80,7 @@
 
 #define enable_checksum                    CHECKSUM("enable")
 #define halt_checksum                      CHECKSUM("halt")
+#define tool_z_checksum                    CHECKSUM("tool_z")
 #define keepout_checksum                   CHECKSUM("keepout")
 #define xmax_checksum                      CHECKSUM("x_max")
 #define ymax_checksum                      CHECKSUM("y_max")
@@ -327,6 +328,8 @@ void Robot::load_keepout_config()
             keepout[n].max[i]= THEKERNEL->config->value(keepout_checksum, zone, hi[i])->by_default(NAN)->as_number();
         }
     }
+
+    keepout_tool_z= THEKERNEL->config->value(keepout_checksum, tool_z_checksum)->by_default(NAN)->as_number();
 }
 
 uint8_t Robot::register_motor(StepperMotor *motor)
@@ -1737,10 +1740,11 @@ bool Robot::clear_of_keepout(const float from[], const float to[], Gcode *gcode)
 {
     if(!keepout_on || !is_homed_all_axes() || THEKERNEL->step_ticker.watching()) return true;
 
-    // the tool length is measured against the reference tool the zones were probed with
-    float tlo= std::get<Z_AXIS>(tool_offset);
-    float tip_from[3]{from[X_AXIS], from[Y_AXIS], from[Z_AXIS] - tlo};
-    float tip_to[3]{to[X_AXIS], to[Y_AXIS], to[Z_AXIS] - tlo};
+    // the position is the spindle nose, so the zones shift with how far the tool reaches past it
+    float tz= persist.tool_z();
+    float reach= isnan(keepout_tool_z) || tz == 0 ? 0 : tz - keepout_tool_z;
+    float tip_from[3]{from[X_AXIS], from[Y_AXIS], from[Z_AXIS] - reach};
+    float tip_to[3]{to[X_AXIS], to[Y_AXIS], to[Z_AXIS] - reach};
     bool not_lower= tip_to[X_AXIS] == tip_from[X_AXIS] && tip_to[Y_AXIS] == tip_from[Y_AXIS] && tip_to[Z_AXIS] >= tip_from[Z_AXIS];
 
     for (uint8_t n = 0; n < k_keepout_zones; n++) {
