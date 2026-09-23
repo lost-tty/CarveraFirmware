@@ -10,10 +10,10 @@ void SlowTicker::start() {
     timer.start();
 }
 
+// a SoftTimer callback runs on the timer service task, not in an interrupt, so the plain
+// task API is the right one here
 void SlowTicker::timerCallback() {
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    vTaskNotifyGiveFromISR(taskHandle, &xHigherPriorityTaskWoken);
-    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    xTaskNotifyGive(taskHandle);
 }
 
 void SlowTicker::on_idle(void*) {
