@@ -23,8 +23,7 @@ class TemperatureControl : public Module {
         int get_pool_index() const { return pool_index; }
         void get_status(struct pad_temperature *t);
         TemperatureControl(uint16_t name, int index)
-        : thermistor_timer("ThermistorReading", 100, true, this, &TemperatureControl::thermistor_read_tick),
-        overheat_timer("OverheatCheck", 1000, true, this, &TemperatureControl::overheat_tick),
+        : read_timer("SpindleTemp", 1000, true, this, &TemperatureControl::read_tick),
         name_checksum(name),
         pool_index(index),
         sensor(nullptr)
@@ -40,19 +39,24 @@ class TemperatureControl : public Module {
 
     private:
         void load_config();
-        void thermistor_read_tick();
+        void read_tick();
+        void drive_fan(float temp);
 
-        void overheat_tick();
-
-        SoftTimer thermistor_timer;
-        SoftTimer overheat_timer;
+        SoftTimer read_timer;
 
         int pool_index;
 
         float max_temp, min_temp;
 
         TempSensor *sensor;
-        float last_reading;
+        float last_reading;      // the average, which is what everything but the halt reads
+        bool has_reading;
+
+        // the fan follows a curve rather than a setpoint: this is a limit, not a temperature
+        // the spindle is meant to hold
+        float fan_threshold, fan_power_init, fan_power_step, fan_power_laser;
+        uint16_t fan_cooldown_delay, cooling_since;
+        uint16_t fan_switch_cs;
 
         std::string designator;
 

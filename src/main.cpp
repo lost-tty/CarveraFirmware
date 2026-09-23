@@ -14,7 +14,6 @@
 #include "modules/tools/endstops/Endstops.h"
 #include "modules/tools/zprobe/ZProbe.h"
 #include "modules/tools/switch/SwitchPool.h"
-#include "modules/tools/temperatureswitch/TemperatureSwitch.h"
 #include "modules/tools/atc/ATCHandler.h"
 #include "modules/utils/script/Scripts.h"
 #include "modules/utils/wifi/WifiProvider.h"
@@ -137,7 +136,6 @@ Laser laser;
 SwitchPool switch_pool;
 TemperatureControlPool temperature_control_pool;
 ZProbe zprobe;
-TemperatureSwitch temperature_switch;
 UsbHost usb_host;
 
 Kernel* THEKERNEL = &kernel;
@@ -210,10 +208,6 @@ void init() {
     #endif
     #ifndef NO_TOOLS_ZPROBE
     THEKERNEL->add_module(&zprobe);
-    #endif
-    #ifndef NO_TOOLS_TEMPERATURESWITCH
-    // Must be loaded after TemperatureControl
-    THEKERNEL->add_module(&temperature_switch);
     #endif
 
     // 10 second watchdog timeout (or config as seconds)

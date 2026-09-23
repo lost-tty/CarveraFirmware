@@ -20,14 +20,22 @@
 
 // Temp sensor implementations:
 #include "Thermistor.h"
+#include "SwitchPool.h"
 
-#define readings_per_second_checksum       CHECKSUM("readings_per_second")
 #define max_temp_checksum                  CHECKSUM("max_temp")
 #define min_temp_checksum                  CHECKSUM("min_temp")
 
 #define get_m_code_checksum                CHECKSUM("get_m_code")
 
 #define designator_checksum                CHECKSUM("designator")
+
+#define temperatureswitch_checksum         CHECKSUM("temperatureswitch")
+#define switch_checksum                    CHECKSUM("switch")
+#define threshold_temp_checksum            CHECKSUM("threshold_temp")
+#define cooldown_power_init_checksum       CHECKSUM("cooldown_power_init")
+#define cooldown_power_step_checksum       CHECKSUM("cooldown_power_step")
+#define cooldown_power_laser_checksum      CHECKSUM("cooldown_power_laser")
+#define cooldown_delay_checksum            CHECKSUM("cooldown_delay")
 
 TemperatureControl::~TemperatureControl()
 {
@@ -39,7 +47,7 @@ void TemperatureControl::on_module_loaded()
 
     this->load_config();
 
-    overheat_timer.start();
+    read_timer.start();
 
 }
 
@@ -49,7 +57,6 @@ void TemperatureControl::load_config()
 
     // General config
     this->get_m_code          = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, get_m_code_checksum)->by_default(105)->as_number();
-    float readings_per_second = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, readings_per_second_checksum)->by_default(20)->as_number();
 
     this->designator          = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, designator_checksum)->by_default(string("T"))->as_string();
 
@@ -61,11 +68,19 @@ void TemperatureControl::load_config()
     sensor = new Thermistor();
     sensor->UpdateConfig(temperature_control_checksum, this->name_checksum);
 
-    // reading tick
-    thermistor_timer.setFrequency(readings_per_second);
-    thermistor_timer.start();
+    // the fan curve; the keys keep their old temperatureswitch.<name>. spelling
+    fan_threshold    = THEKERNEL->config->value(temperatureswitch_checksum, name_checksum, threshold_temp_checksum)->by_default(35.0F)->as_number();
+    fan_power_init   = THEKERNEL->config->value(temperatureswitch_checksum, name_checksum, cooldown_power_init_checksum)->by_default(50.0F)->as_number();
+    fan_power_step   = THEKERNEL->config->value(temperatureswitch_checksum, name_checksum, cooldown_power_step_checksum)->by_default(10.0F)->as_number();
+    fan_power_laser  = THEKERNEL->config->value(temperatureswitch_checksum, name_checksum, cooldown_power_laser_checksum)->by_default(80.0F)->as_number();
+    fan_cooldown_delay = THEKERNEL->config->value(temperatureswitch_checksum, name_checksum, cooldown_delay_checksum)->by_default(180)->as_number();
 
-    this->last_reading = 0.0;
+    std::string fan= THEKERNEL->config->value(temperatureswitch_checksum, name_checksum, switch_checksum)->by_default("")->as_string();
+    fan_switch_cs= fan.empty() ? 0 : get_checksum(fan);
+    cooling_since= fan_cooldown_delay + 1;   // starts off
+
+    has_reading= false;
+    last_reading = 0.0;
 }
 
 void TemperatureControl::report_temperature(Gcode *gcode)
@@ -109,26 +124,45 @@ float TemperatureControl::get_temperature()
     return last_reading;
 }
 
-void TemperatureControl::thermistor_read_tick()
+// One timer: the overheat check comes first, then the fan curve. Both work on the same
+// reading, but the halt uses the raw one so an average cannot delay it.
+void TemperatureControl::read_tick()
 {
-    last_reading = sensor->get_temperature();
+    float t= sensor->get_temperature();
+    bool sane= isfinite(t);
+
+    if(!THEKERNEL->is_halted() && (!sane || t < min_temp || t > max_temp)) {
+        char msg[32];
+        if(sane) snprintf(msg, sizeof(msg), "%s at %dC, max %d", designator.c_str(), (int)t, (int)max_temp);
+        else snprintf(msg, sizeof(msg), "%s sensor open", designator.c_str());
+        THEKERNEL->halt(SPINDLE_OVERHEATED, msg);
+        return;
+    }
+    if(!sane) return;
+
+    // a running average, so the fan and the reports do not follow every wobble
+    last_reading= has_reading ? last_reading + (t - last_reading) / 4 : t;
+    has_reading= true;
+
+    drive_fan(last_reading);
 }
 
-// its own timer, not the second tick: a check that stops the spindle must not depend on some
-// task getting round to pumping an event
-void TemperatureControl::overheat_tick()
+// The fan is a limiter, not a controller: off below the threshold, rising with the temperature
+// above it, and running on for cooldown_delay seconds after the spindle goes cool.
+void TemperatureControl::drive_fan(float temp)
 {
-    if(THEKERNEL->is_halted()) return;
+    if(fan_switch_cs == 0) return;
 
-    // read here and not from last_reading: a stalled reading timer would hide the overheat
-    float t = sensor->get_temperature();
-    bool sane = isfinite(t);
-    if(sane && t >= min_temp && t <= max_temp) return;
+    float power= 0;
+    if(THEKERNEL->get_laser_mode()) power= fan_power_laser;
+    else if(temp >= fan_threshold) power= fan_power_init + (temp - fan_threshold) * fan_power_step;
 
-    // whole degrees: the halt message is printed from the main loop and floats are dear here
-    char msg[32];
-    if(sane) snprintf(msg, sizeof(msg), "%s at %dC, max %d", designator.c_str(), (int)t, (int)max_temp);
-    else snprintf(msg, sizeof(msg), "%s sensor open", designator.c_str());
-    THEKERNEL->halt(SPINDLE_OVERHEATED, msg);
+    if(power > 0) {
+        cooling_since= 0;
+        SwitchPool::set_state(fan_switch_cs, true, power);
+        return;
+    }
+
+    if(cooling_since > fan_cooldown_delay) return;   // already off
+    if(++cooling_since > fan_cooldown_delay) SwitchPool::set_state(fan_switch_cs, false);
 }
-
