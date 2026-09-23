@@ -16,7 +16,7 @@ class StreamOutput;
 
 #include "libs/Module.h"
 #include "libs/Killable.h"
-#include "GcodeDispatch.h"
+#include "libs/McodeRegistry.h"
 #include "SoftTimer.h"
 
 #include <stdint.h>
@@ -41,7 +41,7 @@ class Laser : public Module, public Killable {
         void test_mode_off(Gcode *);
         void set_scale(Gcode *);
 
-        GcodeDispatch::Mcode m321, m322, m323, m324, m325;
+        McodeRegistry::Mcode m321, m322, m323, m324, m325;
         void start(Gcode *gcode);
         void stop(Gcode *gcode);
         static void shell(void *self, const char *name, std::string args, StreamOutput *stream);

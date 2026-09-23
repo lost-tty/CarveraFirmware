@@ -103,7 +103,7 @@ void Endstops::on_module_loaded()
 
     GcodeDispatch::add_handler(this);
     Settings::add(settings_slot, &Endstops::report_settings, this);
-    ADD_MCODE(m119, 119, IMMEDIATE, Endstops::report_switches);
+    ADD_MCODE(m119, 119, BESIDE_JOB, Endstops::report_switches);
     ADD_MCODE(m206, 206, IMMEDIATE, Endstops::set_home_offset);
     ADD_MCODE(m306, 306, BARRIER, Endstops::set_home_offset_here);
 

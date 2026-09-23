@@ -8,10 +8,14 @@
 #ifndef SWITCHPOOL_H
 #define SWITCHPOOL_H
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
+#include "libs/McodeRegistry.h"
+
 class Switch;
+class Gcode;
 struct pad_switch;
 
 class SwitchPool{
@@ -24,6 +28,13 @@ class SwitchPool{
         static bool set_state(uint16_t name, bool on, float value);
 
     private:
+        void run_switch_gcode(Gcode *gcode);
+        void claim(uint16_t code, uint8_t subcode);
+
+        // one slot per code spelling a switch answers to, on and off counted apart
+        std::vector<McodeRegistry::Mcode> codes;
+        size_t used= 0;
+
         static std::vector<Switch *> switches;
 };
 

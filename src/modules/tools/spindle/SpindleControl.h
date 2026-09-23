@@ -10,7 +10,7 @@
 
 #include "libs/Module.h"
 #include "libs/Killable.h"
-#include "GcodeDispatch.h"
+#include "libs/McodeRegistry.h"
 class Gcode;
 
 struct spindle_status;
@@ -34,7 +34,7 @@ class SpindleControl: public Module, public Killable {
         void handle_report(Gcode *);
         void handle_pid(Gcode *);
 
-        GcodeDispatch::Mcode m223, m957, m958;
+        McodeRegistry::Mcode m223, m957, m958;
         
         virtual void turn_on(void) {};
         virtual void turn_off(void) {};

@@ -53,6 +53,7 @@ public:
     struct Registered { const char *name; command_fn command; void *context; const char *help; Registered *next; };
     static void add_command(Registered &slot, const char *name, command_fn fn, void *context, const char *help);
     static void run(const std::string &line, StreamOutput *stream);
+    static bool control_char(char c, StreamOutput *stream);
     void run_command(const std::string &line, StreamOutput *stream);
     SimpleShell()
     : resetTimer("SimpleShell::resetTimer", 3000, false, this, &SimpleShell::system_reset_callback)

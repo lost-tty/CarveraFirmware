@@ -137,14 +137,14 @@ void Robot::on_module_loaded()
     ADD_MCODE(m18,   18, BARRIER,   Robot::motors_off);
     ADD_MCODE(m84,   84, BARRIER,   Robot::motors_off);
     ADD_MCODE(m92,   92, BARRIER,   Robot::steps_per_mm);
-    ADD_MCODE(m114, 114, IMMEDIATE, Robot::report_position);
+    ADD_MCODE(m114, 114, BESIDE_JOB, Robot::report_position);
     ADD_MCODE(m120, 120, IMMEDIATE, Robot::push_state_gcode);
     ADD_MCODE(m121, 121, IMMEDIATE, Robot::pop_state_gcode);
     ADD_MCODE(m203, 203, IMMEDIATE, Robot::max_feedrates);
     ADD_MCODE(m204, 204, IMMEDIATE, Robot::set_acceleration);
     ADD_MCODE(m205, 205, IMMEDIATE, Robot::set_planner_limits);
     ADD_MCODE(m211, 211, IMMEDIATE, Robot::soft_endstops_gcode);
-    ADD_MCODE(m220, 220, IMMEDIATE, Robot::speed_override);
+    ADD_MCODE(m220, 220, BESIDE_JOB, Robot::speed_override);
     ADD_MCODE(m331, 331, IMMEDIATE, Robot::vacuum_mode);
     ADD_MCODE(m332, 332, IMMEDIATE, Robot::vacuum_mode);
     ADD_MCODE(m333, 333, IMMEDIATE, Robot::optional_stop_mode);

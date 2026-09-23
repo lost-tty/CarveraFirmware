@@ -87,37 +87,17 @@ static bool is_modal_setting(Class c) {
 
 Module *GcodeDispatch::handlers = nullptr;
 
-GcodeDispatch::Mcode *GcodeDispatch::mcodes= nullptr;
-
-void GcodeDispatch::add_mcode(Mcode &slot, uint16_t number, When when, void *owner, McodeFn handler)
-{
-    for (const Mcode *m = mcodes; m != nullptr; m = m->next) {
-        if(m == &slot) return;   // re-registering a slot would make the list point at itself
-    }
-
-    slot = Mcode{number, when, owner, handler, mcodes};
-    mcodes = &slot;
-}
-
-// one number may have several owners when they are instances that pick themselves by a parameter,
-// as each temperature controller does for M105
 bool GcodeDispatch::run_mcode(Gcode &gcode)
 {
-    bool claimed= false;
-    for (const Mcode *m = mcodes; m != nullptr; m = m->next) {
-        if(m->number != gcode.m) continue;
-        claimed= true;
-        // ACTION belongs in the queue; until a block can carry one it waits like a barrier
-        if(m->when != IMMEDIATE) {
-            if(!THECONVEYOR.wait_for_idle()) return true;   // a halt cut the drain short
-            break;
-        }
-    }
-    if(!claimed) return false;
+    const McodeRegistry::Mcode *m= McodeRegistry::find(gcode.m, gcode.subcode);
+    if(m == nullptr) return false;
 
-    for (const Mcode *m = mcodes; m != nullptr; m = m->next) {
-        if(m->number == gcode.m) m->handler(m->owner, &gcode);
+    // ACTION belongs in the queue; until a block can carry one it waits like a barrier
+    if((m->when & ~McodeRegistry::MID_JOB) != McodeRegistry::IMMEDIATE) {
+        if(!THECONVEYOR.wait_for_idle()) return true;   // a halt cut the drain short
     }
+
+    m->handler(m->owner, &gcode);
     return true;
 }
 
@@ -134,7 +114,7 @@ void GcodeDispatch::init()
     homed_check= true;
 
     ADD_MCODE(m500, 500, IMMEDIATE, GcodeDispatch::report_settings);
-    ADD_MCODE(m503, 503, IMMEDIATE, GcodeDispatch::report_settings);
+    ADD_MCODE(m503, 503, BESIDE_JOB, GcodeDispatch::report_settings);
 }
 
 // no module writes the config, so M500 has always only reported, like M503
@@ -151,12 +131,34 @@ bool GcodeDispatch::fail(StreamOutput *, const char *msg)
 }
 
 
+bool GcodeDispatch::safe_while_running(const gcode::Words &words)
+{
+    bool found_one= false;
+    for (const gcode::Word &w : words) {
+        if(w.letter == 'G') return false;   // a G code moves the machine or changes how it moves
+        if(w.letter != 'M') continue;
+
+        const McodeRegistry::Mcode *m= McodeRegistry::find(w.value, w.subcode);
+        if(m == nullptr || !(m->when & McodeRegistry::MID_JOB)) return false;
+        found_one= true;
+    }
+    return found_one;
+}
+
 // an interleaved line would move the machine out of sequence; a suspended job is safe to jog
 void GcodeDispatch::run_mdi(const SerialMessage &msg)
 {
     if(sources.active()) {
-        msg.stream->printf("error:busy, a job or script is running\r\n");
-        return;
+        // without the parameters: reading #5021 drains the queue, and the letters decide this
+        gcode::Line parsed;
+        if(!parsed.parse(msg.message.c_str(), nullptr)) {
+            msg.stream->printf("error:%s, and parameters are not read while a job runs\r\n", parsed.error_text().c_str());
+            return;
+        }
+        if(!safe_while_running(parsed.words())) {
+            msg.stream->printf("error:busy, a job or script is running\r\n");
+            return;
+        }
     }
     run_line(msg);
 }

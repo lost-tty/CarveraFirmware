@@ -20,7 +20,7 @@ using std::string;
 #include "libs/Watch.h"
 #include "libs/KeepOut.h"
 #include "libs/Settings.h"
-#include "GcodeDispatch.h"
+#include "libs/McodeRegistry.h"
 #include "nuts_bolts.h"
 
 class Gcode;
@@ -247,8 +247,8 @@ class Robot : public Module {
 
         float soft_endstop_min[3], soft_endstop_max[3];
         Settings::Sink settings_slot;
-        GcodeDispatch::Mcode m2, m30, m17, m18, m84, m92, m114, m120, m121;
-        GcodeDispatch::Mcode m203, m204, m205, m211, m220, m331, m332, m333, m334, m400, m665;
+        McodeRegistry::Mcode m2, m30, m17, m18, m84, m92, m114, m120, m121;
+        McodeRegistry::Mcode m203, m204, m205, m211, m220, m331, m332, m333, m334, m400, m665;
         static const uint8_t k_keepout_zones= 4;
         KeepOut keepout[k_keepout_zones];
         bool keepout_on= true;

@@ -17,7 +17,7 @@ using namespace std;
 #include "Pin.h"
 #include "Module.h"
 #include "StreamOutput.h"
-#include "GcodeDispatch.h"
+#include "libs/McodeRegistry.h"
 
 #include "M8266WIFIDrv.h"
 #include "libs/RingBuffer.h"
@@ -60,7 +60,7 @@ private:
     void query_ap_param(Gcode *);
     void report_status(Gcode *);
 
-    GcodeDispatch::Mcode m482, m483, m489;
+    McodeRegistry::Mcode m482, m483, m489;
     void set_wifi_op_mode(u8 op_mode);
 
     void M8266WIFI_Module_Hardware_Reset(void);

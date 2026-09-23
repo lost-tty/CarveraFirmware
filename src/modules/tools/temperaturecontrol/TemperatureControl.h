@@ -15,12 +15,13 @@ class Gcode;
 #include "TemperatureControlPublicAccess.h"
 #include "SoftTimer.h"
 
-#include "GcodeDispatch.h"
 
 class TemperatureControl : public Module {
 
     public:
         uint16_t get_name() const { return name_checksum; }
+        uint16_t get_report_mcode() const { return get_m_code; }
+        int get_pool_index() const { return pool_index; }
         void get_status(struct pad_temperature *t);
         TemperatureControl(uint16_t name, int index)
         : thermistor_timer("ThermistorReading", 100, true, this, &TemperatureControl::thermistor_read_tick),
@@ -37,7 +38,6 @@ class TemperatureControl : public Module {
         void report_temperature(Gcode *);
         void sensor_settings_gcode(Gcode *);
 
-        GcodeDispatch::Mcode m_get, m305;
         void on_second_tick(void* argument);
 
         float get_temperature();

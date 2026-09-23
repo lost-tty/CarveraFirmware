@@ -12,7 +12,7 @@
 #include "Pin.h"
 #include "libs/Watch.h"
 #include "libs/Settings.h"
-#include "GcodeDispatch.h"
+#include "libs/McodeRegistry.h"
 
 #include <vector>
 
@@ -68,7 +68,7 @@ private:
 
     uint32_t probe_trigger_time;
     Settings::Sink settings_slot;
-    GcodeDispatch::Mcode m670;
+    McodeRegistry::Mcode m670;
 
     Watch probe_watch;
 

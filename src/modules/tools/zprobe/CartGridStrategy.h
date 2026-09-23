@@ -11,7 +11,7 @@
 class StreamOutput;
 class Gcode;
 
-#include "GcodeDispatch.h"
+#include "libs/McodeRegistry.h"
 
 class CartGridStrategy : public LevelingStrategy
 {
@@ -29,7 +29,7 @@ public:
     void set_probe_offsets(Gcode *);
 
 private:
-    GcodeDispatch::Mcode m370, m374, m375, m561, m565;
+    McodeRegistry::Mcode m370, m374, m375, m561, m565;
 
 
     bool doProbe(Gcode *gc);

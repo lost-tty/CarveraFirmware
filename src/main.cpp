@@ -133,6 +133,9 @@ ATCHandler atc_handler;
 Scripts scripts;
 Endstops endstops;
 Laser laser;
+// the pools keep the M code slots they register, so they outlive the registry
+SwitchPool switch_pool;
+TemperatureControlPool temperature_control_pool;
 ZProbe zprobe;
 TemperatureSwitch temperature_switch;
 UsbHost usb_host;
@@ -184,16 +187,12 @@ void init() {
 
     // these modules can be completely disabled in the Makefile by adding to EXCLUDE_MODULES
     #ifndef NO_TOOLS_SWITCH
-    SwitchPool *sp= new SwitchPool();
-    sp->load_tools();
-    delete sp;
+    switch_pool.load_tools();
     #endif
 
     // #ifndef NO_TOOLS_TEMPERATURECONTROL
     // Note order is important here must be after extruder so Tn as a parameter will get executed first
-    TemperatureControlPool *tp= new TemperatureControlPool();
-    tp->load_tools();
-    delete tp;
+    temperature_control_pool.load_tools();
 
     // #endif
     #ifndef NO_TOOLS_ENDSTOPS

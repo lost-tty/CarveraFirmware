@@ -1,7 +1,7 @@
 #pragma once
 
 #include "libs/Module.h"
-#include "GcodeDispatch.h"
+#include "libs/McodeRegistry.h"
 
 class Gcode;
 
@@ -16,7 +16,7 @@ private:
     void start(Gcode *);
     void stop(Gcode *);
 
-    GcodeDispatch::Mcode m3, m5;
+    McodeRegistry::Mcode m3, m5;
 };
 
 extern ToolHead tool_head;

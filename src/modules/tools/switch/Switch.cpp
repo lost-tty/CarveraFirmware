@@ -295,9 +295,6 @@ void Switch::on_config_reload(void *argument)
     }
 
 
-    if(input_on_command_letter == 'M') ADD_MCODE(m_on, input_on_command_code, ACTION, Switch::on_gcode);
-    if(input_off_command_letter == 'M') ADD_MCODE(m_off, input_off_command_code, ACTION, Switch::off_gcode);
-
     if(this->output_type == SIGMADELTA) {
         // SIGMADELTA
 	    pwm_timer.start();
@@ -424,13 +421,11 @@ void Switch::on_gcode_received(Gcode *argument)
 
 void Switch::on_gcode(Gcode *gcode)
 {
-    if(gcode->subcode != this->subcode) return;
     this->turn_on_switch(gcode->has_letter('S') ? gcode->get_value('S') : -1);
 }
 
 void Switch::off_gcode(Gcode *gcode)
 {
-    if(gcode->subcode != this->subcode) return;
     this->turn_off_switch();
 }
 

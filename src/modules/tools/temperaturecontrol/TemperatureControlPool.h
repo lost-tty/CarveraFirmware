@@ -11,7 +11,10 @@
 #include <cstdint>
 #include <vector>
 
+#include "libs/McodeRegistry.h"
+
 class TemperatureControl;
+class Gcode;
 struct pad_temperature;
 
 class TemperatureControlPool {
@@ -23,6 +26,15 @@ class TemperatureControlPool {
         static void poll(std::vector<struct pad_temperature> &v);
 
     private:
+        void report_temperature(Gcode *gcode);
+        void sensor_settings_gcode(Gcode *gcode);
+        void claim(uint16_t code);
+
+        // one slot per distinct get_m_code the controllers asked for
+        std::vector<McodeRegistry::Mcode> report_codes;
+        size_t used= 0;
+        McodeRegistry::Mcode m305;
+
         static std::vector<TemperatureControl *> controls;
 };
 

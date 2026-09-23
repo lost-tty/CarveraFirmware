@@ -22,7 +22,7 @@ using std::string;
 
 #define baud_rate2_setting_checksum CHECKSUM("baud_rate2")
 
-#include "GcodeDispatch.h"
+#include "libs/McodeRegistry.h"
 
 class WirelessProbe : public Module {
 
@@ -36,7 +36,7 @@ class WirelessProbe : public Module {
         void set_channel(Gcode *);
         void stop_transmission(Gcode *);
 
-        GcodeDispatch::Mcode m470, m471, m472, m881, m882;
+        McodeRegistry::Mcode m470, m471, m472, m881, m882;
 
         float get_voltage() const { return wp_voltage; }
         void request_state() { putc('Q'); }

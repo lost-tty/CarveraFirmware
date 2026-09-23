@@ -13,7 +13,7 @@
 #include "libs/PinGroup.h"
 #include "libs/Watch.h"
 #include "libs/Settings.h"
-#include "GcodeDispatch.h"
+#include "libs/McodeRegistry.h"
 
 #include <bitset>
 #include <array>
@@ -125,7 +125,7 @@ class Endstops : public Module{
         volatile Status status{NOT_HOMING};
         PinGroup alarm_pins;
         Settings::Sink settings_slot;
-        GcodeDispatch::Mcode m119, m206, m306;
+        McodeRegistry::Mcode m119, m206, m306;
         Watch    approach_watch;   // the isr holds a pointer to this, so it outlives the move
 
         // Global state

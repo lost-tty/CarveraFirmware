@@ -2,6 +2,7 @@
 
 #include "libs/Kernel.h"
 #include "libs/Logging.h"
+#include "SimpleShell.h"
 
 #include <string>
 
@@ -11,6 +12,7 @@ void FrameConsole::on_frame()
     uint16_t len = decoder.length();
 
     switch (decoder.type()) {
+        // ? and * answer in their own frame types here; the rest are the same on every console
         case Frame::CTRL_SINGLE: {
             if (len < 1) return;
             std::string s;
@@ -23,12 +25,9 @@ void FrameConsole::on_frame()
                     s = THEKERNEL->get_diagnose_string();
                     send(Frame::DIAG, s.data(), s.size());
                     break;
-                case 'X' - 'A' + 1: // ^X
-                    THEKERNEL->halt(MANUAL, "stopped");
-                    printf("ALARM: Abort during cycle\r\n");
+                default:
+                    SimpleShell::control_char(p[0], this);
                     break;
-                case '!': if (THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(true); break;
-                case '~': if (THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(false); break;
             }
             break;
         }

@@ -11,7 +11,7 @@
 class StreamOutput;
 class Plane3D;
 
-#include "GcodeDispatch.h"
+#include "libs/McodeRegistry.h"
 
 class ThreePointStrategy : public LevelingStrategy
 {
@@ -29,7 +29,7 @@ public:
     float getZOffset(float x, float y);
 
 private:
-    GcodeDispatch::Mcode m557, m561, m565;
+    McodeRegistry::Mcode m557, m561, m565;
 
     void homeXY();
     bool doProbing(StreamOutput *stream);

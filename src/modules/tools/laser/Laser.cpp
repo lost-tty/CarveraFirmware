@@ -109,7 +109,7 @@ void Laser::on_module_loaded()
     ADD_MCODE(m322, 322, BARRIER, Laser::enter_cnc_mode);
     ADD_MCODE(m323, 323, IMMEDIATE, Laser::test_mode_on);
     ADD_MCODE(m324, 324, IMMEDIATE, Laser::test_mode_off);
-    ADD_MCODE(m325, 325, IMMEDIATE, Laser::set_scale);
+    ADD_MCODE(m325, 325, BESIDE_JOB, Laser::set_scale);
     SimpleShell::add_command(shell_slot, "laser", &Laser::shell, this, "laser on|off|status|test - laser mode");
 
     // no point in updating the power more than the PWM frequency, but not faster than 1KHz

@@ -16,6 +16,7 @@ using namespace std;
 #include "checksumm.h"
 #include "ConfigValue.h"
 #include "TemperatureControlPublicAccess.h"
+#include "Gcode.h"
 
 #define enable_checksum              CHECKSUM("enable")
 
@@ -46,6 +47,32 @@ void TemperatureControlPool::poll(std::vector<struct pad_temperature> &v)
     }
 }
 
+// every controller that asked for this code answers on one line
+void TemperatureControlPool::report_temperature(Gcode *gcode)
+{
+    for(TemperatureControl *c : controls) {
+        if(c->get_report_mcode() == gcode->m) c->report_temperature(gcode);
+    }
+}
+
+// M305 S<n> addresses one controller; without an S every controller reports
+void TemperatureControlPool::sensor_settings_gcode(Gcode *gcode)
+{
+    for(TemperatureControl *c : controls) {
+        if(gcode->has_letter('S') && gcode->get_value('S') != c->get_pool_index()) continue;
+        c->sensor_settings_gcode(gcode);
+    }
+}
+
+void TemperatureControlPool::claim(uint16_t code)
+{
+    for(size_t i = 0; i < used; i++) {
+        if(report_codes[i].number == code) return;
+    }
+    // a refused slot was never written, so it must not count against the budget
+    if(ADD_MCODE(report_codes[used], code, BESIDE_JOB, TemperatureControlPool::report_temperature)) used++;
+}
+
 void TemperatureControlPool::load_tools()
 {
     vector<uint16_t> modules;
@@ -59,4 +86,13 @@ void TemperatureControlPool::load_tools()
             THEKERNEL->add_module(controller);
         }
     }
+
+    if(controls.empty()) return;
+
+    // the registry holds the address of each slot, so the vector must never grow again
+    if(!report_codes.empty()) return;
+    report_codes.resize(controls.size());
+    for(TemperatureControl *c : controls) claim(c->get_report_mcode());
+
+    ADD_MCODE(m305, 305, IMMEDIATE, TemperatureControlPool::sensor_settings_gcode);
 }

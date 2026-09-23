@@ -17,6 +17,7 @@ using namespace std;
 #include "Config.h"
 #include "checksumm.h"
 #include "ConfigValue.h"
+#include "Gcode.h"
 
 #define switch_checksum CHECKSUM("switch")
 #define enable_checksum CHECKSUM("enable")
@@ -55,6 +56,26 @@ bool SwitchPool::set_state(uint16_t name, bool on, float value)
     return true;
 }
 
+// the same code may be one switch's on command and another's off command
+void SwitchPool::run_switch_gcode(Gcode *gcode)
+{
+    for(Switch *s : switches) {
+        if(s->get_subcode() != gcode->subcode) continue;
+        if(s->get_on_mcode() == gcode->m) s->on_gcode(gcode);
+        else if(s->get_off_mcode() == gcode->m) s->off_gcode(gcode);
+    }
+}
+
+void SwitchPool::claim(uint16_t code, uint8_t subcode)
+{
+    if(code == 0) return;
+    for(size_t i = 0; i < used; i++) {
+        if(codes[i].number == code && codes[i].subcode == subcode) return;
+    }
+    // a refused slot was never written, so it must not count against the budget
+    if(ADD_SUBCODE(codes[used], code, subcode, ACTION, SwitchPool::run_switch_gcode)) used++;
+}
+
 void SwitchPool::load_tools()
 {
     vector<uint16_t> modules;
@@ -69,6 +90,13 @@ void SwitchPool::load_tools()
         }
     }
 
+    // the registry holds the address of each slot, so the vector must never grow again
+    if(!codes.empty()) return;
+    codes.resize(switches.size() * 2);
+    for(Switch *s : switches) {
+        claim(s->get_on_mcode(), s->get_subcode());
+        claim(s->get_off_mcode(), s->get_subcode());
+    }
 }
 
 

@@ -11,7 +11,6 @@
 #include "Pwm.h"
 #include "SoftPWM.h"
 #include "SoftTimer.h"
-#include "GcodeDispatch.h"
 
 #include <math.h>
 #include <string>
@@ -43,6 +42,9 @@ class Switch : public Module, public Killable {
         void kill() override;
         void cleanup() override;
         uint16_t get_name() const { return name_checksum; }
+        uint8_t get_subcode() const { return subcode; }
+        uint16_t get_on_mcode() const { return input_on_command_letter == 'M' ? input_on_command_code : 0; }
+        uint16_t get_off_mcode() const { return input_off_command_letter == 'M' ? input_off_command_code : 0; }
         void get_state(struct pad_switch *pad) const;
         void set_state(bool on);
         void set_state(bool on, float value);
@@ -65,7 +67,6 @@ class Switch : public Module, public Killable {
         void turn_off_switch();
 
         SoftTimer pinpoll_timer;
-        GcodeDispatch::Mcode m_on, m_off;
         SoftTimer pwm_timer;
 
         float switch_value;

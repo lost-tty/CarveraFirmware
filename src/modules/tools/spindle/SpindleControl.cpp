@@ -20,7 +20,7 @@ SpindleControl *spindle_control = nullptr;
 
 void SpindleControl::register_mcodes()
 {
-    ADD_MCODE(m223, 223, IMMEDIATE, SpindleControl::handle_override);
+    ADD_MCODE(m223, 223, BESIDE_JOB, SpindleControl::handle_override);
     ADD_MCODE(m957, 957, IMMEDIATE, SpindleControl::handle_report);
     ADD_MCODE(m958, 958, BARRIER, SpindleControl::handle_pid);
 }

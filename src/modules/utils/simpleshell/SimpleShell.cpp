@@ -155,6 +155,30 @@ bool SimpleShell::parse_command(const char *cmd, std::string args, StreamOutput 
 }
 
 // When a new line is received, check if it is a command, and if it is, act upon it
+// the single characters that act at once, from any console
+bool SimpleShell::control_char(char c, StreamOutput *stream)
+{
+    switch (c) {
+        case '?':
+            stream->printf("%s\n", THEKERNEL->get_query_string().c_str());
+            return true;
+        case '*':
+            stream->printf("%s\n", THEKERNEL->get_diagnose_string().c_str());
+            return true;
+        case 'X' - 'A' + 1: // ^X
+            THEKERNEL->halt(MANUAL, "stopped");
+            printk("ALARM: Abort during cycle\n");
+            return true;
+        case '!':
+            if (THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(true);
+            return true;
+        case '~':
+            if (THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(false);
+            return true;
+    }
+    return false;
+}
+
 void SimpleShell::run(const std::string &line, StreamOutput *stream)
 {
     simpleshell.run_command(line, stream);
@@ -170,6 +194,8 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
         stream->printf("ok\r\n");
         return;
     }
+    // ?, !, ~ and friends act the moment they arrive, from any console
+    if(possible_command.find_first_not_of(" \t", i + 1) == string::npos && control_char(possible_command[i], stream)) return;
     if(!islower(possible_command[i]) && possible_command[i] != '$') {
         gcode_dispatch.run_mdi(new_message);
         return;

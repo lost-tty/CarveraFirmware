@@ -13,7 +13,7 @@
 class Gcode;
 #include "GcodeFile.h"
 #include "Source.h"
-#include "GcodeDispatch.h"
+#include "libs/McodeRegistry.h"
 #include "SimpleShell.h"
 
 #include <stdio.h>
@@ -43,7 +43,7 @@ class Player : public Module, public Source, public Killable {
         void suspend_gcode(Gcode *);
         void resume_gcode(Gcode *);
 
-        GcodeDispatch::Mcode m0, m1, m600, m601;
+        McodeRegistry::Mcode m0, m1, m600, m601;
         void kill() override {}
         void cleanup() override;
         Source::Result next(SerialMessage &msg) override;

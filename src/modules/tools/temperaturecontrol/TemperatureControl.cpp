@@ -7,7 +7,6 @@
 
 #include "libs/Module.h"
 #include "libs/Kernel.h"
-#include "GcodeDispatch.h"
 #include <math.h>
 #include "TemperatureControl.h"
 #include "TemperatureControlPool.h"
@@ -53,9 +52,6 @@ void TemperatureControl::on_module_loaded()
     // Settings
     this->load_config();
 
-    // Register for events
-    ADD_MCODE(m_get, this->get_m_code, IMMEDIATE, TemperatureControl::report_temperature);
-    ADD_MCODE(m305, 305, IMMEDIATE, TemperatureControl::sensor_settings_gcode);
     this->register_for_event(ON_SECOND_TICK);
 
 }
@@ -105,10 +101,10 @@ void TemperatureControl::report_temperature(Gcode *gcode)
     gcode->txt_after_ok.append(buf, n);
 }
 
-// M305 S<n> addresses one controller, so each checks the index against its own
+// the pool has already checked that S names this controller, or that there is no S at all
 void TemperatureControl::sensor_settings_gcode(Gcode *gcode)
 {
-    if(gcode->has_letter('S') && (gcode->get_value('S') == this->pool_index)) {
+    if(gcode->has_letter('S')) {
         TempSensor::sensor_options_t args= gcode->get_args();
         args.erase('S'); // don't include the S
         if(args.size() > 0) {
@@ -123,7 +119,7 @@ void TemperatureControl::sensor_settings_gcode(Gcode *gcode)
             this->sensor_settings= false;
         }
 
-    } else if(!gcode->has_letter('S')) {
+    } else {
         sensor->get_raw();
         TempSensor::sensor_options_t options;
         if(sensor->get_optional(options)) {
