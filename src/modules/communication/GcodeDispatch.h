@@ -11,6 +11,7 @@
 #include "libs/McodeRegistry.h"
 #include "utils/GcodeLine.h"
 #include "utils/Parameters.h"
+#include "modules/robot/MachineTask.h"
 
 #include <cstdint>
 #include <string>
@@ -30,7 +31,7 @@ public:
 class GcodeDispatch : public Module
 {
 public:
-    static bool run_mcode(Gcode &gcode);
+    static bool run_mcode(Gcode &gcode, bool nested);
     void report_settings(Gcode *);
 
     static void add_handler(Module *module); // for a module that handles G or M codes
@@ -41,23 +42,28 @@ public:
     Parameters &parameters() { return params; }
     void set_script_hook(ScriptHook *hook) { scripts= hook; }
     void run_mdi(const SerialMessage &msg); // a console line: most of them wait for the job to finish
-    bool run_line(const SerialMessage &msg); // false: the line was refused
-    bool run_line(const std::string &line, StreamOutput *stream);
+    // nested: dispatched by a handler, so it must not touch the enclosing line's modal state
+    bool run_line(const SerialMessage &msg, bool nested= false); // false: the line was refused
+    bool run_line(const std::string &line, StreamOutput *stream, bool nested= true);
 private:
     enum Gate { PASS, HANDLED, REFUSED };
-    bool dispatch(const SerialMessage &msg);
+    bool dispatch(const SerialMessage &msg, bool nested);
     Gate allowed_while_halted(const gcode::Words &words, StreamOutput *stream);
     Gate homed_enough(const gcode::Words &words, StreamOutput *stream);
-    bool execute(const gcode::Words &words, const std::string &text, StreamOutput *stream, unsigned int line);
+    bool execute(const gcode::Words &words, const std::string &text, StreamOutput *stream, unsigned int line, bool nested);
     bool parameter_statement(const char *p, StreamOutput *stream);
     bool fail(StreamOutput *stream, const char *msg);
     static bool safe_while_running(const gcode::Words &words);
+    static void broadcast(Gcode &gcode, OnMachine);
+    static void broadcast_drained(Gcode &gcode, OnMachine);
+    static void run_barrier(Gcode &gcode, OnMachine);
+    static void hold_or_run(Gcode &gcode, OnMachine);
+    void run_gcode(Gcode &gcode, uint8_t flags, bool nested);
 
     Parameters params;
     McodeRegistry::Mcode m500, m503;
     static Module *handlers;
     ScriptHook *scripts= nullptr;
-    uint8_t depth= 0; // a line dispatched from inside another must not touch its modal state
     uint8_t modal_group_1;
     bool homed_check;
 };

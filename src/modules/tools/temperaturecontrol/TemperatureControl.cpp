@@ -86,9 +86,7 @@ void TemperatureControl::load_config()
 
 void TemperatureControl::report_temperature(Gcode *gcode)
 {
-    char buf[32]; // should be big enough for any status
-    int n = snprintf(buf, sizeof(buf), "%s:%3.1f /0.0 @0 ", this->designator.c_str(), this->get_temperature());
-    gcode->txt_after_ok.append(buf, n);
+    gcode->stream->printf("%s:%3.1f /0.0 @0\n", this->designator.c_str(), this->get_temperature());
 }
 
 // the pool has already checked that S names this controller, or that there is no S at all

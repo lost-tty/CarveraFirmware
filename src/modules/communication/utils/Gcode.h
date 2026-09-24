@@ -22,11 +22,12 @@ class StreamOutput;
 // One command word (G or M) of a line plus all of the line's parameter words
 class Gcode {
     public:
+        Gcode() : m(0), g(0), line(0), subcode(0), has_m(false), has_g(false),
+            mcs(false), stream(nullptr) {}
         Gcode(const string& text, StreamOutput* stream, unsigned int line = 0);
         // command is an index into words, or words.size() for a line without G or M
-        Gcode(const gcode::Words& words, size_t command, const string& text, StreamOutput* stream, unsigned int line);
+        Gcode(const gcode::Words& words, size_t command, StreamOutput* stream, unsigned int line);
 
-        const char* get_command() const { return text.c_str(); }
         bool has_letter(char letter) const { return find(letter) != nullptr; }
         float get_value(char letter) const;
         int get_int(char letter) const;
@@ -41,15 +42,13 @@ class Gcode {
         uint8_t subcode;
 
         struct {
-            bool add_nl:1;
             bool has_m:1;
             bool has_g:1;
-            bool is_error:1;
             bool mcs:1;                                       // G53: this motion is in machine coordinates
         };
 
         StreamOutput* stream;
-        string txt_after_ok;
+        string error_text;
 
     private:
         const gcode::Word* find(char letter) const;
@@ -57,7 +56,6 @@ class Gcode {
         static bool is_parameter(char letter) { return letter != 'G' && letter != 'M' && letter != 'T'; }
 
         gcode::Words words;
-        string text;
 };
 
 #endif

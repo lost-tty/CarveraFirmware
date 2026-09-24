@@ -20,6 +20,7 @@
 #include "Logging.h"
 #include "ConfigValue.h"
 #include "Robot.h"
+#include "MachineTask.h"
 #include "StepperMotor.h"
 
 #include <functional>
@@ -61,11 +62,11 @@ void Conveyor::init()
     running = false;
     allow_fetch = false;
     flush = false;
+    force_fetch = false;
 }
 
 void Conveyor::on_module_loaded()
 {
-    register_for_event(ON_MAIN_LOOP);
 
     // Attach to the end_of_move stepper event
     queue_delay_time_ms = THEKERNEL->config->value(queue_delay_time_ms_checksum)->by_default(100)->as_number();
@@ -75,6 +76,7 @@ void Conveyor::on_module_loaded()
 void Conveyor::start(uint8_t n_actuators)
 {
     Block::init(n_actuators);
+
     running = true;
 }
 
@@ -83,12 +85,18 @@ void Conveyor::cleanup()
     flush_queue();
 }
 
-void Conveyor::on_main_loop(void*)
+void Conveyor::service()
 {
-    if (running) {
-        check_queue();
-    }
+    // running is false while the main task drains: then every block goes to the ticker at once
+    check_queue(!running || force_fetch);
+    force_fetch= false;
     collect();
+
+    // the actions went with the blocks they were written after
+    if(flush && queue.is_empty()) {
+        pending_actions.clear();
+        flush= false;
+    }
 }
 
 // a block the step ticker has finished with is only freed here
@@ -109,10 +117,10 @@ void Conveyor::collect()
     if(THEKERNEL->is_halted()) pending_actions.clear();
 
     // an action handler reaches the conveyor again through its own calls; it must not recurse here
-    if(running_actions) return;
-    running_actions= true;
+    if(in_actions != nullptr) return;
+    in_actions= xTaskGetCurrentTaskHandle();
     pending_actions.run_upto(finished);
-    running_actions= false;
+    in_actions= nullptr;
 }
 
 // see if we are idle
@@ -130,8 +138,8 @@ bool Conveyor::is_idle() const
 // Wait for the queue to be empty and for all the jobs to finish in step ticker
 bool Conveyor::wait_for_idle(bool wait_for_motors)
 {
-    // an action already runs at its place in the path, so draining from one would undo that
-    if(running_actions) return !THEKERNEL->is_halted();
+    // draining from inside an action would undo its place in the path
+    if(in_actions == xTaskGetCurrentTaskHandle()) return !THEKERNEL->is_halted();
 
     bool halted= false;
 
@@ -139,7 +147,6 @@ bool Conveyor::wait_for_idle(bool wait_for_motors)
     // forcing them to be jobs
     running = false;
     while (!queue.is_empty()) {
-        check_queue(true); // forces queue to be made available to stepticker
         if(!wait_for_block(halted)) break;
     }
 
@@ -163,7 +170,6 @@ void Conveyor::queue_head_block()
     // upstream caller will block on this until there is room in the queue
     bool halted= false;
     while (queue.is_full()) {
-        check_queue();
         if(!wait_for_block(halted)) break;
     }
 
@@ -232,6 +238,19 @@ bool Conveyor::get_next_block(Block **block)
     return false;
 }
 
+// the step ticker is above configMAX_SYSCALL_INTERRUPT_PRIORITY, so it cannot notify directly
+extern "C" void RIT_IRQHandler(void)
+{
+    THECONVEYOR.wake_server();
+}
+
+void Conveyor::wake_server()
+{
+    BaseType_t woken= pdFALSE;
+    if(server != nullptr) vTaskNotifyGiveIndexedFromISR(server, k_notify_index, &woken);
+    portYIELD_FROM_ISR(woken);
+}
+
 // called from step ticker ISR when block is finished, do not do anything slow here
 void Conveyor::block_finished()
 {
@@ -239,32 +258,19 @@ void Conveyor::block_finished()
     queue.isr_tail_i= queue.next(queue.isr_tail_i);
     finished++;
 
-    if(waiter != nullptr) {
-        BaseType_t woken= pdFALSE;
-        vTaskNotifyGiveIndexedFromISR(waiter, k_notify_index, &woken);
-        portYIELD_FROM_ISR(woken);
-    }
+    NVIC_SetPendingIRQ(RIT_IRQn);
 }
 
 // the step ticker only notifies when a block ends, so the timeout is there to re-check whether
 // the motors have stopped
 bool Conveyor::wait_for_block(bool &halted)
 {
-    collect();
-    watchdog.alive();
     if(THEKERNEL->is_halted()) {
         halted= true;
         return false;
     }
 
-    waiter= xTaskGetCurrentTaskHandle();
-    // a block that ended while nobody was waiting must not make this return at once
-    ulTaskNotifyValueClearIndexed(nullptr, k_notify_index, UINT32_MAX);
-    ulTaskNotifyTakeIndexed(k_notify_index, pdTRUE, pdMS_TO_TICKS(10));
-    waiter= nullptr;
-    collect();
-
-    THEKERNEL->call_event(ON_IDLE, this);
+    machine_task.tick();
     return true;
 }
 
@@ -296,31 +302,40 @@ bool Conveyor::refusal_due(unsigned int &line)
     return true;
 }
 
+void Conveyor::force_queue()
+{
+    force_fetch= true;
+    if(server != nullptr) xTaskNotifyGiveIndexed(server, k_notify_index);
+}
+
 bool Conveyor::hold_action(const McodeRegistry::Mcode *code, const Gcode &gcode)
 {
     if(queued == finished) return false;
     return pending_actions.hold(code, gcode, queued);
 }
 
-void Conveyor::flush_queue()
+// stopping at a block boundary keeps the position exact
+bool Conveyor::stop_soon()
 {
-    allow_fetch = false;
-    flush= true;
-    running = false;
-
-    pending_actions.clear();
-    refusal_pending= false;
-
-    // TODO force deceleration of last block
+    bool held= THEKERNEL->get_feed_hold();
+    if(!held) THEKERNEL->set_feed_hold(true);
 
     bool halted= false;
-    while (!queue.is_empty()) {
-        check_queue(true);
+    while(THEROBOT.any_motor_moving() && !halted) {
         if(!wait_for_block(halted)) break;
     }
 
-    running = true;
-    flush= false;
+    // flush before releasing the hold, or the ISR fetches the block this meant to stop
+    flush_queue();
+    if(!held) THEKERNEL->set_feed_hold(false);
+    return !halted;
+}
+
+// the blocks are dropped, not run, so there is nothing to wait for
+void Conveyor::flush_queue()
+{
+    refusal_pending= false;
+    flush= true;
 }
 
 // Debug function

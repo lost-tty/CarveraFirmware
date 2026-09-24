@@ -6,6 +6,7 @@
 */
 
 #include "ZProbe.h"
+#include "Endstops.h"
 #include "SimpleShell.h"
 
 #include "Kernel.h"
@@ -238,12 +239,7 @@ void ZProbe::on_gcode_received(Gcode *argument)
                 // the result is in actuator coordinates moved
                 gcode->stream->printf("Z:%1.4f\n", THEROBOT.from_millimeters(mm));
 
-                if(set_z) {
-                    // set current Z to the specified value, shortcut for G92 Znnn
-                    char buf[32];
-                    snprintf(buf, sizeof(buf), "G92 Z%f", gcode->get_value('Z'));
-                    gcode_dispatch.run_line(buf, &StreamOutput::NullStream);
-                }
+                if(set_z) THEROBOT.set_wcs_position(Z_AXIS, THEROBOT.to_millimeters(gcode->get_value('Z')));
 
             } else {
                 gcode->stream->printf("ZProbe not triggered\n");
@@ -479,6 +475,6 @@ void ZProbe::coordinated_move(float x, float y, float z, float feedrate, bool re
 // issue home command
 void ZProbe::home()
 {
-    gcode_dispatch.run_line("G28.2", &StreamOutput::NullStream);
+    endstops.home_all();
 }
 

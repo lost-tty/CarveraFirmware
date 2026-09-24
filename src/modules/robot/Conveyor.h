@@ -17,6 +17,8 @@
 
 class Block;
 
+extern "C" void RIT_IRQHandler(void);
+
 class Conveyor : public Module, public Killable
 {
 public:
@@ -24,21 +26,21 @@ public:
     void start(uint8_t n_actuators);
 
     void on_module_loaded(void);
-    void on_main_loop(void *);
     void kill() override {}
     void cleanup() override;
 
+    void service();
+    void wake_on_block(TaskHandle_t t) { server= t; }
     bool wait_for_idle(bool wait_for_motors=true); // false when a halt cut the wait short
-    bool is_queue_empty() { return queue.is_empty(); };
-    bool is_queue_full() { return queue.is_full(); };
-    bool is_idle() const;
+    bool stop_soon();
 
-    // returns next available block writes it to block and returns true
     bool get_next_block(Block **block);
     void block_finished();
+    void wake_server();
 
-    void dump_queue(void);
     void flush_queue(void);
+    bool flushing() const { return flush; }
+    void force_queue();   // a jog runs now, not after the pre-load wait
 
     // false: nothing is queued to wait on, so the caller runs it now
     bool hold_action(const McodeRegistry::Mcode *code, const Gcode &gcode);
@@ -46,13 +48,17 @@ public:
     // a line refused while earlier moves are still queued: they finish, then the job stops
     bool refuse_after_queued(unsigned int line);
     bool refusal_due(unsigned int &line);
+
     bool refused() const { return refusal_pending; }
+    bool is_idle() const;
+    bool is_queue_empty() { return queue.is_empty(); };
     float get_current_feedrate() const { return current_feedrate; }
-    void force_queue() { check_queue(true); }
 
     friend class Planner; // for queue
 
 private:
+    void dump_queue(void);
+    bool is_queue_full() { return queue.is_full(); };
     void check_queue(bool force= false);
     void collect();
     void queue_head_block(void);
@@ -63,10 +69,10 @@ private:
     using Queue_t = BlockQueue<32>;
     Queue_t queue; // Queue of Blocks
 
-    volatile TaskHandle_t waiter{nullptr};
+    volatile TaskHandle_t server{nullptr};   // the machine task, woken when a block ends
 
     BlockActions pending_actions;
-    bool running_actions{false};
+    volatile TaskHandle_t in_actions{nullptr};   // the task inside an action handler, if any
     uint32_t queued{0};
     volatile uint32_t finished{0};
 
@@ -77,9 +83,9 @@ private:
     uint32_t queue_delay_time_ms;
     float current_feedrate{0}; // actual nominal feedrate that current block is running at in mm/sec
 
-    struct {
-        volatile bool running:1;
-        volatile bool allow_fetch:1;
-        bool flush:1;
-    };
+    // separate bytes so unlocked cross-task writes do not read-modify-write each other
+    volatile bool running;
+    volatile bool allow_fetch;
+    volatile bool flush;
+    volatile bool force_fetch;
 };

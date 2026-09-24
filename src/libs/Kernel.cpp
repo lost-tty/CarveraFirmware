@@ -16,6 +16,8 @@
 #include "ConfigValue.h"
 
 #include "libs/StepTicker.h"
+#include "libs/Watchdog.h"
+#include "modules/robot/MachineTask.h"
 #include "modules/communication/SerialConsole.h"
 #include "modules/communication/WirelessProbe.h"
 #include "modules/robot/Planner.h"
@@ -60,7 +62,6 @@
 #define microseconds_per_step_pulse_checksum        CHECKSUM("microseconds_per_step_pulse")
 #define disable_leds_checksum                       CHECKSUM("leds_disable")
 #define feed_hold_enable_checksum                   CHECKSUM("enable_feed_hold")
-#define ok_per_line_checksum                        CHECKSUM("ok_per_line")
 
 // The kernel is the central point in Smoothie : it stores modules, and handles event calls
 void Kernel::init()
@@ -107,9 +108,6 @@ void Kernel::init()
 
     this->enable_feed_hold = this->config->value( feed_hold_enable_checksum )->by_default(true)->as_bool();
 
-    // we expect ok per line now not per G code, setting this to false will return to the old (incorrect) way of ok per G code
-    this->ok_per_line = this->config->value( ok_per_line_checksum )->by_default(true)->as_bool();
-
     this->add_module( this->serial );
 
     this->adc.init();
@@ -125,6 +123,11 @@ void Kernel::init()
     // Set other priorities lower than the timers
     NVIC_SetPriority(ADC_IRQn, 5);
     NVIC_SetPriority(USB_IRQn, 5);
+
+    // NVIC_SetPriority shifts by the chip's bits, FreeRTOS compares the raw register
+    NVIC_SetVector(RIT_IRQn, (uintptr_t)&RIT_IRQHandler);
+    NVIC_SetPriority(RIT_IRQn, configMAX_SYSCALL_INTERRUPT_PRIORITY >> (8 - __NVIC_PRIO_BITS));
+    NVIC_EnableIRQ(RIT_IRQn);
 
     // If MRI is enabled
     if( MRI_ENABLE ) {
@@ -457,11 +460,12 @@ void Kernel::register_for_event(_EVENT_ENUM id_event, Module *mod)
 void Kernel::clear_halt()
 {
     dispatch_halt(); // the halt may still be pending if the main loop has not run since
+
+    machine_task.clear_halt();   // a post while halted is false would land in the ring being dropped
+
     halted = false;
     feed_hold = false;
     Killable::restore_all();
-    THEROBOT.reset_position_from_current_actuator_position();
-    THEROBOT.set_keepout(true);
 }
 
 void Kernel::halt(uint8_t reason, const char *msg)
@@ -475,6 +479,14 @@ void Kernel::halt(uint8_t reason, const char *msg)
     halted = true;
     Killable::kill_all();
     halt_pending = true;
+}
+
+void Kernel::serve_main()
+{
+    watchdog.alive();
+    dispatch_halt();
+    call_event(ON_MAIN_LOOP);
+    call_event(ON_IDLE);
 }
 
 void Kernel::dispatch_halt()

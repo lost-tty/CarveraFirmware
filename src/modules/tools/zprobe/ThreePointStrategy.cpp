@@ -52,6 +52,7 @@
 */
 
 #include "ThreePointStrategy.h"
+#include "Endstops.h"
 #include "Kernel.h"
 #include "Config.h"
 #include "Robot.h"
@@ -226,7 +227,11 @@ void ThreePointStrategy::set_probe_offsets(Gcode *gcode)
 
 void ThreePointStrategy::homeXY()
 {
-    gcode_dispatch.run_line("G28.2 X0 Y0", &StreamOutput::NullStream);
+    Endstops::axis_bitmap_t xy;
+    xy.reset();
+    xy.set(X_AXIS);
+    xy.set(Y_AXIS);
+    endstops.home_axes(xy);
 }
 
 bool ThreePointStrategy::doProbing(StreamOutput *stream)

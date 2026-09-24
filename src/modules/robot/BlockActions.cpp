@@ -27,10 +27,11 @@ bool BlockActions::hold(const McodeRegistry::Mcode *code, const Gcode &gcode, ui
 void BlockActions::run(const Pending &p)
 {
     gcode::Words words;
-    words.push_back(gcode::Word{'M', p.subcode, (float)p.number, true});
+    words.push_back(gcode::Word{.letter= 'M', .subcode= p.subcode,
+                                .has_value= true, .value= (float)p.number});
     for (uint8_t i = 0; i < p.n_words; i++) words.push_back(p.words[i]);
 
-    Gcode gcode(words, 0, "", nullptr, 0);
+    Gcode gcode(words, 0, nullptr, 0);
     p.code->handler(p.code->owner, &gcode);
 }
 

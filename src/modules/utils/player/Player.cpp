@@ -25,6 +25,7 @@
 #include "SDFAT.h"
 
 #include "modules/robot/Conveyor.h"
+#include "modules/robot/MachineTask.h"
 #include "DirHandle.h"
 #include "PlayerPublicAccess.h"
 #include "Scripts.h"
@@ -170,7 +171,6 @@ void Player::play_command( string parameters, StreamOutput *stream )
     string options= extract_options(parameters);
     // Get filename which is the entire parameter line upto any options found or entire line
     this->filename = absolute_from_relative(shift_parameter(parameters));
-    this->last_filename = this->filename;
 
     if (!sources.empty() || THEKERNEL->is_suspending() || THEKERNEL->is_waiting()) {
         stream->printf("Currently printing, abort print first\r\n");
@@ -314,7 +314,7 @@ void Player::abort()
     THEROBOT.set_keepout(true);
 
     THEKERNEL->set_waiting(true);
-    bool finished= THECONVEYOR.wait_for_idle();
+    bool finished= machine_task.post_drain();
     THEKERNEL->set_waiting(false);
     if(!finished) return;
     tool_head.stop_all();
@@ -336,9 +336,7 @@ void Player::abort_command( string parameters, StreamOutput *stream )
     }
 
     if (parameters.empty()) {
-        // clear out the block queue, will wait until queue is empty
-        // MUST be called in on_main_loop to make sure there are no blocked main loops waiting to put something on the queue
-        THECONVEYOR.flush_queue();
+        machine_task.post_stop();
 
         // now the position will think it is at the last received pos, so we need to do FK to get the actuator position and reset the current position
         THEROBOT.reset_position_from_current_actuator_position();
@@ -417,13 +415,6 @@ bool Player::get_progress(struct pad_progress &p)
     return true;
 }
 
-void Player::restart_job()
-{
-    if(this->last_filename.empty()) return;
-    printk("Job restarted: %s.\r\n", this->last_filename.c_str());
-    this->play_command(this->last_filename, &(StreamOutput::NullStream));
-}
-
 /**
 Suspend a print in progress
 1. send pause to upstream host, or pause if printing from sd
@@ -462,8 +453,7 @@ void Player::suspend_now(StreamOutput *stream)
 
     THEKERNEL->set_waiting(true);
 
-    // wait for queue to empty
-    THECONVEYOR.wait_for_idle();
+    machine_task.post_drain();
 
     if(THEKERNEL->is_halted()) {
         printk("Suspend aborted by halt\n");
@@ -521,7 +511,7 @@ void Player::resume_command(string parameters, StreamOutput *stream )
     if (this->goto_line == 0 && current_motion_mode > 1) { // back to the arc mode the job was in
         char buf[8];
         snprintf(buf, sizeof(buf), "G%d", current_motion_mode - 1);
-        gcode_dispatch.run_line(buf, &StreamOutput::NullStream);
+        gcode_dispatch.run_line(buf, &StreamOutput::NullStream, false);
     }
 
     THEROBOT.pop_state();

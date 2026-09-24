@@ -96,9 +96,9 @@ class Kernel {
         // safe from an interrupt
         void halt(uint8_t reason, const char *msg = nullptr);
         void dispatch_halt();
+        void serve_main();
         bool is_halted() const { return halted; }
         void clear_halt();
-        bool is_ok_per_line() const { return ok_per_line; }
 
         void set_feed_hold(bool f) { feed_hold= f; }
         bool get_feed_hold() const { return feed_hold; }
@@ -154,7 +154,6 @@ class Kernel {
         struct {
             bool use_leds:1;
             bool feed_hold:1;
-            bool ok_per_line:1;
             volatile bool enable_feed_hold:1;
             bool bad_mcu:1;
             bool laser_mode:1;

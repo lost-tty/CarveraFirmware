@@ -51,6 +51,7 @@ class Switch : public Module, public Killable {
 
         void on_module_loaded();
         void on_main_loop(void *argument);
+        void drive_output();
         void on_config_reload(void* argument);
         void on_gcode_received(Gcode *argument);
         void on_gcode(Gcode *);

@@ -60,6 +60,7 @@ class Robot : public Module {
         void reset_axis_position(float x, float y, float z);
         void reset_actuator_position(const ActuatorCoordinates &ac);
         void reset_position_from_current_actuator_position();
+        void set_wcs_position(uint8_t axis, float to);
         float get_seconds_per_minute() const { return seconds_per_minute; }
         float get_z_maxfeedrate() const { return this->max_speeds[Z_AXIS]; }
         float get_seek_rate() const { return this->seek_rate / seconds_per_minute; }
@@ -109,7 +110,8 @@ class Robot : public Module {
         bool delta_move(const float delta[], float rate_mm_s, uint8_t naxis);
         bool delta_move_watch(const float delta[], float rate_mm_s, uint8_t naxis, Watch &w);
         bool delta_move_sync(const float delta[], float rate_mm_s, uint8_t naxis);
-        void jog(const float delta[], float scale);
+        bool jog(const float delta[], float scale);
+        bool jog_move(const float delta[], uint8_t naxis, float scale);
         bool move_to_machine_position(const float pos[3]);
         bool step_motor(uint8_t axis, bool dir, unsigned steps, unsigned steps_per_sec, std::string &err);
         uint8_t register_motor(StepperMotor*);

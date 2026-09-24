@@ -47,7 +47,6 @@ void SourceStack::on_main_loop(void *)
     unsigned int refused;
     if(THECONVEYOR.refusal_due(refused)) {
         printk("job stopped at line %u\n", refused);
-        THECONVEYOR.flush_queue();
         clear();
         return;
     }

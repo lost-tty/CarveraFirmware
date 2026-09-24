@@ -146,9 +146,9 @@ int main() {
 
     gcode::Line ml;
     CHECK(ml.parse("G90 G0 X1 M3 S100", &p));
-    Gcode g5(ml.words(), 1, "G90 G0 X1 M3 S100", nullptr, 7);
+    Gcode g5(ml.words(), 1, nullptr, 7);
     CHECK(g5.has_g && g5.g == 0 && !g5.has_m && g5.line == 7 && g5.has_letter('S') && g5.get_num_args() == 2);
-    Gcode g6(ml.words(), ml.words().size(), "", nullptr, 0);
+    Gcode g6(ml.words(), ml.words().size(), nullptr, 0);
     CHECK(!g6.has_g && !g6.has_m);
 
     printf(failures ? "%d failures\n" : "all passed\n", failures);

@@ -4,6 +4,7 @@
 #include "libs/Kernel.h"
 #include "Robot.h"
 #include "Conveyor.h"
+#include "modules/robot/MachineTask.h"
 #include "StepperMotor.h"
 #include "checksumm.h"
 #include "SpindlePublicAccess.h"
@@ -30,7 +31,8 @@ bool Parameters::get(int n, float &v) const
         return !std::isnan(v); // blank EEPROM reads as NaN
     }
 
-    if (n >= 5021 && n <= 5044) THECONVEYOR.wait_for_idle(); // positions are where the machine is, not where it is going
+    // the queue has to run out first, or this reads the planned position
+    if (n >= 5021 && n <= 5044) machine_task.post_drain();
     float mpos[3];
     switch (n) {
         case 2000: v = persist.tool_length(); return true;

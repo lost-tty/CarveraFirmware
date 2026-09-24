@@ -12,6 +12,7 @@
 
 #include "Robot.h"
 #include "Conveyor.h"
+#include "MachineTask.h"
 #include "Endstops.h"
 #include "ATCHandler.h"
 #include "SpindleControl.h"
@@ -348,34 +349,46 @@ uint8_t Robot::register_motor(StepperMotor *motor)
 
 void Robot::home_on_startup()
 {
-    if(home_on_boot) gcode_dispatch.run_line("G28.2", &THEKERNEL->streams);
+    if(home_on_boot) endstops.home_all();
 }
 
-// $J: the slowest involved axis sets the rate, and the move runs now rather than waiting for the queue
-void Robot::jog(const float delta[], float scale)
+bool Robot::jog(const float delta[], float scale)
+{
+    for (uint8_t i = 0; i < n_motors; ++i) {
+        if(delta[i] != 0) return machine_task.post_jog(delta, n_motors, scale);
+    }
+    return false;
+}
+
+bool Robot::jog_move(const float delta[], uint8_t naxis, float scale)
 {
     float rate_mm_s= NAN;
-    for (int i = 0; i < n_motors; ++i) {
-        if(delta[i] != 0) {
-            float r= actuators[i]->get_max_rate();
-            rate_mm_s= isnan(rate_mm_s) ? r : std::min(rate_mm_s, r);
-        }
+    for (uint8_t i = 0; i < naxis; ++i) {
+        if(delta[i] == 0) continue;
+        float r= actuators[i]->get_max_rate();
+        rate_mm_s= isnan(rate_mm_s) ? r : std::min(rate_mm_s, r);
     }
-    if(isnan(rate_mm_s)) return;
+    if(isnan(rate_mm_s)) return false;
 
-    delta_move(delta, rate_mm_s * scale, n_motors);
+    if(!delta_move(delta, rate_mm_s * scale, naxis)) return false;
+
     THECONVEYOR.force_queue();
+    return true;
 }
 
 bool Robot::move_to_machine_position(const float pos[3])
 {
     float cur[3];
     get_axis_position(cur);
-    const float delta[3]{pos[X_AXIS] - cur[X_AXIS], pos[Y_AXIS] - cur[Y_AXIS], pos[Z_AXIS] - cur[Z_AXIS]};
-    return delta_move_sync(delta, get_seek_rate(), 3);
+
+    float delta[k_max_actuators]{0};
+    for (int i = 0; i <= Z_AXIS; ++i) delta[i]= pos[i] - cur[i];
+
+    if(machine_task.on_task()) return delta_move_sync(delta, get_seek_rate(), 3);
+    return machine_task.post_jog(delta, 3, 1.0F);
 }
 
-// steps one motor past the planner, so the position has to be recovered from the actuator afterwards
+// steps one motor past the planner, so the position is recovered from the actuator afterwards
 bool Robot::step_motor(uint8_t axis, bool dir, unsigned steps, unsigned steps_per_sec, std::string &err)
 {
     if(axis > C_AXIS) { err= "axis must be x, y, z, a, b, c"; return false; }
@@ -750,8 +763,7 @@ void Robot::on_gcode_received(Gcode *argument)
             case 22: { // G22 [Pn] X Y Z I J K: zone n spans the two corners, an omitted word leaves that side open
                 unsigned n= gcode->has_letter('P') ? gcode->get_uint('P') : 1;
                 if(n < 1 || n > k_keepout_zones) {
-                    gcode->is_error= true;
-                    gcode->txt_after_ok= "G22 P must be 1 to 4";
+                    gcode->error_text= "G22 P must be 1 to 4";
                     break;
                 }
                 KeepOut &z= keepout[n - 1];
@@ -827,23 +839,10 @@ void Robot::on_gcode_received(Gcode *argument)
                     // set laser mode offset
                 	setLaserOffset();
                 } else {
-                    // standard setting of the g92 offsets, making current WCS position whatever the coordinate arguments are
-                    float x, y, z;
-                    std::tie(x, y, z) = g92_offset;
-                    // get current position in WCS
-                    wcs_t pos= mcs2wcs(machine_position);
-
-                    // adjust g92 offset to make the current wpos == the value requested
-                    if(gcode->has_letter('X')){
-                        x += to_millimeters(gcode->get_value('X')) - std::get<X_AXIS>(pos);
+                    for (int i = 0; i <= Z_AXIS; ++i) {
+                        char axis= 'X' + i;
+                        if(gcode->has_letter(axis)) set_wcs_position(i, to_millimeters(gcode->get_value(axis)));
                     }
-                    if(gcode->has_letter('Y')){
-                        y += to_millimeters(gcode->get_value('Y')) - std::get<Y_AXIS>(pos);
-                    }
-                    if(gcode->has_letter('Z')) {
-                        z += to_millimeters(gcode->get_value('Z')) - std::get<Z_AXIS>(pos);
-                    }
-                    g92_offset = wcs_t(x, y, z);
                 }
 
                 #if MAX_ROBOT_ACTUATORS > 3
@@ -922,7 +921,7 @@ void Robot::steps_per_mm(Gcode *gcode)
         }
         gcode->stream->printf("%c:%f ", axis, actuators[i]->get_steps_per_mm());
     }
-    gcode->add_nl = true;
+    gcode->stream->printf("\n");
     check_max_actuator_speeds();
 }
 
@@ -933,7 +932,7 @@ void Robot::report_position(Gcode *gcode)
     if(gcode->subcode > COMPENSATED) return;
     char buf[80];
     format_position((position_source)gcode->subcode, tags[gcode->subcode], buf, sizeof(buf));
-    gcode->txt_after_ok.append(buf);
+    gcode->stream->printf("%s\n", buf);
 }
 
 void Robot::push_state_gcode(Gcode *gcode)
@@ -961,7 +960,7 @@ void Robot::max_feedrates(Gcode *gcode)
             gcode->stream->printf(" S: %g ", this->max_speed);
         }
 
-        gcode->add_nl = true;
+        gcode->stream->printf("\n");
         return;
     }
 
@@ -1135,7 +1134,7 @@ void Robot::arm_solution_gcode(Gcode *gcode)
         for(auto &i : options) {
             // print all current values of supported options
             gcode->stream->printf("%c: %8.4f ", i.first, i.second);
-            gcode->add_nl = true;
+            gcode->stream->printf("\n");
         }
     }
 
@@ -1181,8 +1180,7 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
             // refuse absolute WCS moves on an unhomed axis
             for(int i= X_AXIS; i <= Z_AXIS; ++i) {
                 if(isnan(param[i]) || is_homed(i) || !gcode_dispatch.homed_check_enabled()) continue;
-                gcode->is_error= true;
-                gcode->txt_after_ok= "not homed: $H first, or move with G53 or G91";
+                gcode->error_text= "not homed: $H first, or move with G53 or G91";
                 return;
             }
 
@@ -1313,15 +1311,14 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
         case CCW_ARC:
             // Note arcs are not currently supported by extruder based machines, as 3D slicers do not use arcs (G2/G3)
             if(gcode->has_letter('R') && !arc_radius_to_offset(gcode, target, motion_mode, offset)) {
-                gcode->is_error= true;
-                gcode->txt_after_ok= "arc radius too small for the endpoints";
+                gcode->error_text= "arc radius too small for the endpoints";
                 return;
             }
             moved = this->compute_arc(gcode, offset, target, motion_mode);
             break;
     }
 
-    if(gcode->is_error) {
+    if(!gcode->error_text.empty()) {
         // segments queued before the refusal still run; take the position from where they end
         if(moved) {
             THECONVEYOR.wait_for_idle();
@@ -1415,6 +1412,20 @@ void Robot::reset_actuator_position(const ActuatorCoordinates &ac)
 
 // Use FK to find out where actuator is and reset to match
 // TODO maybe we should only reset axis that are being homed unless this is due to a ON_HALT
+void Robot::set_wcs_position(uint8_t axis, float to)
+{
+    if(axis > Z_AXIS) return;
+
+    float o[3];
+    std::tie(o[X_AXIS], o[Y_AXIS], o[Z_AXIS]) = g92_offset;
+
+    wcs_t pos= mcs2wcs(machine_position);
+    const float at[3]{std::get<X_AXIS>(pos), std::get<Y_AXIS>(pos), std::get<Z_AXIS>(pos)};
+
+    o[axis] += to - at[axis];
+    g92_offset = wcs_t(o[X_AXIS], o[Y_AXIS], o[Z_AXIS]);
+}
+
 void Robot::reset_position_from_current_actuator_position()
 {
     ActuatorCoordinates actuator_pos;
@@ -1727,8 +1738,7 @@ bool Robot::within_soft_limits(const float transformed_target[], Gcode *gcode)
         } else if(gcode == nullptr) {
             printk("error:soft limit %c exceeded\n", i+'X');
         } else {
-            gcode->is_error= true;
-            gcode->txt_after_ok= std::string("soft limit ") + char('X' + i) + " exceeded";
+            gcode->error_text= std::string("soft limit ") + char('X' + i) + " exceeded";
         }
         return false;
     }
@@ -1757,8 +1767,7 @@ bool Robot::clear_of_keepout(const float from[], const float to[], Gcode *gcode)
         if(gcode == nullptr) {
             printk("error:%s\n", msg);
         } else {
-            gcode->is_error= true;
-            gcode->txt_after_ok= msg;
+            gcode->error_text= msg;
         }
         return false;
     }
@@ -1777,8 +1786,7 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s)
 
     // catch negative or zero feed rates and return the same error as GRBL does
     if(rate_mm_s <= 0.0F) {
-        gcode->is_error= true;
-        gcode->txt_after_ok= (rate_mm_s == 0 ? "Undefined feed rate" : "feed rate < 0");
+        gcode->error_text= (rate_mm_s == 0 ? "Undefined feed rate" : "feed rate < 0");
         return false;
     }
 
@@ -1843,7 +1851,7 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s)
             // Append the end of this segment to the queue
             // this can block waiting for free block queue or if in feed hold
             bool b= this->append_milestone(segment_end, rate_mm_s, gcode);
-            if(gcode->is_error) return moved;
+            if(!gcode->error_text.empty()) return moved;
             moved= moved || b;
         }
     }
@@ -1862,8 +1870,7 @@ bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[]
     float rate_mm_s= this->feed_rate / seconds_per_minute;
     // catch negative or zero feed rates and return the same error as GRBL does
     if(rate_mm_s <= 0.0F) {
-        gcode->is_error= true;
-        gcode->txt_after_ok= (rate_mm_s == 0 ? "Undefined feed rate" : "feed rate < 0");
+        gcode->error_text= (rate_mm_s == 0 ? "Undefined feed rate" : "feed rate < 0");
         return false;
     }
 
@@ -1995,7 +2002,7 @@ bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[]
 
             // Append this segment to the queue
             bool b= this->append_milestone(arc_target, rate_mm_s, gcode);
-            if(gcode->is_error) return moved;
+            if(!gcode->error_text.empty()) return moved;
             moved= moved || b;
         }
     }

@@ -541,29 +541,41 @@ void Endstops::home(axis_bitmap_t a)
 
 void Endstops::process_home_command(Gcode* gcode)
 {
-    // First wait for the queue to be empty
-    THECONVEYOR.wait_for_idle();
-
-    // turn off any compensation transform so Z does not move as XY home
-    auto savect= THEROBOT.take_compensation();
-
-    // figure out which axis to home
-    axis_bitmap_t haxis;
-    haxis.reset();
-
     bool axis_speced = (gcode->has_letter('X') || gcode->has_letter('Y') || gcode->has_letter('Z') ||
                         gcode->has_letter('A') || gcode->has_letter('B') || gcode->has_letter('C'));
 
+    axis_bitmap_t haxis;
+    haxis.reset();
     for (auto &p : homing_axis) {
         // only enable homing if the endstop is defined,
         if(p.pin_info == nullptr) continue;
         if(!axis_speced || gcode->has_letter(p.axis)) haxis.set(p.axis_index);
     }
 
+    home_axes(haxis);
+}
+
+void Endstops::home_all()
+{
+    axis_bitmap_t haxis;
+    haxis.reset();
+    for (auto &p : homing_axis) {
+        if(p.pin_info != nullptr) haxis.set(p.axis_index);
+    }
+    home_axes(haxis);
+}
+
+void Endstops::home_axes(axis_bitmap_t haxis)
+{
     if(haxis.none()) {
         printk("WARNING: Nothing to home\n");
         return;
     }
+
+    THECONVEYOR.wait_for_idle();
+
+    // turn off any compensation transform so Z does not move as XY home
+    auto savect= THEROBOT.take_compensation();
 
     // do the actual homing
     if(homing_order != 0) {
@@ -733,7 +745,7 @@ void Endstops::on_gcode_received(Gcode *argument)
                     if(p.pin_info == nullptr) continue; // ignore if not a homing endstop
                     gcode->stream->printf("%c:%d ", p.axis, p.homed);
                 }
-                gcode->add_nl= true;
+                gcode->stream->printf("\n");
                 break;
 
             default:
@@ -760,7 +772,7 @@ void Endstops::report_switches(Gcode *gcode)
         gcode->stream->printf("(%s)P%d.%d:%d ", str.c_str(), p->pin.port_number, p->pin.pin, p->pin.get());
     }
     gcode->stream->printf(" Probe: %d", zprobe.getProbeStatus());
-    gcode->add_nl = true;
+    gcode->stream->printf("\n");
 }
 
 // M206: the offset applied at the next home

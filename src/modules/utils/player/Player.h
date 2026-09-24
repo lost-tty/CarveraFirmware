@@ -36,7 +36,6 @@ class Player : public Module, public Source, public Killable {
         static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
         bool is_playing() const { return playing_file; }
         bool get_progress(struct pad_progress &p);
-        void restart_job();
         void on_gcode_received(Gcode *argument);
         void program_stop(Gcode *);
         void optional_stop(Gcode *);
@@ -71,7 +70,6 @@ class Player : public Module, public Source, public Killable {
         // bool check_cluster(const char *gcode_str, float *x_value, float *y_value, float *distance, float *slope, float *s_value);
 
         string filename;
-        string last_filename;
         StreamOutput* current_stream;
         StreamOutput* reply_stream;
 

@@ -168,13 +168,10 @@ Source::Result Scripts::next(SerialMessage &msg)
             return WAIT;
         case script::Runner::DONE: {
             float reason= runner->aborted();
-            StreamOutput *caller= reply;
             finish();
             if(reason != 0) {
                 printk("error:script %s aborted (%d)\n", name.c_str(), (int)reason);
                 halt(reason > 0 && reason < 255 ? (int)reason : SCRIPT);
-            } else if(caller != nullptr) {
-                caller->printf("ok\r\n");
             }
             return DONE;
         }
@@ -240,7 +237,7 @@ void Scripts::shell(void *self, const char *cmd, std::string args, StreamOutput 
 
 void Scripts::sub_check(std::string, StreamOutput *stream)
 {
-    if(load(stream)) stream->printf("ok\n");
+    load(stream);
 }
 
 void Scripts::sub_list(std::string, StreamOutput *stream)
@@ -253,13 +250,11 @@ void Scripts::sub_list(std::string, StreamOutput *stream)
     for (const script::Control &c : p.controls) {
         if(c.kind == script::SUB) stream->printf("%s\n", p.label_text(p.labels[c.label]).c_str());
     }
-    stream->printf("ok\n");
 }
 
 void Scripts::sub_params(std::string, StreamOutput *stream)
 {
     Parameters::list_named(stream);
-    stream->printf("ok\n");
 }
 
 void Scripts::sub_run(std::string cmd, StreamOutput *stream)
@@ -277,5 +272,4 @@ void Scripts::sub_run(std::string cmd, StreamOutput *stream)
 void Scripts::sub_trace(std::string cmd, StreamOutput *stream)
 {
     trace= shift_parameter(cmd) == "on";
-    stream->printf("ok\n");
 }

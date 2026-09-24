@@ -58,8 +58,6 @@
        leveling-strategy.rectangular-grid.human_readable  true
 
     For probes like the bltouch you can define a before probe and after probe GCode sequence (to deploy and stow the probe)
-        leveling-strategy.rectangular-grid.before_probe_gcode M280
-        leveling-strategy.rectangular-grid.after_probe_gcode M281
 
 
     Usage
@@ -121,8 +119,6 @@
 #define human_readable_checksum      CHECKSUM("human_readable")
 #define height_limit_checksum        CHECKSUM("height_limit")
 #define dampening_start_checksum     CHECKSUM("dampening_start")
-#define before_probe_gcode_checksum  CHECKSUM("before_probe_gcode")
-#define after_probe_gcode_checksum   CHECKSUM("after_probe_gcode")
 
 #define GRIDFILE "/sd/cartesian.grid"
 #define GRIDFILE_NM "/sd/cartesian_nm.grid"
@@ -205,12 +201,8 @@ bool CartGridStrategy::handleConfig()
         m_attach= nullptr;
     }
 
-    this->before_probe = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, before_probe_gcode_checksum)->by_default("")->as_string();
-    this->after_probe = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, after_probe_gcode_checksum)->by_default("")->as_string();
 
     // for the gcode commands we need to replace _ for space
-    std::replace(before_probe.begin(), before_probe.end(), '_', ' '); // replace _ with space
-    std::replace(after_probe.begin(), after_probe.end(), '_', ' '); // replace _ with space
 
     grid = (float *)malloc(configured_grid_x_size * configured_grid_y_size * sizeof(float));
 
@@ -437,20 +429,10 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
                 zprobe->home();
             }
 
-            if(!before_probe.empty()) {
-                gcode_dispatch.run_line(before_probe, &StreamOutput::NullStream);
-                THECONVEYOR.wait_for_idle(); // it is a user string, it may move
-            }
-
             if(!doProbe(gcode)) {
                 gcode->stream->printf("Probe failed to complete, check the initial probe height and/or initial_height settings\n");
             } else {
                 gcode->stream->printf("Probe completed.\n");
-            }
-
-            if(!after_probe.empty()) {
-                gcode_dispatch.run_line(after_probe, &StreamOutput::NullStream);
-                THECONVEYOR.wait_for_idle(); // it is a user string, it may move
             }
 
             return true;
@@ -464,19 +446,10 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
                 zprobe->home();
             }
 
-            if(!before_probe.empty()) {
-                gcode_dispatch.run_line(before_probe, &StreamOutput::NullStream);
-                THECONVEYOR.wait_for_idle(); // it is a user string, it may move
-            }
-
             if(!scan_bed(gcode)) {
                 gcode->stream->printf("scan failed to complete\n");
             }
 
-            if(!after_probe.empty()) {
-                gcode_dispatch.run_line(after_probe, &StreamOutput::NullStream);
-                THECONVEYOR.wait_for_idle(); // it is a user string, it may move
-            }
             return true;
         }
 

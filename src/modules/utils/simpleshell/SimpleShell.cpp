@@ -14,6 +14,7 @@
 #include "libs/nuts_bolts.h"
 #include "libs/utils.h"
 #include "libs/SerialMessage.h"
+#include "modules/robot/MachineTask.h"
 #include "libs/StreamOutput.h"
 #include "libs/Logging.h"
 #include "Conveyor.h"
@@ -191,7 +192,6 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
 
     size_t i = possible_command.find_first_not_of(" \t");
     if(i == string::npos) {
-        stream->printf("ok\r\n");
         return;
     }
     // ?, !, ~ and friends act the moment they arrive, from any console
@@ -207,7 +207,6 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
             case 'G':
                 // issue get state
                 get_command("state", new_message.stream);
-                new_message.stream->printf("ok\n");
                 break;
 
             case 'I':
@@ -224,16 +223,14 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
 
             case '#':
                 grblDP_command("", new_message.stream);
-                new_message.stream->printf("ok\n");
                 break;
 
             case 'H':
                 {
                     if(THEKERNEL->is_halted()) THEKERNEL->clear_halt();
                     // issue G28.2 which is force homing cycle
-                    gcode_dispatch.run_line("G28.2", new_message.stream);
+                    gcode_dispatch.run_line("G28.2", new_message.stream, false);
 
-                    new_message.stream->printf("ok\n");
                 }
                 break;
 
@@ -600,6 +597,7 @@ void SimpleShell::mem_command(string parameters, StreamOutput *stream)
 
     stream->printf("Block size: %u bytes\n", sizeof(Block));
     stream->printf("Main loop stack unused at worst: %lu bytes\r\n", uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t));
+    stream->printf("Machine task stack unused at worst: %u bytes\r\n", (unsigned)machine_task.stack_unused());
 }
 
 const char* getTaskStateString(eTaskState state)
@@ -893,7 +891,6 @@ void SimpleShell::eeprom_show( string parameters, StreamOutput *stream)
     for (uint8_t i = 0; i < Persist::k_user_vars; i++) {
         if (!std::isnan(persist.user_var(i))) stream->printf("#%u: %1.4f\r\n", 501 + i, persist.user_var(i));
     }
-    stream->printf("ok\r\n");
 }
 
 void SimpleShell::eeprom_clear( string parameters, StreamOutput *stream)
@@ -1317,16 +1314,7 @@ void SimpleShell::jog(string parameters, StreamOutput *stream)
         delta[a]= strtof(p.substr(1).c_str(), NULL);
     }
 
-    bool ok= false;
-    for (int i = 0; i < n_motors; ++i) {
-        if(delta[i] != 0) { ok= true; break; }
-    }
-    if(!ok) {
-        stream->printf("error:no delta jog specified\n");
-        return;
-    }
-
-    THEROBOT.jog(delta, scale);
+    if(!THEROBOT.jog(delta, scale)) stream->printf("error:jog refused\n");
 }
 
 void SimpleShell::help_command(string parameters, StreamOutput *stream)

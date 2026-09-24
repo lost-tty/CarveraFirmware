@@ -18,6 +18,7 @@
 #include <bitset>
 #include <array>
 #include <map>
+#include <vector>
 
 class StepperMotor;
 class Gcode;
@@ -26,6 +27,10 @@ class Pin;
 class Endstops : public Module{
 
     public:
+        using axis_bitmap_t = std::bitset<6>;
+
+        void home_axes(axis_bitmap_t haxis);
+        void home_all();
         static void report_settings(void *self, StreamOutput *stream);
         void report_switches(Gcode *);
         void set_home_offset(Gcode *);
@@ -46,7 +51,6 @@ class Endstops : public Module{
         bool load_old_config();
         bool load_config();
         void get_global_configs();
-        using axis_bitmap_t = std::bitset<6>;
         void home(axis_bitmap_t a);
         void back_off_home(axis_bitmap_t axis);
         void after_home(axis_bitmap_t axis);

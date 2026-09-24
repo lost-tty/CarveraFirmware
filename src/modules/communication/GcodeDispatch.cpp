@@ -12,6 +12,7 @@
 #include "libs/Settings.h"
 #include "Robot.h"
 #include "Conveyor.h"
+#include "MachineTask.h"
 #include "utils/Gcode.h"
 #include "libs/SerialMessage.h"
 #include "libs/StreamOutput.h"
@@ -53,7 +54,7 @@ static Class classify(const gcode::Word &w)
             case 23: return {16, STROKE, 0};
             case 28: return {0, NON_MODAL, uint8_t(AXIS_WORDS | DRAINS)};
             case 30: return {0, NON_MODAL, uint8_t(AXIS_WORDS | NEEDS_HOMED | DRAINS)};
-            case 31: case 32: return {0, NON_MODAL, uint8_t(AXIS_WORDS | DRAINS)};
+            case 29: case 31: case 32: return {0, NON_MODAL, uint8_t(AXIS_WORDS | DRAINS)};
             case 40: case 41: case 42: return {7, CUTTER_COMP, 0};
             case 43: case 49: return {8, TOOL_OFFSET, 0};
             case 54: case 55: case 56: case 57: case 58: case 59: return {12, WCS, 0};
@@ -88,24 +89,75 @@ static bool is_modal_setting(Class c) {
 
 Module *GcodeDispatch::handlers = nullptr;
 
-bool GcodeDispatch::run_mcode(Gcode &gcode)
+bool GcodeDispatch::run_mcode(Gcode &gcode, bool nested)
 {
     const McodeRegistry::Mcode *m= McodeRegistry::find(gcode.m, gcode.subcode);
     if(m == nullptr) return false;
 
     uint8_t when= m->when & ~McodeRegistry::MID_JOB;
 
-    // an ACTION runs where it was written, after the queued moves, without stopping for it
-    if(when == McodeRegistry::ACTION && THECONVEYOR.hold_action(m, gcode))
+    if(when == McodeRegistry::IMMEDIATE) {
+        m->handler(m->owner, &gcode);
         return true;
-
-    // an ACTION lands here only when it could not be held, and then it waits like a BARRIER
-    if(when != McodeRegistry::IMMEDIATE) {
-        if(!THECONVEYOR.wait_for_idle()) return true;   // a halt cut the drain short
     }
 
-    m->handler(m->owner, &gcode);
+    // an ACTION waits for the moves written before it, a BARRIER for all of them
+    MachineTask::Job job= when == McodeRegistry::ACTION ? hold_or_run : run_barrier;
+
+    if(machine_task.on_task()) {
+        job(gcode, machine_task.proof());
+        return true;
+    }
+
+    if(machine_task.post(job, gcode) == MachineTask::k_no_ticket) gcode.error_text= "no machine task";
     return true;
+}
+
+// an empty queue has nothing to wait behind
+void GcodeDispatch::hold_or_run(Gcode &gcode, OnMachine)
+{
+    const McodeRegistry::Mcode *m= McodeRegistry::find(gcode.m, gcode.subcode);
+    if(m == nullptr) return;
+    if(THECONVEYOR.hold_action(m, gcode)) return;
+    m->handler(m->owner, &gcode);
+}
+
+void GcodeDispatch::run_barrier(Gcode &gcode, OnMachine on)
+{
+    const McodeRegistry::Mcode *m= McodeRegistry::find(gcode.m, gcode.subcode);
+    if(m == nullptr) return;
+    if(!THECONVEYOR.wait_for_idle()) return;
+    m->handler(m->owner, &gcode);
+}
+
+void GcodeDispatch::broadcast(Gcode &gcode, OnMachine)
+{
+    for (Module *m = handlers; m != nullptr; m = m->next_gcode_handler) m->on_gcode_received(&gcode);
+
+    // the posting line has already returned, so the error is reported from here
+    if(gcode.error_text.empty()) return;
+    printk("error:%s\n", gcode.error_text.c_str());
+    if(!THECONVEYOR.refuse_after_queued(gcode.line)) sources.clear();
+}
+
+// G4 and G92 read or set where the machine is, so the queue has to run out first
+void GcodeDispatch::broadcast_drained(Gcode &gcode, OnMachine on)
+{
+    if(!THECONVEYOR.wait_for_idle()) return;
+    broadcast(gcode, on);
+}
+
+void GcodeDispatch::run_gcode(Gcode &gcode, uint8_t flags, bool nested)
+{
+    MachineTask::Job job= (flags & DRAINS) ? broadcast_drained : broadcast;
+
+    if(!machine_task.on_task()) {
+        if(machine_task.post(job, gcode) == MachineTask::k_no_ticket)
+            gcode.error_text= "no machine task";
+        return;
+    }
+
+    job(gcode, machine_task.proof());
 }
 
 void GcodeDispatch::add_handler(Module *module)
@@ -170,26 +222,22 @@ void GcodeDispatch::run_mdi(const SerialMessage &msg)
     run_line(msg);
 }
 
-bool GcodeDispatch::run_line(const SerialMessage &msg)
+bool GcodeDispatch::run_line(const SerialMessage &msg, bool nested)
 {
-    depth++;
-    bool ok= dispatch(msg);
-    depth--;
-    return ok;
+    return dispatch(msg, nested);
 }
 
-bool GcodeDispatch::run_line(const std::string &line, StreamOutput *stream)
+bool GcodeDispatch::run_line(const std::string &line, StreamOutput *stream, bool nested)
 {
-    return run_line(SerialMessage{stream, line, 0});
+    return dispatch(SerialMessage{stream, line, 0}, nested);
 }
 
-bool GcodeDispatch::dispatch(const SerialMessage &msg)
+bool GcodeDispatch::dispatch(const SerialMessage &msg, bool nested)
 {
     const string &s= msg.message;
 
     size_t i= s.find_first_not_of(" \t");
     if(i == string::npos) {
-        msg.stream->printf("ok\r\n");
         return true;
     }
 
@@ -206,7 +254,7 @@ bool GcodeDispatch::dispatch(const SerialMessage &msg)
 
     gcode::Line parsed; // local: modules may dispatch console lines while a line executes
     if(!parsed.parse(s.c_str() + i, &params)) return fail(msg.stream, parsed.error_text().c_str());
-    return execute(parsed.words(), s.substr(i), msg.stream, msg.line);
+    return execute(parsed.words(), s.substr(i), msg.stream, msg.line, nested);
 }
 
 // "#n = expr" assigns, "#n" prints
@@ -223,7 +271,6 @@ bool GcodeDispatch::parameter_statement(const char *p, StreamOutput *stream)
         if(params.get(n, v)) stream->printf("#%d = %.4f\r\n", n, v);
         else stream->printf("#%d not set\r\n", n);
     }
-    stream->printf("ok\r\n");
     return true;
 }
 
@@ -265,10 +312,9 @@ GcodeDispatch::Gate GcodeDispatch::homed_enough(const gcode::Words &words, Strea
     return PASS;
 }
 
-bool GcodeDispatch::execute(const gcode::Words &words, const string &text, StreamOutput *stream, unsigned int line)
+bool GcodeDispatch::execute(const gcode::Words &words, const string &text, StreamOutput *stream, unsigned int line, bool nested)
 {
     if(words.empty()) {
-        stream->printf("ok\r\n");
         return true;
     }
 
@@ -319,7 +365,8 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
     for (size_t k= 0; k < blocks.size(); k++) {
         Blk &b= blocks[k];
         if(b.motion || !(b.mcs || (b.settings_only && (b.axis || b.feed)))) continue;
-        all.push_back(gcode::Word{'G', 0, float(b.axis || b.mcs ? modal_group_1 : 1), true});
+        all.push_back(gcode::Word{.letter= 'G', .subcode= 0, .has_value= true,
+                                  .value= float(b.axis || b.mcs ? modal_group_1 : 1)});
         block_of.push_back(k);
         size_t pos= order.size();
         while(pos > 0 && (order[pos - 1].block > k || (order[pos - 1].block == k && order[pos - 1].rank > MOTION))) pos--;
@@ -359,46 +406,35 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
             if(i == c.index) index= k;
             k++;
         }
-        Gcode gcode(block_words, index, text, stream, line);
+        Gcode gcode(block_words, index, stream, line);
 
         if(c.rank == MOTION) {
             gcode.mcs= blocks[c.block].mcs;
             // G80 cancels a canned cycle, so the mode goes back to the last plain motion
-            if(depth == 1 && c.index < words.size() && (gcode.g < 4 || (gcode.g >= 81 && gcode.g <= 89))) modal_group_1= gcode.g;
-            if(depth == 1 && gcode.g == 80) modal_group_1= 0;
+            if(!nested && c.index < words.size() && (gcode.g < 4 || (gcode.g >= 81 && gcode.g <= 89))) modal_group_1= gcode.g;
+            if(!nested && gcode.g == 80) modal_group_1= 0;
         }
 
         bool claimed= true;
-        if(gcode.has_m) claimed= run_mcode(gcode);
-        else {
-            // the handler reads or sets where the machine is, so it must see it standing still
-            if(c.index < words.size() && (classify(words[c.index]).flags & DRAINS)) {
-                if(!THECONVEYOR.wait_for_idle()) return true;
-            }
-            for (Module *m = handlers; m != nullptr; m = m->next_gcode_handler) m->on_gcode_received(&gcode);
-        }
+        if(gcode.has_m) claimed= run_mcode(gcode, nested);
+        else if(c.index >= words.size()) run_gcode(gcode, 0, nested);
+        else run_gcode(gcode, c.rank == MOTION ? 0 : classify(words[c.index]).flags, nested);
 
         // a scripted code runs its sub after the modules have seen it, so their handlers still apply;
         // the ok follows when the sub is done, which is the last block of the line by rank
         std::string err;
-        if(scripts != nullptr && depth == 1 && scripts->trigger(gcode, stream, err)) {
+        if(scripts != nullptr && !nested && scripts->trigger(gcode, stream, err)) {
             return err.empty() || fail(stream, err.c_str());
         }
 
         // a macro may claim a code no module does, and a nested line never reaches the trigger
-        if(!claimed && depth == 1) {
+        if(!claimed && !nested) {
             char buf[24];
             snprintf(buf, sizeof(buf), "unsupported M%u", gcode.m);
             return fail(stream, buf);
         }
 
-        if(gcode.is_error) return fail(stream, gcode.txt_after_ok.empty() ? "unknown" : gcode.txt_after_ok.c_str());
-        if(gcode.add_nl) stream->printf("\r\n");
-        if(!gcode.txt_after_ok.empty()) {
-            stream->printf("ok %s\r\n", gcode.txt_after_ok.c_str());
-        } else if(!THEKERNEL->is_ok_per_line() || n + 1 == order.size()) {
-            stream->printf("ok\r\n");
-        }
+        if(!gcode.error_text.empty()) return fail(stream, gcode.error_text.c_str());
     }
     return true;
 }

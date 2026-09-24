@@ -1,3 +1,4 @@
+
 #ifndef FREERTOS_CONFIG_H
 #define FREERTOS_CONFIG_H
 
@@ -9,8 +10,8 @@
 #define configUSE_TICK_HOOK             0
 #define configUSE_TIMERS                1
 #define configUSE_COUNTING_SEMAPHORES   1
-#define configTASK_NOTIFICATION_ARRAY_ENTRIES 2   // 0: the second tick, 1: a block finished
-#define configTIMER_TASK_STACK_DEPTH    256
+#define configTASK_NOTIFICATION_ARRAY_ENTRIES 3   // 0: the second tick, 1: a block finished, 2: motion handed over
+#define configTIMER_TASK_STACK_DEPTH    192
 #define configTIMER_QUEUE_LENGTH        16
 #define configCPU_CLOCK_HZ              ( ( unsigned long ) SystemCoreClock )
 #define configTICK_RATE_HZ              ( ( portTickType ) 1000 )

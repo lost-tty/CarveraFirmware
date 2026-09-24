@@ -458,7 +458,6 @@ void ATCHandler::sub_state(std::string, StreamOutput *stream)
     stream->printf("clamp %s, slot %s\r\n", atc_home_info.clamp_status == CLAMPED ? "clamped" :
                    atc_home_info.clamp_status == LOOSED ? "loosed" : "unhomed",
                    tool_detected ? "occupied" : "empty");
-    stream->printf("ok\r\n");
 }
 
 void ATCHandler::sub_rack(std::string, StreamOutput *stream)
@@ -468,7 +467,6 @@ void ATCHandler::sub_rack(std::string, StreamOutput *stream)
                        anchor1_y + toolrack_offset_y + (i == 0 ? 210 : (6 - i) * 30), toolrack_z);
     }
     stream->printf("probe  x %1.1f  y %1.1f  z %1.1f\r\n", probe_mx_mm, probe_my_mm, probe_mz_mm);
-    stream->printf("ok\r\n");
 }
 
 void ATCHandler::register_params()

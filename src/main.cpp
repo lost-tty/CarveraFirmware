@@ -19,6 +19,7 @@
 #include "modules/utils/wifi/WifiProvider.h"
 #include "modules/utils/webserver/WebServer.h"
 #include "modules/robot/Conveyor.h"
+#include "modules/robot/MachineTask.h"
 #include "modules/robot/Robot.h"
 #include "modules/utils/simpleshell/SimpleShell.h"
 #include "modules/utils/player/Player.h"
@@ -236,6 +237,7 @@ void init() {
     
     THEKERNEL->step_ticker.start();
     THEKERNEL->slow_ticker.start();
+    machine_task.start();
 }
 
 // no printf: this can run on the 512 byte main stack with interrupts off, and vfprintf
@@ -259,8 +261,8 @@ void vTaskMainLoop(void *pvParameters) {
     uint16_t cnt = 0;
 
     init();
-    THEROBOT.home_on_startup(); // a boot script may assume a referenced machine
-    scripts.boot();
+
+    machine_task.post_startup();
 
     printk("Mainloop started\n");
 
@@ -270,11 +272,7 @@ void vTaskMainLoop(void *pvParameters) {
             leds[1]= (cnt++ & 0x1000) ? 1 : 0;
         }
 
-        watchdog.alive();
-        THEKERNEL->dispatch_halt();
-        THEKERNEL->call_event(ON_MAIN_LOOP);
-        THEKERNEL->call_event(ON_IDLE);
-
+        THEKERNEL->serve_main();
         vTaskDelay(1);
     }
 }

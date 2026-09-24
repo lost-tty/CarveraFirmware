@@ -8,9 +8,9 @@ namespace gcode {
 
 struct Word {
     char letter;
-    uint8_t subcode; // G and M only
+    uint8_t subcode;  // G and M only
+    bool has_value;   // "G28 X Y": a bare letter reads as 0
     float value;
-    bool has_value; // "G28 X Y": a bare letter reads as 0
 };
 
 class Words {

@@ -457,9 +457,7 @@ void Switch::set_state(bool on)
     if(on) turn_on_switch(-1);
     else turn_off_switch();
 
-    // with no gcode to send we can act now, so a temperature switch can still run a fan
-    // while the main loop is blocked in a heat-and-wait
-    if(this->output_on_command.empty() && this->output_off_command.empty()) on_main_loop(nullptr);
+    drive_output();
 }
 
 void Switch::set_state(bool on, float value)
@@ -468,12 +466,10 @@ void Switch::set_state(bool on, float value)
     else turn_off_switch();
 }
 
-void Switch::on_main_loop(void *argument)
+// pins only; the switch's g code is dispatched from the main loop
+void Switch::drive_output()
 {
-    if(this->switch_changed) {
-        if(this->switch_state) {
-            if(!this->output_on_command.empty()) gcode_dispatch.run_line(this->output_on_command, &StreamOutput::NullStream);
-
+    if(this->switch_state) {
             if(this->output_type == SIGMADELTA) {
                 this->sigmadelta_pin->pwm(this->switch_value); // this requires the value has been set otherwise it switches on to whatever it last was
 
@@ -491,10 +487,7 @@ void Switch::on_main_loop(void *argument)
                 this->pwm_pin->write(confine(this->switch_value, this->min_pwm, this->max_pwm) / 100.0F);
             }
 
-        } else {
-
-            if(!this->output_off_command.empty()) gcode_dispatch.run_line(this->output_off_command, &StreamOutput::NullStream);
-
+    } else {
             if(this->output_type == SIGMADELTA) {
                 this->sigmadelta_pin->set(false);
 
@@ -509,9 +502,18 @@ void Switch::on_main_loop(void *argument)
             } else if (this->output_type == DIGITALPWM) {
             	this->digital_pin->set(false);
             }
-        }
-        this->switch_changed = false;
     }
+}
+
+void Switch::on_main_loop(void *)
+{
+    if(!this->switch_changed) return;
+
+    this->switch_changed = false;
+
+    const std::string &cmd= this->switch_state ? this->output_on_command : this->output_off_command;
+    if(!cmd.empty()) gcode_dispatch.run_line(cmd, &StreamOutput::NullStream);
+    drive_output();
 }
 
 // TODO Make this use InterruptIn
