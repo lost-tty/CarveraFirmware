@@ -38,6 +38,8 @@ enum Flag : uint8_t {
 struct Class { uint8_t group; Rank rank; uint8_t flags; };  // group 0: may be combined freely
 
 static bool is_command(const gcode::Word &w) { return w.letter == 'G' || w.letter == 'M'; }
+static bool is_axis(char letter) { return strchr("XYZABC", letter) != nullptr; }
+static bool is_move_word(char letter) { return strchr("XYZABCIJKRF", letter) != nullptr; }
 
 static Class classify(const gcode::Word &w)
 {
@@ -109,7 +111,7 @@ bool GcodeDispatch::run_mcode(Gcode &gcode, bool nested)
         return true;
     }
 
-    if(!machine_task.post(job, gcode)) gcode.error_text= "no machine task";
+    if(!machine_task.post(job, gcode)) gcode.error_text= "machine busy";
     return true;
 }
 
@@ -152,7 +154,7 @@ void GcodeDispatch::run_gcode(Gcode &gcode, uint8_t flags, bool nested)
     MachineTask::Job job= (flags & DRAINS) ? broadcast_drained : broadcast;
 
     if(!machine_task.on_task()) {
-        if(!machine_task.post(job, gcode)) gcode.error_text= "no machine task";
+        if(!machine_task.post(job, gcode)) gcode.error_text= "machine busy";
         return;
     }
 
@@ -286,7 +288,11 @@ GcodeDispatch::Gate GcodeDispatch::allowed_while_halted(const gcode::Words &word
         }
     }
     for (const gcode::Word &w : words) {
-        if(!is_command(w)) continue;
+        if(!is_command(w)) {
+            if(!is_axis(w.letter)) continue;
+            stream->printf("error:Alarm lock\n");
+            return REFUSED;
+        }
         if(classify(w).flags & WHEN_HALTED) continue;
         stream->printf("error:Alarm lock\n");
         return REFUSED;
@@ -334,7 +340,7 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
         const gcode::Word &w= words[i];
         Blk *b= &blocks.back();
         if(!is_command(w)) {
-            if(strchr("XYZABC", w.letter)) b->axis= true;
+            if(is_axis(w.letter)) b->axis= true;
             if(w.letter == 'F') b->feed= true;
             block_of[i]= blocks.size() - 1;
             continue;
@@ -381,7 +387,7 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
     }
     for (size_t i= 0; i < words.size(); i++) {
         const gcode::Word &w= words[i];
-        if(!w.has_value && (blocks[block_of[i]].motion || blocks[block_of[i]].axis_code) && strchr("XYZABCIJKRF", w.letter)) {
+        if(!w.has_value && (blocks[block_of[i]].motion || blocks[block_of[i]].axis_code) && is_move_word(w.letter)) {
             char buf[24];
             snprintf(buf, sizeof(buf), "%c needs a value", w.letter);
             return fail(stream, buf);
