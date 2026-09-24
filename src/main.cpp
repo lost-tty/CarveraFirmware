@@ -252,7 +252,6 @@ extern "C" void __malloc_unlock(struct _reent *)
     if(xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) xTaskResumeAll();
 }
 
-// the tick alone wakes it within a millisecond
 extern "C" void vApplicationIdleHook(void)
 {
     __WFI();

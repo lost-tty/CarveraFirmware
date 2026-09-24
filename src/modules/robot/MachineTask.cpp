@@ -81,9 +81,6 @@ void MachineTask::publish(uint8_t slot)
     xTaskNotifyGiveIndexed(handle, k_notify_index);
 }
 
-// a halt from an interrupt sets no bits, so the wait comes back on its own to notice it
-// every end of a wait is a bit, so they are waited on together and whichever arrives says what
-// happened: the machine ran dry, or it stopped and will not
 uint32_t MachineTask::motion_mark() const
 {
     return THECONVEYOR.queue_mark();
@@ -297,7 +294,6 @@ void MachineTask::finish_clear()
 {
     clearing= false;
 
-    // a drain or stop asked for before the halt describes a job that is over
     taskENTER_CRITICAL();
     draining= stopping= false;
     taskEXIT_CRITICAL();
