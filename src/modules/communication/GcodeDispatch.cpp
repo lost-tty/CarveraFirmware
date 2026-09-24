@@ -139,7 +139,7 @@ void GcodeDispatch::broadcast(Gcode &gcode, OnMachine)
     // the posting line has already returned, so the error is reported from here
     if(gcode.error_text.empty()) return;
     printk("error:%s\n", gcode.error_text.c_str());
-    if(!THECONVEYOR.refuse_after_queued(gcode.line)) sources.clear();
+    if(!sources.stop_after_queued(gcode.line)) sources.clear();
 }
 
 // G4 and G92 read or set where the machine is, so the queue has to run out first

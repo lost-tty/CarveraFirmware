@@ -35,14 +35,16 @@ class Player : public Module, public Source, public Killable {
         void on_module_loaded();
         static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
         bool is_playing() const { return playing_file; }
+        bool m1_stops_program() const { return m1_stops; }
         bool get_progress(struct pad_progress &p);
         void on_gcode_received(Gcode *argument);
         void program_stop(Gcode *);
         void optional_stop(Gcode *);
         void suspend_gcode(Gcode *);
+        void optional_stop_mode(Gcode *);
         void resume_gcode(Gcode *);
 
-        McodeRegistry::Mcode m0, m1, m600, m601;
+        McodeRegistry::Mcode m0, m1, m333, m334, m600, m601;
         void kill() override {}
         void cleanup() override;
         Source::Result next(SerialMessage &msg) override;
@@ -57,7 +59,7 @@ class Player : public Module, public Source, public Killable {
         void progress_command( string parameters, StreamOutput* stream );
         void abort_command( string parameters, StreamOutput* stream );
         void suspend_command( string parameters, StreamOutput* stream );
-        void suspend_now( StreamOutput* stream );
+        void suspend_now();
         void resume_command( string parameters, StreamOutput* stream );
         void goto_command( string parameters, StreamOutput* stream );
         void test_command(string parameters, StreamOutput* stream );
@@ -70,24 +72,14 @@ class Player : public Module, public Source, public Killable {
         // bool check_cluster(const char *gcode_str, float *x_value, float *y_value, float *distance, float *slope, float *s_value);
 
         string filename;
-        StreamOutput* current_stream;
-        StreamOutput* reply_stream;
-
+        bool verbose;
 
         GcodeFile file;
         TickType_t start_time;
-        unsigned long goto_line;
-        unsigned int playing_lines;
-        uint8_t current_motion_mode;
-        float saved_position[3]; // only saves XYZ
-        float slope;
-        std::map<uint16_t, float> saved_temperatures;
         struct {
             bool playing_file:1;
-            bool leave_heaters_on:1;
-            bool override_leave_heaters_on:1;
+            bool m1_stops:1;   // M334 turns it on, M333 off
             bool suspend_pending:1;   // asked for while a script was on top, taken at the next file line
-            bool laser_clustering:1;
         };
 };
 

@@ -43,7 +43,7 @@ void Scripts::on_module_loaded()
     gcode_dispatch.set_script_hook(this);
     SimpleShell::add_command(shell_slot, "macro", &Scripts::shell, this,
                              "macro list | params | check | run <sub> [args] | trace on|off");
-    load(&THEKERNEL->streams);
+    load(&StreamOutput::AllStreams);
 }
 
 #define SD_DIR SCRIPTS_DIR
@@ -107,15 +107,15 @@ bool Scripts::run(const char *sub, const float *args, unsigned nargs, StreamOutp
     name= sub;
     reply= stream;
     preamble= true;
-    THEROBOT.push_state();
+    machine_task.push_modal_state();
     sources.push(this);
     return true;
 }
 
 void Scripts::finish()
 {
-    THEROBOT.pop_state();
-    THEROBOT.set_keepout(true);
+    machine_task.pop_modal_state();
+    machine_task.enforce_keepout();
     atc_handler.set_state(0);
     reply= nullptr;
 }
@@ -177,11 +177,9 @@ Source::Result Scripts::next(SerialMessage &msg)
             return DONE;
         }
         case script::Runner::ERROR: {
-            StreamOutput *caller= reply;
             finish();
             std::string where= macros.located(err, runner->error_offset());
             printk("error:script %s %s\n", name.c_str(), where.c_str());
-            if(caller != nullptr && caller != &THEKERNEL->streams) caller->printf("error:script %s %s\n", name.c_str(), where.c_str());
             halt(SCRIPT);
             return DONE;
         }
@@ -203,7 +201,7 @@ void Scripts::file_changed(const char *path)
 {
     if(path == nullptr || strncmp(path, SD_DIR, sizeof(SD_DIR) - 1) != 0) return;
     loaded= false;
-    load(&THEKERNEL->streams);
+    load(&StreamOutput::AllStreams);
 }
 
 bool Scripts::run_sub(const char *sub, const float *args, unsigned nargs)

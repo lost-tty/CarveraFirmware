@@ -109,12 +109,18 @@
 // The Robot converts GCodes into actual movements, and then adds them to the Planner, which passes them to the Conveyor so they can be added to the queue
 // It takes care of cutting arcs into segments, same thing for line that are too long
 
-void Robot::init()
+// G21 G90 G90.1 G17. work offsets not touched
+void Robot::reset_modal_state()
 {
     this->inch_mode = false;
     this->absolute_mode = true;
     this->absolute_arc_centre = false;
     this->select_plane(X_AXIS, Y_AXIS, Z_AXIS);
+}
+
+void Robot::init()
+{
+    reset_modal_state();
     memset(this->machine_position, 0, sizeof machine_position);
     memset(this->compensated_machine_position, 0, sizeof compensated_machine_position);
     this->arm_solution = NULL;
@@ -149,8 +155,6 @@ void Robot::on_module_loaded()
     ADD_MCODE(m220, 220, BESIDE_JOB, Robot::speed_override);
     ADD_MCODE(m331, 331, IMMEDIATE, Robot::vacuum_mode);
     ADD_MCODE(m332, 332, IMMEDIATE, Robot::vacuum_mode);
-    ADD_MCODE(m333, 333, IMMEDIATE, Robot::optional_stop_mode);
-    ADD_MCODE(m334, 334, IMMEDIATE, Robot::optional_stop_mode);
     ADD_MCODE(m400, 400, BARRIER,   Robot::wait_for_moves);
     ADD_MCODE(m665, 665, IMMEDIATE, Robot::arm_solution_gcode);
 
@@ -1101,14 +1105,6 @@ void Robot::vacuum_mode(Gcode *gcode)
     }
 
     gcode->stream->printf("turning vacuum mode %s\r\n", on ? "on" : "off");
-}
-
-// M333, M334: whether M1 stops the program
-void Robot::optional_stop_mode(Gcode *gcode)
-{
-    bool on= gcode->m == 334;
-    THEKERNEL->set_optional_stop_mode(on);
-    gcode->stream->printf("turning optional stop mode %s\r\n", on ? "on" : "off");
 }
 
 // M400: nothing to do, the barrier already drained the queue

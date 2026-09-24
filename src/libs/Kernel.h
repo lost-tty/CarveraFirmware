@@ -80,18 +80,8 @@ class Kernel {
 
         void set_vacuum_mode(bool f) { vacuum_mode = f; }
         bool get_vacuum_mode() const { return vacuum_mode; }
-
-        void set_optional_stop_mode(bool f) { optional_stop_mode = f; }
-        bool get_optional_stop_mode() const { return optional_stop_mode; }
-
         void set_sleeping(bool f) { sleeping = f; }
         bool is_sleeping() const { return sleeping; }
-
-        void set_suspending(bool f) { suspending = f; }
-        bool is_suspending() const { return suspending; }
-
-        void set_waiting(bool f) { waiting = f; }
-        bool is_waiting() const { return waiting; }
 
         std::string get_query_string();
 
@@ -121,10 +111,7 @@ class Kernel {
             bool bad_mcu:1;
             bool laser_mode:1;
             bool vacuum_mode:1;
-            bool optional_stop_mode:1;
             bool sleeping:1;
-            bool suspending: 1;
-            bool waiting: 1;
         };
 
 };

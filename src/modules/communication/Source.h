@@ -33,16 +33,23 @@ public:
     SimpleShell::Registered shell_slot;
     bool push(Source *s);   // false when already stacked
     void clear();           // aborts every source, top first
-    void suspend();         // freezes what is running; a source pushed afterwards still feeds
+    void suspend();
     void resume();
     Source *top() const { return stack.empty() ? nullptr : stack.back(); }
     bool empty() const { return stack.empty(); }
     bool active() const { return !stack.empty() && !frozen_all(); } // something will feed; MDI would interleave
+    bool suspended() const { return frozen != 0; }
+
+    // a line refused while earlier moves are still queued: they finish, then the job stops
+    bool stop_after_queued(unsigned int line);
 
 private:
     bool frozen_all() const;
     std::vector<Source *> stack;
     unsigned frozen= 0;     // depth of the stack when suspended
+    uint32_t stop_after= 0; // the queue mark the refused line was written before
+    unsigned int stop_line= 0;
+    bool stopping= false;
 };
 
 extern SourceStack sources;

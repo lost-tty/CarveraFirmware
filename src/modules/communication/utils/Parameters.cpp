@@ -46,7 +46,7 @@ bool Parameters::get(int n, float &v) const
             }
             return true;
         }
-        case 3033: v = THEKERNEL->get_optional_stop_mode(); return true;
+        case 3033: v = player.m1_stops_program(); return true;
         case 5021: case 5022: case 5023:
             machine_position(mpos);
             v = mpos[n - 5021];

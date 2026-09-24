@@ -51,7 +51,6 @@ class Robot : public Module {
         void soft_endstops_gcode(Gcode *);
         void speed_override(Gcode *);
         void vacuum_mode(Gcode *);
-        void optional_stop_mode(Gcode *);
         void wait_for_moves(Gcode *);
         void arm_solution_gcode(Gcode *);
         void report_settings(StreamOutput *stream);
@@ -140,7 +139,7 @@ class Robot : public Module {
         wcs_t wcs2mcs(const wcs_t &pos) const;
         wcs_t wcs2mcs(const float *pos) const { return wcs2mcs(wcs_t(pos[X_AXIS], pos[Y_AXIS], pos[Z_AXIS])); }
 
-        void set_absolute_mode() { absolute_mode = true; }
+        void reset_modal_state();
 
         // homing and probing drive the actuators directly
         class NoSegmentation {
@@ -250,7 +249,7 @@ class Robot : public Module {
         float soft_endstop_min[3], soft_endstop_max[3];
         Settings::Sink settings_slot;
         McodeRegistry::Mcode m2, m30, m17, m18, m84, m92, m114, m120, m121;
-        McodeRegistry::Mcode m203, m204, m205, m211, m220, m331, m332, m333, m334, m400, m665;
+        McodeRegistry::Mcode m203, m204, m205, m211, m220, m331, m332, m400, m665;
         static const uint8_t k_keepout_zones= 4;
         KeepOut keepout[k_keepout_zones];
         float keepout_tool_z;

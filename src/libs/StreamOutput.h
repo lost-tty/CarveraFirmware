@@ -19,6 +19,7 @@
 // send() emits one Makera frame (Frame.h), printf() emits INFO frames; puts()/putc() are the raw transport.
 
 class NullStreamOutput;
+class AllStreamsOutput;
 
 class StreamOutput {
     public:
@@ -39,6 +40,7 @@ class StreamOutput {
         virtual bool is_transferring() const { return false; }
 
         static NullStreamOutput NullStream;
+        static AllStreamsOutput AllStreams;
 };
 
 class NullStreamOutput : public StreamOutput {
@@ -46,6 +48,13 @@ class NullStreamOutput : public StreamOutput {
         int printf(const char *format, ...) { return 0; }
         void send(uint8_t type, const void *payload, size_t len) {}
         int puts(const char* str, int size = 0) { return strlen(str); }
+};
+
+class AllStreamsOutput : public StreamOutput {
+    public:
+        int vprintf(const char *format, va_list args);
+        int puts(const char* str, int size = 0);
+        void send(uint8_t type, const void *payload, size_t len);
 };
 
 #endif

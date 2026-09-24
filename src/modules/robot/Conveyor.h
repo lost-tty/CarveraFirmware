@@ -45,13 +45,12 @@ public:
     // false: nothing is queued to wait on, so the caller runs it now
     bool hold_action(const McodeRegistry::Mcode *code, const Gcode &gcode);
 
-    // a line refused while earlier moves are still queued: they finish, then the job stops
-    bool refuse_after_queued(unsigned int line);
-    bool refusal_due(unsigned int &line);
+    uint32_t queue_mark() const { return queued; }
+    bool passed(uint32_t mark) const { return finished >= mark; }
 
-    bool refused() const { return refusal_pending; }
     bool is_idle() const;
     bool is_queue_empty() { return queue.is_empty(); };
+    unsigned int running_line() const;
     float get_current_feedrate() const { return current_feedrate; }
 
     friend class Planner; // for queue
@@ -76,9 +75,6 @@ private:
     uint32_t queued{0};
     volatile uint32_t finished{0};
 
-    uint32_t refused_after{0};
-    unsigned int refused_line{0};
-    bool refusal_pending{false};
 
     uint32_t queue_delay_time_ms;
     float current_feedrate{0}; // actual nominal feedrate that current block is running at in mm/sec

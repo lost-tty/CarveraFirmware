@@ -78,6 +78,20 @@ public:
 
     bool post_drain();
     bool idle() const { return (xEventGroupGetBits(state) & k_idle) != 0; }
+    bool full() const { return uxQueueMessagesWaiting(free_slots) == 0; }
+
+    uint32_t motion_mark() const;
+    bool motion_passed(uint32_t mark) const;
+
+    unsigned int running_line() const;
+
+    bool homed() const;
+    bool prepare_for_job();
+    void enforce_keepout();
+
+    void push_modal_state();
+    void pop_modal_state();
+
     void drop_all();
 
     void halt(uint8_t reason, const char *msg = nullptr);

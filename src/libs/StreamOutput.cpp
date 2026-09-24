@@ -1,7 +1,25 @@
 #include "StreamOutput.h"
+#include "Kernel.h"
+#include "StreamOutputPool.h"
 #include "Frame.h"
 
 NullStreamOutput StreamOutput::NullStream;
+AllStreamsOutput StreamOutput::AllStreams;
+
+int AllStreamsOutput::vprintf(const char *format, va_list args)
+{
+    return THEKERNEL->streams.vprintf(format, args);
+}
+
+int AllStreamsOutput::puts(const char *str, int size)
+{
+    return THEKERNEL->streams.puts(str, size);
+}
+
+void AllStreamsOutput::send(uint8_t type, const void *payload, size_t len)
+{
+    THEKERNEL->streams.send(type, payload, len);
+}
 
 // longer payloads are split into several frames of the same type
 static const size_t MAX_FRAME_PAYLOAD = 512;

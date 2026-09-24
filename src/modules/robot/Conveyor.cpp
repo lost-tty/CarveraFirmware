@@ -128,6 +128,13 @@ void Conveyor::collect()
 // see if we are idle
 // this checks the block queue is empty, and that the step queue is empty and
 // checks that all motors are no longer moving
+unsigned int Conveyor::running_line() const
+{
+    const Block *block= THEKERNEL->step_ticker.get_current_block();
+    if(block != nullptr && block->is_ready && block->is_g123) return block->line;
+    return 0;
+}
+
 bool Conveyor::is_idle() const
 {
     if(queue.is_empty()) {
@@ -283,27 +290,6 @@ bool Conveyor::wait_for_block(bool &halted)
     gcode gets stuck in the queue, this is bad. Current work around is to call
     this when the queue in not full and streaming has stopped
 */
-// false: nothing is queued ahead of it, so the caller stops the job itself
-bool Conveyor::refuse_after_queued(unsigned int line)
-{
-    if(queued == finished) return false;
-    if(refusal_pending) return true;   // the first refusal is the one that stopped the job
-
-    refused_after= queued;
-    refused_line= line;
-    refusal_pending= true;
-    return true;
-}
-
-// the moves written before the refused line have run, so the job can be stopped now
-bool Conveyor::refusal_due(unsigned int &line)
-{
-    if(!refusal_pending || finished < refused_after) return false;
-    line= refused_line;
-    refusal_pending= false;
-    return true;
-}
-
 void Conveyor::force_queue()
 {
     force_fetch= true;
@@ -336,7 +322,6 @@ bool Conveyor::stop_soon()
 // the blocks are dropped, not run, so there is nothing to wait for
 void Conveyor::flush_queue()
 {
-    refusal_pending= false;
     flush= true;
 }
 

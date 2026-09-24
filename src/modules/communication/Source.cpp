@@ -6,7 +6,6 @@
 #include "libs/StreamOutput.h"
 #include "GcodeDispatch.h"
 #include "SimpleShell.h"
-#include "Conveyor.h"
 #include "utils.h"
 
 #include <algorithm>
@@ -37,22 +36,22 @@ bool SourceStack::push(Source *s)
 
 bool SourceStack::frozen_all() const
 {
-    return THEKERNEL->is_suspending() && stack.size() <= frozen;
+    return suspended() && stack.size() <= frozen;
 }
 
 void SourceStack::on_main_loop(void *)
 {
-    if(stack.empty() || machine_task.is_halted() || THEKERNEL->is_waiting() || frozen_all()) return;
+    if(stack.empty() || machine_task.is_halted() || frozen_all()) return;
 
-    // a line refused while earlier moves are still queued stops the job once they have run
-    unsigned int refused;
-    if(THECONVEYOR.refusal_due(refused)) {
-        printk("job stopped at line %u\n", refused);
+    if(machine_task.full()) return;
+
+    if(stopping) {
+        if(!machine_task.motion_passed(stop_after)) return;   // the job is over, it just has to finish moving
+        stopping= false;
+        printk("job stopped at line %u\n", stop_line);
         clear();
         return;
     }
-
-    if(THECONVEYOR.refused()) return;   // the job is over, it just has to finish moving
 
     Source *s= stack.back();
     SerialMessage msg{&StreamOutput::NullStream, "", 0};
@@ -60,7 +59,7 @@ void SourceStack::on_main_loop(void *)
         case Source::LINE:
             // a halt inside clears the stack, s is not touched after this
             if(!gcode_dispatch.run_line(msg) && !stack.empty()) {
-                if(THECONVEYOR.refuse_after_queued(msg.line)) break;
+                if(stop_after_queued(msg.line)) break;
                 printk("job stopped at line %u\n", msg.line);
                 clear();
             }
@@ -86,16 +85,31 @@ void SourceStack::clear()
         s->abort();
     }
     frozen= 0;
+    stopping= false;
 }
 
+// false: nothing is queued ahead of it, so the caller stops the job itself
+bool SourceStack::stop_after_queued(unsigned int line)
+{
+    uint32_t mark= machine_task.motion_mark();
+    if(machine_task.motion_passed(mark)) return false;
+    if(stopping) return true;   // the first refusal is the one that stopped the job
+
+    stop_after= mark;
+    stop_line= line;
+    stopping= true;
+    return true;
+}
+
+// the hold stops at a block boundary, so the queue survives and resuming just lets it run
 void SourceStack::suspend()
 {
     frozen= stack.size();
-    THEKERNEL->set_suspending(true);
+    machine_task.hold(true);
 }
 
 void SourceStack::resume()
 {
     frozen= 0;
-    THEKERNEL->set_suspending(false);
+    machine_task.hold(false);
 }

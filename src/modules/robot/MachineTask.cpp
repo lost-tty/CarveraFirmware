@@ -84,6 +84,46 @@ void MachineTask::publish(uint8_t slot)
 // a halt from an interrupt sets no bits, so the wait comes back on its own to notice it
 // every end of a wait is a bit, so they are waited on together and whichever arrives says what
 // happened: the machine ran dry, or it stopped and will not
+uint32_t MachineTask::motion_mark() const
+{
+    return THECONVEYOR.queue_mark();
+}
+
+bool MachineTask::motion_passed(uint32_t mark) const
+{
+    return THECONVEYOR.passed(mark);
+}
+
+unsigned int MachineTask::running_line() const
+{
+    return THECONVEYOR.running_line();
+}
+
+bool MachineTask::homed() const
+{
+    return THEROBOT.is_homed_all_axes();
+}
+
+void MachineTask::push_modal_state()
+{
+    THEROBOT.push_state();
+}
+
+void MachineTask::pop_modal_state()
+{
+    THEROBOT.pop_state();
+}
+
+bool MachineTask::prepare_for_job()
+{
+    return post([](Gcode &, OnMachine) { THEROBOT.reset_modal_state(); }, Gcode{});
+}
+
+void MachineTask::enforce_keepout()
+{
+    THEROBOT.set_keepout(true);
+}
+
 bool MachineTask::wait_idle(EventBits_t ends)
 {
     while(true) {

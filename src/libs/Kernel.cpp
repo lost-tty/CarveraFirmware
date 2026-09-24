@@ -18,6 +18,7 @@
 #include "libs/StepTicker.h"
 #include "libs/Watchdog.h"
 #include "modules/robot/MachineTask.h"
+#include "modules/communication/Source.h"
 #include "modules/communication/SerialConsole.h"
 #include "modules/communication/WirelessProbe.h"
 #include "modules/robot/Planner.h"
@@ -71,10 +72,7 @@ void Kernel::init()
     bad_mcu= true;
     laser_mode = false;
     vacuum_mode = false;
-    optional_stop_mode = false;
     sleeping = false;
-    waiting = false;
-    suspending = false;
 
     // serial first at fixed baud rate (DEFAULT_SERIAL_BAUD_RATE) so config can report errors to serial
     // Set to UART0, this will be changed to use the same UART as MRI if it's enabled
@@ -177,10 +175,8 @@ uint8_t Kernel::get_state()
     bool homing = endstops.is_homing();
     if (sleeping) {
     	return SLEEP;
-    } else if (suspending) {
+    } else if (sources.suspended()) {
     	return SUSPEND;
-    } else if (waiting) {
-    	return WAIT;
     } else if(machine_task.is_halted()) {
     	return ALARM;
     } else if (homing) {
