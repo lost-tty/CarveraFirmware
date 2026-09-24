@@ -1,6 +1,6 @@
 (X back and forth by #1 mm at feed #2, #3 times)
 o<test_jog> sub
-  G21 G90 G91.1 G17 (mm, absolute, arc centre relative, XY plane)
+  G21 G90 G91.1 G17
   G91
   o1 repeat [#3]
     G1 X#1 F#2

@@ -1,6 +1,6 @@
 (trace the work area outline with the probe laser: #1 #2 origin, #3 #4 far corner)
 o<margin> sub
-  G21 G90 G91.1 G17 (mm, absolute, arc centre relative, XY plane)
+  G21 G90 G91.1 G17
   M497.4
   M494.1
   G53 G0 Z#<_clearance_z>

@@ -378,18 +378,6 @@ bool Player::get_progress(struct pad_progress &p)
     return true;
 }
 
-/**
-Suspend a print in progress
-1. send pause to upstream host, or pause if printing from sd
-2. wait for empty queue
-3. save the current position, extruder position, temperatures - any state that would need to be restored
-4. retract by specifed amount either on command line or in config
-5. turn off heaters.
-6. optionally run after_suspend gcode (either in config or on command line)
-
-User may jog or remove and insert filament at this point, extruding or retracting as needed
-
-*/
 void Player::suspend_command(string parameters, StreamOutput *stream )
 {
     if (sources.suspended()) {
@@ -416,13 +404,6 @@ void Player::suspend_now()
     printk("Suspended, resume to continue playing\n");
 }
 
-/**
-resume the suspended print
-1. restore the temperatures and wait for them to get up to temp
-2. optionally run before_resume gcode if specified
-3. restore the position it was at and E and any other saved state
-4. resume sd print or send resume upstream
-*/
 void Player::resume_command(string parameters, StreamOutput *stream )
 {
     if (this->suspend_pending) {
