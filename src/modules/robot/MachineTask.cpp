@@ -5,6 +5,9 @@
 #include "Scripts.h"
 #include "libs/Kernel.h"
 #include "libs/Watchdog.h"
+#include "libs/Killable.h"
+
+#include <cstring>
 #include "libs/Logging.h"
 #include "mri.h"
 
@@ -12,6 +15,13 @@ MachineTask machine_task;
 
 void MachineTask::start()
 {
+    free_slots= xQueueCreateStatic(k_max_tickets, sizeof(uint8_t), free_store, &free_q);
+    full_slots= xQueueCreateStatic(k_max_tickets, sizeof(uint8_t), full_store, &full_q);
+    state= xEventGroupCreateStatic(&state_store);
+    xEventGroupSetBits(state, k_idle);
+
+    for (uint8_t i = 0; i < k_max_tickets; ++i) xQueueSend(free_slots, &i, 0);
+
     xTaskCreateStatic(run, "Machine", k_stack_words, this, k_priority, stack, &task);
 }
 
@@ -30,53 +40,92 @@ void MachineTask::run(void *self)
     me->loop();
 }
 
-MachineTask::Ref MachineTask::post(Job job, const Gcode &gcode)
+bool MachineTask::post(Job job, const Gcode &gcode)
 {
-    if(handle == nullptr || xTaskGetCurrentTaskHandle() == handle) return k_no_ticket;
+    uint8_t slot;
+    if(!take_slot(slot)) return false;
 
-    while(count >= k_max_tickets) {
-        if(THEKERNEL->is_halted()) return k_no_ticket;
-        wait_for_room();
+    ring[slot].kind= Ticket::LINE;
+    ring[slot].job= job;
+    ring[slot].gcode= gcode;
+
+    publish(slot);
+    return true;
+}
+
+// blocks until a slot is free. the wait is bounded so the watchdog keeps being fed
+bool MachineTask::take_slot(uint8_t &slot)
+{
+    if(xTaskGetCurrentTaskHandle() == handle) return false;
+
+    while(!halted) {
+        if(xQueueReceive(free_slots, &slot, pdMS_TO_TICKS(k_room_wait_ms)) == pdTRUE) {
+            watchdog.alive();
+            return true;
+        }
+        watchdog.alive();
     }
+    return false;
+}
 
-    ring[head].kind= Ticket::LINE;
-    ring[head].job= job;
-    ring[head].gcode= gcode;
-
-    Ref ticket;
-    taskENTER_CRITICAL();
-    if(THEKERNEL->is_halted()) {
-        taskEXIT_CRITICAL();
-        return k_no_ticket;
-    }
-    ticket= ring[head].ticket= ++posted;
-    head= (head + 1) % k_max_tickets;
-    count++;
-    taskEXIT_CRITICAL();
+void MachineTask::publish(uint8_t slot)
+{
+    // together, or the machine task can look between the two and call the machine idle.
+    // the scheduler, not the interrupts: both of these are FreeRTOS calls
+    vTaskSuspendAll();
+    xQueueSend(full_slots, &slot, 0);   // a slot this task owns always fits
+    xEventGroupClearBits(state, k_idle);
+    xTaskResumeAll();
 
     xTaskNotifyGiveIndexed(handle, k_notify_index);
-    return ticket;
+}
+
+// a halt from an interrupt sets no bits, so the wait comes back on its own to notice it
+// every end of a wait is a bit, so they are waited on together and whichever arrives says what
+// happened: the machine ran dry, or it stopped and will not
+bool MachineTask::wait_idle(EventBits_t ends)
+{
+    while(true) {
+        EventBits_t bits= xEventGroupGetBits(state);
+        if(bits & k_idle) return true;
+        if(bits & ends) return false;
+
+        watchdog.alive();
+        xEventGroupWaitBits(state, k_idle | ends, pdFALSE, pdFALSE,
+                            pdMS_TO_TICKS(k_room_wait_ms));
+    }
 }
 
 bool MachineTask::post_jog(const float delta[], uint8_t naxis, float scale)
 {
-    if(handle == nullptr || xTaskGetCurrentTaskHandle() == handle) return false;
-    if(naxis > k_max_actuators || THEKERNEL->is_halted()) return false;
-    if(count >= k_max_tickets) return false;
+    if(xTaskGetCurrentTaskHandle() == handle) return false;
+    if(naxis > k_max_actuators || halted) return false;
 
-    ring[head].kind= Ticket::JOG;
-    for (uint8_t i = 0; i < naxis; ++i) ring[head].move.delta[i]= delta[i];
-    ring[head].move.naxis= naxis;
-    ring[head].move.scale= scale;
+    // a queued jog would keep moving after the button is let go, so a full ring drops it
+    uint8_t slot;
+    if(xQueueReceive(free_slots, &slot, 0) != pdTRUE) return false;
 
-    taskENTER_CRITICAL();
-    ring[head].ticket= ++posted;
-    head= (head + 1) % k_max_tickets;
-    count++;
-    taskEXIT_CRITICAL();
+    ring[slot].kind= Ticket::JOG;
+    for (uint8_t i = 0; i < naxis; ++i) ring[slot].move.delta[i]= delta[i];
+    ring[slot].move.naxis= naxis;
+    ring[slot].move.scale= scale;
 
-    xTaskNotifyGiveIndexed(handle, k_notify_index);
+    publish(slot);
     return true;
+}
+
+bool MachineTask::post_move(const float delta[], float rate_mm_s)
+{
+    uint8_t slot;
+    if(!take_slot(slot)) return false;
+
+    ring[slot].kind= Ticket::MOVE;
+    for (uint8_t i = 0; i < k_max_actuators; ++i) ring[slot].move.delta[i]= i < 3 ? delta[i] : 0;
+    ring[slot].move.naxis= 3;
+    ring[slot].move.scale= rate_mm_s;
+
+    publish(slot);
+    return post_drain();
 }
 
 // the boot script may read positions, which only mean anything after homing
@@ -88,83 +137,62 @@ static void startup()
 
 void MachineTask::post_startup()
 {
-    if(post([](Gcode &, OnMachine) { startup(); }, Gcode{}) == k_no_ticket)
+    if(!post([](Gcode &, OnMachine) { startup(); }, Gcode{}))
         printk("ERROR: no machine task, the machine will not move\n");
 }
 
+// true when the machine came to a stop, whatever brought it there
 bool MachineTask::post_stop()
 {
-    Ref t= post([](Gcode &, OnMachine) { THECONVEYOR.stop_soon(); }, Gcode{});
-    if(t == k_no_ticket) return false;
-    wait_for(t);
-    return !THEKERNEL->is_halted();
+    vTaskSuspendAll();
+    xEventGroupClearBits(state, k_idle);
+    stopping= true;
+    xTaskResumeAll();
+
+    xTaskNotifyGiveIndexed(handle, k_notify_index);
+    return wait_idle(k_halted);
 }
 
 bool MachineTask::post_drain()
 {
-    if(on_task()) return THECONVEYOR.wait_for_idle();
+    vTaskSuspendAll();
+    xEventGroupClearBits(state, k_idle);
+    draining= true;
+    xTaskResumeAll();
 
-    Ref t= post([](Gcode &, OnMachine) { THECONVEYOR.wait_for_idle(); }, Gcode{});
-    if(t == k_no_ticket) return false;
-    wait_for(t);
-    return !THEKERNEL->is_halted();
-}
-
-void MachineTask::wait_for(Ref ticket)
-{
-    while(!done(ticket) && !THEKERNEL->is_halted()) wait_for_room();
-}
-
-// serving the main loop from here would post the next job line too, recursing without bound
-void MachineTask::wait_for_room()
-{
-    waiter= xTaskGetCurrentTaskHandle();
-    watchdog.alive();
-    ulTaskNotifyTakeIndexed(k_room_notify_index, pdTRUE, pdMS_TO_TICKS(k_room_wait_ms));
-    waiter= nullptr;
-}
-
-void MachineTask::wake_waiter()
-{
-    TaskHandle_t t= waiter;
-    if(t != nullptr) xTaskNotifyGiveIndexed(t, k_room_notify_index);
+    xTaskNotifyGiveIndexed(handle, k_notify_index);
+    return wait_idle();
 }
 
 void MachineTask::drop_all()
 {
-    taskENTER_CRITICAL();
-    tail= head;
-    count= 0;
-    served= posted;
-    taskEXIT_CRITICAL();
-
-    wake_waiter();
+    uint8_t slot;
+    while(xQueueReceive(full_slots, &slot, 0) == pdTRUE) xQueueSend(free_slots, &slot, 0);
 }
 
 void MachineTask::serve_tickets()
 {
-    while(count > 0) {
-        if(THEKERNEL->is_halted()) {
+    uint8_t slot;
+    while(xQueueReceive(full_slots, &slot, 0) == pdTRUE) {
+        if(halted) {
+            xQueueSend(free_slots, &slot, 0);
             drop_all();
             return;
         }
 
-        Ticket t= ring[tail];
+        xEventGroupClearBits(state, k_idle);
 
-        taskENTER_CRITICAL();
-        tail= (tail + 1) % k_max_tickets;
-        count--;
-        taskEXIT_CRITICAL();
+        Ticket t= ring[slot];
+        xQueueSend(free_slots, &slot, 0);   // the copy is ours, the slot can be refilled
 
         if(t.kind == Ticket::JOG) {
             THEROBOT.jog_move(t.move.delta, t.move.naxis, t.move.scale);
+        } else if(t.kind == Ticket::MOVE) {
+            THEROBOT.delta_move_sync(t.move.delta, t.move.scale, t.move.naxis);
         } else {
             t.job(t.gcode, OnMachine{});
         }
 
-        // the job may have dropped the ring, which already advanced served past this
-        if(t.ticket > served) served= t.ticket;
-        wake_waiter();
     }
 }
 
@@ -176,29 +204,115 @@ void MachineTask::tick()
     ulTaskNotifyTakeIndexed(k_notify_index, pdTRUE, pdMS_TO_TICKS(k_poll_ms));
 }
 
+// from interrupts too, so it only sets flags and cuts power: no queue, no waiting
+void MachineTask::halt(uint8_t why, const char *what)
+{
+    if(!halted) {
+        reason= why;
+        strncpy(msg, what != nullptr ? what : "halted", sizeof(msg) - 1);
+        msg[sizeof(msg) - 1]= '\0';
+    }
+    halted= true;
+    Killable::kill_all();
+    pending= true;
+}
+
+void MachineTask::dispatch_halt()
+{
+    taskENTER_CRITICAL();
+    bool report= pending;
+    pending= false;
+    taskEXIT_CRITICAL();
+
+    if(!report) return;
+
+    printk("ALARM: %s\n", msg);
+    Killable::cleanup_all();
+}
+
+// not a ticket: a stop must work from any task, and with the ring full
+void MachineTask::abort(uint8_t why, const char *what)
+{
+    halt(why, what);
+}
+
+void MachineTask::hold(bool on)
+{
+    if(THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(on);
+}
+
+bool MachineTask::unlock()
+{
+    if(!halted) return false;
+    clear_halt();
+
+    // the caller goes on to home or move, so the machine is clear by the time this returns
+    wait_idle();
+    return true;
+}
+
 void MachineTask::clear_halt()
 {
+    THEKERNEL->set_feed_hold(false);
+    Killable::restore_all();
+
+    vTaskSuspendAll();
+    xEventGroupClearBits(state, k_idle);
     clearing= true;
-    if(handle != nullptr) xTaskNotifyGiveIndexed(handle, k_notify_index);
+    xTaskResumeAll();
+
+    xTaskNotifyGiveIndexed(handle, k_notify_index);
 }
 
 void MachineTask::finish_clear()
 {
     clearing= false;
+
+    // a drain or stop asked for before the halt describes a job that is over
+    taskENTER_CRITICAL();
+    draining= stopping= false;
+    taskEXIT_CRITICAL();
+
     drop_all();
     THECONVEYOR.flush_queue();
 
     while(THECONVEYOR.flushing()) tick();
 
-    THEROBOT.reset_position_from_current_actuator_position();
     THEROBOT.set_keepout(true);
+
+    // last: a line accepted before this would plan from the old position
+    halted= false;
+    xEventGroupClearBits(state, k_halted);
 }
 
 void MachineTask::loop()
 {
     while(true) {
+        // halt() runs in interrupts and cannot touch an event group, so the bit follows here
+        if(halted) xEventGroupSetBits(state, k_halted);
+
+        dispatch_halt();
         if(clearing) finish_clear();
+
+        // a drain has to run here to set running false, which sends the lookahead to the ticker
+        taskENTER_CRITICAL();
+        bool drain= draining, stop= stopping;
+        draining= stopping= false;
+        taskEXIT_CRITICAL();
+
+        if(stop) THECONVEYOR.stop_soon();
+        else if(drain) THECONVEYOR.wait_for_idle();
+
         serve_tickets();
+
+        vTaskSuspendAll();
+        bool quiet= !draining && !stopping && !clearing
+                 && uxQueueMessagesWaiting(full_slots) == 0 && THECONVEYOR.is_idle();
+        if(quiet) xEventGroupSetBits(state, k_idle);
+        if(THEKERNEL->get_feed_hold()) xEventGroupSetBits(state, k_held);
+        else xEventGroupClearBits(state, k_held);
+        xTaskResumeAll();
+
         tick();
     }
 }

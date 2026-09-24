@@ -7,6 +7,7 @@
 #include "Player.h"
 #include "SwitchPublicAccess.h"
 #include "SwitchPool.h"
+#include "modules/robot/MachineTask.h"
 
 using namespace std;
 
@@ -111,7 +112,7 @@ void MainButton::check_12v()
 
 // both edges fire, so check the button rather than halting on release too
 void MainButton::e_stop_irq() {
-    if(this->e_stop.get()) THEKERNEL->halt(E_STOP, "e-stop");
+    if(this->e_stop.get()) machine_task.halt(E_STOP, "e-stop");
 }
 
 // the power fan runs while anything draws current, and for a while after
@@ -148,13 +149,13 @@ void MainButton::go_to_sleep()
     switch_power_12(0);
     switch_power_24(0);
     THEKERNEL->set_sleeping(true);
-    THEKERNEL->halt(MANUAL, "stopped by button");
+    machine_task.halt(MANUAL, "stopped by button");
 }
 
 void MainButton::short_press(uint8_t state)
 {
     switch(state) {
-        case IDLE: case RUN: case HOME: THEKERNEL->halt(MANUAL, "stopped by button"); break;
+        case IDLE: case RUN: case HOME: machine_task.halt(MANUAL, "stopped by button"); break;
         case HOLD:  THEKERNEL->set_feed_hold(false); break;
         case SLEEP: system_reset(false); break;
         case ALARM: break;   // it takes a long press to clear an alarm
@@ -167,15 +168,15 @@ void MainButton::long_press(uint8_t state)
         case IDLE:
             if(long_press_enable == "Sleep") go_to_sleep();
             break;
-        case RUN: case HOME: THEKERNEL->halt(MANUAL, "stopped by button"); break;
+        case RUN: case HOME: machine_task.halt(MANUAL, "stopped by button"); break;
         case HOLD:  THEKERNEL->set_feed_hold(false); break;
         case SLEEP: system_reset(false); break;
         case ALARM:
             // a reason above 20 is a fault the machine cannot simply be unlocked from
-            if(THEKERNEL->get_halt_reason() > 20) {
+            if(machine_task.halt_reason() > 20) {
                 system_reset(false);
             } else {
-                THEKERNEL->clear_halt();
+                machine_task.clear_halt();
                 printk("UnKill button pressed, Halt cleared\r\n");
             }
             break;
@@ -209,8 +210,8 @@ void MainButton::handle_button()
 
     uint8_t state = THEKERNEL->get_state();
 
-    if(stop_on_cover_open && !THEKERNEL->is_halted() && player.is_playing() && !endstops.cover_closed())
-        THEKERNEL->halt(COVER_OPEN, "cover open");
+    if(stop_on_cover_open && !machine_task.is_halted() && player.is_playing() && !endstops.cover_closed())
+        machine_task.halt(COVER_OPEN, "cover open");
 
     update_power(state);
     update_timeouts(state);

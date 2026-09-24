@@ -120,22 +120,24 @@ void Player::on_gcode_received(Gcode *argument)
 }
 
 // M0: stop the program until the operator resumes it
-void Player::program_stop(Gcode *gcode)
+// a barrier runs on the machine task, which cannot wait for itself to drain: the main loop
+// picks this up and suspends there
+void Player::program_stop(Gcode *)
 {
-    this->suspend_command((gcode->subcode == 1) ? "h" : "", gcode->stream);
+    suspend_pending= playing_file;
 }
 
 // M1: the same, obeyed only when the optional stop mode is on
-void Player::optional_stop(Gcode *gcode)
+void Player::optional_stop(Gcode *)
 {
     if(!THEKERNEL->get_optional_stop_mode()) return;
-    this->suspend_command((gcode->subcode == 1) ? "h" : "", gcode->stream);
+    suspend_pending= playing_file;
 }
 
-// M600: suspend, M600.1 leaves the spindle on
-void Player::suspend_gcode(Gcode *gcode)
+// M600: suspend
+void Player::suspend_gcode(Gcode *)
 {
-    this->suspend_command((gcode->subcode == 1) ? "h" : "", gcode->stream);
+    suspend_pending= playing_file;
 }
 
 void Player::resume_gcode(Gcode *gcode)
@@ -156,7 +158,7 @@ const Player::Cmd Player::COMMANDS[] = {
 
 void Player::shell(void *self, const char *name, std::string args, StreamOutput *stream)
 {
-    if(THEKERNEL->is_halted()) return;
+    if(machine_task.is_halted()) return;
     Player *me= static_cast<Player *>(self);
     for (const Cmd *c= COMMANDS; c->name != nullptr; ++c) {
         if(strcmp(c->name, name) == 0) { (me->*(c->fn))(args, stream); return; }
@@ -312,12 +314,6 @@ void Player::abort()
     this->current_stream = NULL;
     file.close();
     THEROBOT.set_keepout(true);
-
-    THEKERNEL->set_waiting(true);
-    bool finished= machine_task.post_drain();
-    THEKERNEL->set_waiting(false);
-    if(!finished) return;
-    tool_head.stop_all();
 }
 
 void Player::abort_command( string parameters, StreamOutput *stream )
@@ -330,16 +326,13 @@ void Player::abort_command( string parameters, StreamOutput *stream )
     sources.clear(); // the file and any script on top of it, or a script alone
     sources.resume();
 
-    if(THEKERNEL->is_halted()) {
+    if(machine_task.is_halted()) {
         printk("Aborted by halt\n");
         return;
     }
 
     if (parameters.empty()) {
-        machine_task.post_stop();
-
-        // now the position will think it is at the last received pos, so we need to do FK to get the actuator position and reset the current position
-        THEROBOT.reset_position_from_current_actuator_position();
+        if(machine_task.post_stop()) tool_head.stop_all();
         stream->printf("Aborted playing or paused file. \r\n");
     }
 }
@@ -455,7 +448,7 @@ void Player::suspend_now(StreamOutput *stream)
 
     machine_task.post_drain();
 
-    if(THEKERNEL->is_halted()) {
+    if(machine_task.is_halted()) {
         printk("Suspend aborted by halt\n");
         THEKERNEL->set_waiting(false);
         return;
@@ -501,7 +494,7 @@ void Player::resume_command(string parameters, StreamOutput *stream )
 
     stream->printf("Resuming playing...\n");
 
-    if(THEKERNEL->is_halted()) {
+    if(machine_task.is_halted()) {
         printk("Resume aborted by kill\n");
         THEROBOT.pop_state();
         sources.resume();
@@ -516,7 +509,7 @@ void Player::resume_command(string parameters, StreamOutput *stream )
 
     THEROBOT.pop_state();
 
-    if(THEKERNEL->is_halted()) {
+    if(machine_task.is_halted()) {
         printk("Resume aborted by kill\n");
         sources.resume();
         return;

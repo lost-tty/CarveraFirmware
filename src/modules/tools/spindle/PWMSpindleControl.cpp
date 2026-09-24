@@ -25,6 +25,7 @@
 #include "PwmOut.h"
 #include "port_api.h"
 #include "us_ticker_api.h"
+#include "modules/robot/MachineTask.h"
 
 #define spindle_checksum                    CHECKSUM("spindle")
 #define spindle_pwm_pin_checksum            CHECKSUM("pwm_pin")
@@ -141,8 +142,8 @@ void PWMSpindleControl::on_pin_rise()
 void PWMSpindleControl::on_update_speed()
 {
     // the VFD latches its alarm output, so one read is the whole check
-    if(!THEKERNEL->is_halted() && alarm_pin.get()) {
-        THEKERNEL->halt(SPINDLE_ALARM, "spindle alarm, power off/on");
+    if(!machine_task.is_halted() && alarm_pin.get()) {
+        machine_task.halt(SPINDLE_ALARM, "spindle alarm, power off/on");
         return;
     }
 

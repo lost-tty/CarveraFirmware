@@ -384,8 +384,7 @@ bool Robot::move_to_machine_position(const float pos[3])
     float delta[k_max_actuators]{0};
     for (int i = 0; i <= Z_AXIS; ++i) delta[i]= pos[i] - cur[i];
 
-    if(machine_task.on_task()) return delta_move_sync(delta, get_seek_rate(), 3);
-    return machine_task.post_jog(delta, 3, 1.0F);
+    return machine_task.post_move(delta, get_seek_rate());
 }
 
 // steps one motor past the planner, so the position is recovered from the actuator afterwards
@@ -397,7 +396,7 @@ bool Robot::step_motor(uint8_t axis, bool dir, unsigned steps, unsigned steps_pe
     uint32_t delayus= 1000000.0F / std::max(steps_per_sec, 1u);
     vTaskSuspendAll();
     for(unsigned s= 0; s < steps; s++) {
-        if(THEKERNEL->is_halted()) break;
+        if(machine_task.is_halted()) break;
         actuators[axis]->manual_step(dir);
         wait_us(delayus);
     }
@@ -1680,7 +1679,7 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode
 // Used to plan a single move used by things like endstops when homing, zprobe, extruder firmware retracts etc.
 bool Robot::delta_move(const float *delta, float rate_mm_s, uint8_t naxis)
 {
-    if(THEKERNEL->is_halted()) return false;
+    if(machine_task.is_halted()) return false;
 
     // catch negative or zero feed rates
     if(rate_mm_s <= 0.0F) {
@@ -1715,14 +1714,14 @@ bool Robot::delta_move_watch(const float *delta, float rate_mm_s, uint8_t naxis,
     bool ok= delta_move(delta, rate_mm_s, naxis);
     if(ok) THECONVEYOR.wait_for_idle();
     THEKERNEL->step_ticker.set_watch(nullptr);
-    return ok && !THEKERNEL->is_halted();
+    return ok && !machine_task.is_halted();
 }
 
 bool Robot::delta_move_sync(const float *delta, float rate_mm_s, uint8_t naxis)
 {
     if(!delta_move(delta, rate_mm_s, naxis)) return false;
     THECONVEYOR.wait_for_idle();
-    return !THEKERNEL->is_halted();
+    return !machine_task.is_halted();
 }
 
 // refuse a target outside the soft limits of a homed axis
@@ -1844,7 +1843,7 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s)
         // segment 0 is already done - it's the end point of the previous move so we start at segment 1
         // We always add another point after this loop so we stop at segments-1, ie i < segments
         for (int i = 1; i < segments; i++) {
-            if(THEKERNEL->is_halted()) return false; // don't queue any more segments
+            if(machine_task.is_halted()) return false; // don't queue any more segments
             for (int j = 0; j < n_motors; j++)
                 segment_end[j] += segment_delta[j];
 
@@ -1977,7 +1976,7 @@ bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[]
         arc_target[this->plane_axis_2] = this->machine_position[this->plane_axis_2];
 
         for (i = 1; i < segments; i++) { // Increment (segments-1)
-            if(THEKERNEL->is_halted()) return false; // don't queue any more segments
+            if(machine_task.is_halted()) return false; // don't queue any more segments
 
             if (count < this->arc_correction ) {
                 // Apply vector rotation matrix

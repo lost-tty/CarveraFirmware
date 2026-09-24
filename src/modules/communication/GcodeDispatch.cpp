@@ -109,7 +109,7 @@ bool GcodeDispatch::run_mcode(Gcode &gcode, bool nested)
         return true;
     }
 
-    if(machine_task.post(job, gcode) == MachineTask::k_no_ticket) gcode.error_text= "no machine task";
+    if(!machine_task.post(job, gcode)) gcode.error_text= "no machine task";
     return true;
 }
 
@@ -152,8 +152,7 @@ void GcodeDispatch::run_gcode(Gcode &gcode, uint8_t flags, bool nested)
     MachineTask::Job job= (flags & DRAINS) ? broadcast_drained : broadcast;
 
     if(!machine_task.on_task()) {
-        if(machine_task.post(job, gcode) == MachineTask::k_no_ticket)
-            gcode.error_text= "no machine task";
+        if(!machine_task.post(job, gcode)) gcode.error_text= "no machine task";
         return;
     }
 
@@ -277,11 +276,11 @@ bool GcodeDispatch::parameter_statement(const char *p, StreamOutput *stream)
 // M999 is the only way out of a halt, so it is handled before the alarm lock refuses everything else
 GcodeDispatch::Gate GcodeDispatch::allowed_while_halted(const gcode::Words &words, StreamOutput *stream)
 {
-    if(!THEKERNEL->is_halted()) return PASS;
+    if(!machine_task.is_halted()) return PASS;
 
     for (const gcode::Word &w : words) {
         if(w.letter == 'M' && w.value == 999) {
-            THEKERNEL->clear_halt();
+            machine_task.clear_halt();
             stream->printf("WARNING: After HALT you should HOME as position is currently unknown\nok\n");
             return HANDLED;
         }

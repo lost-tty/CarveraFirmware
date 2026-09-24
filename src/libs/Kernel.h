@@ -44,33 +44,6 @@ enum STATE {
 	WAIT    = 7
 };
 
-enum HALT_REASON {
-	// No need to reset when triggered
-	MANUAL     				= 1,
-	HOME_FAIL  				= 2,
-	PROBE_FAIL 				= 3,
-	CALIBRATE_FAIL			= 4,
-	ATC_HOME_FAIL   		= 5,
-	ATC_TOOL_INVALID		= 6,
-	ATC_NO_TOOL				= 7,
-	ATC_HAS_TOOL			= 8,
-	SPINDLE_OVERHEATED 		= 9,
-	SOFT_LIMIT				= 10,
-	COVER_OPEN				= 11,
-	PROBE_INVALID			= 12,
-	E_STOP					= 13,
-	NON_HOME				= 15,
-	SCRIPT					= 16,
-	// Need to reset when triggered
-	HARD_LIMIT				= 21,
-	MOTOR_ERROR_X			= 22,
-	MOTOR_ERROR_Y			= 23,
-	MOTOR_ERROR_Z			= 24,
-	SPINDLE_STALL			= 25,
-	SD_ERROR				= 26,
-	// Need to switch off/on the power
-	SPINDLE_ALARM			= 41
-};
 
 class Kernel {
     public:
@@ -94,11 +67,7 @@ class Kernel {
 
         bool is_using_leds() const { return use_leds; }
         // safe from an interrupt
-        void halt(uint8_t reason, const char *msg = nullptr);
-        void dispatch_halt();
         void serve_main();
-        bool is_halted() const { return halted; }
-        void clear_halt();
 
         void set_feed_hold(bool f) { feed_hold= f; }
         bool get_feed_hold() const { return feed_hold; }
@@ -124,8 +93,6 @@ class Kernel {
         void set_waiting(bool f) { waiting = f; }
         bool is_waiting() const { return waiting; }
 
-        uint8_t get_halt_reason() const { return halt_reason; }
-
         std::string get_query_string();
 
         std::string get_diagnose_string();
@@ -141,15 +108,11 @@ class Kernel {
         uint32_t          base_stepping_frequency;
 
         uint8_t get_state();
-        uint8_t halt_reason;
-        char halt_msg[32];
 
     private:
         // When a module asks to be called for a specific event ( a hook ), this is where that request is remembered
         mbed::I2C* i2c;
         std::array<std::vector<Module*>, NUMBER_OF_DEFINED_EVENTS> hooks;
-        volatile bool halted;
-        volatile bool halt_pending;
 
         struct {
             bool use_leds:1;

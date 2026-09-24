@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
+#include "modules/robot/MachineTask.h"
 
 #define switch_checksum CHECKSUM("switch")
 #define state_checksum  CHECKSUM("state")
@@ -103,7 +104,7 @@ void Pendant::key_down(uint8_t key, bool shifted)
 {
     for (auto& k : keys) {
         if (k.key != key || k.shifted != shifted) continue;
-        if (THEKERNEL->is_halted() && k.action != UNLOCK && k.action != HOME) return;
+        if (machine_task.is_halted() && k.action != UNLOCK && k.action != HOME) return;
         switch (k.action) {
             case JOG:
                 held_axis = k.axis;
@@ -128,7 +129,7 @@ void Pendant::key_down(uint8_t key, bool shifted)
                 else line(THEKERNEL->is_suspending() ? "resume" : "suspend");
                 break;
             case ABORT:
-                THEKERNEL->halt(MANUAL, "stopped from pendant");
+                machine_task.halt(MANUAL, "stopped from pendant");
                 break;
             case UNLOCK:  line("$X"); break;
             case HOME:    line("$H"); break;

@@ -66,7 +66,6 @@
 // The kernel is the central point in Smoothie : it stores modules, and handles event calls
 void Kernel::init()
 {
-    halted = false;
     feed_hold = false;
     enable_feed_hold = false;
     bad_mcu= true;
@@ -76,7 +75,6 @@ void Kernel::init()
     sleeping = false;
     waiting = false;
     suspending = false;
-    halt_reason = MANUAL;
 
     // serial first at fixed baud rate (DEFAULT_SERIAL_BAUD_RATE) so config can report errors to serial
     // Set to UART0, this will be changed to use the same UART as MRI if it's enabled
@@ -183,7 +181,7 @@ uint8_t Kernel::get_state()
     	return SUSPEND;
     } else if (waiting) {
     	return WAIT;
-    } else if(halted) {
+    } else if(machine_task.is_halted()) {
     	return ALARM;
     } else if (homing) {
     	return HOME;
@@ -333,8 +331,8 @@ std::string Kernel::get_query_string()
     }
 
     // if halted
-    if (halted) {
-        n = snprintf(buf, sizeof(buf), "|H:%d", halt_reason);
+    if (machine_task.is_halted()) {
+        n = snprintf(buf, sizeof(buf), "|H:%d", machine_task.halt_reason());
         if(n > sizeof(buf)) n = sizeof(buf);
         str.append(buf, n);
     }
@@ -457,47 +455,13 @@ void Kernel::register_for_event(_EVENT_ENUM id_event, Module *mod)
 }
 
 // Call a specific event with an argument
-void Kernel::clear_halt()
-{
-    dispatch_halt(); // the halt may still be pending if the main loop has not run since
 
-    machine_task.clear_halt();   // a post while halted is false would land in the ring being dropped
-
-    halted = false;
-    feed_hold = false;
-    Killable::restore_all();
-}
-
-void Kernel::halt(uint8_t reason, const char *msg)
-{
-    // the first reason is the cause; a halt raised while stopping is a consequence of it
-    if(!halted) {
-        halt_reason = reason;
-        strncpy(halt_msg, msg != nullptr ? msg : "halted", sizeof(halt_msg) - 1);
-        halt_msg[sizeof(halt_msg) - 1] = '\0';
-    }
-    halted = true;
-    Killable::kill_all();
-    halt_pending = true;
-}
 
 void Kernel::serve_main()
 {
     watchdog.alive();
-    dispatch_halt();
     call_event(ON_MAIN_LOOP);
     call_event(ON_IDLE);
-}
-
-void Kernel::dispatch_halt()
-{
-    if(!halt_pending) return;
-    halt_pending = false;
-    printk("ALARM: %s\n", halt_msg);
-    bool was_idle = THECONVEYOR.is_idle();
-    Killable::cleanup_all();
-    // backed up commands leave the planner ahead of where the machine stopped
-    if(!was_idle) THEROBOT.reset_position_from_current_actuator_position();
 }
 
 void Kernel::call_event(_EVENT_ENUM id_event, void * argument)

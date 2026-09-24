@@ -29,6 +29,7 @@
 // strategies we know about
 #include "ThreePointStrategy.h"
 #include "CartGridStrategy.h"
+#include "modules/robot/MachineTask.h"
 
 #define enable_checksum          CHECKSUM("enable")
 #define probe_pin_checksum       CHECKSUM("probe_pin")
@@ -343,7 +344,7 @@ void ZProbe::probe_XYZ(Gcode *gcode)
 
     if(this->probe_pin.get() != invert_probe) {
         gcode->stream->printf("Error:ZProbe triggered before move, aborting command.\n");
-        THEKERNEL->halt(PROBE_FAIL, "probe failed");
+        machine_task.halt(PROBE_FAIL, "probe failed");
         return;
     }
 
@@ -355,16 +356,15 @@ void ZProbe::probe_XYZ(Gcode *gcode)
 
     float delta[3]= {x, y, z};
     if(!THEROBOT.delta_move_watch(delta, rate, 3, probe_watch)) {
-        if(!THEKERNEL->is_halted()) {
+        if(!machine_task.is_halted()) {
             gcode->stream->printf("ERROR: Move too small,  %1.3f, %1.3f, %1.3f\n", x, y, z);
-            THEKERNEL->halt(PROBE_FAIL, "probe failed");
+            machine_task.halt(PROBE_FAIL, "probe failed");
         }
         return;
     }
 
-    // if the probe stopped the move we need to correct the last_milestone as it did not reach where it thought
-    // this also sets last_milestone to the machine coordinates it stopped at
-    THEROBOT.reset_position_from_current_actuator_position();
+    if(probe_watch.hit) THEROBOT.reset_position_from_current_actuator_position();
+
     float pos[3];
     THEROBOT.get_axis_position(pos, 3);
 
@@ -377,7 +377,7 @@ void ZProbe::probe_XYZ(Gcode *gcode)
     if(probeok == 0 && (gcode->subcode == 2 || gcode->subcode == 4)) {
         // issue error if probe was not triggered and subcode is 2 or 4
         gcode->stream->printf("ALARM: Probe fail\n");
-        THEKERNEL->halt(PROBE_FAIL, "probe failed");
+        machine_task.halt(PROBE_FAIL, "probe failed");
     }
 }
 
@@ -418,16 +418,15 @@ void ZProbe::calibrate_Z(Gcode *gcode)
 
     float delta[3]= {0, 0, z};
     if(!THEROBOT.delta_move_watch(delta, rate, 3, probe_watch)) {
-        if(!THEKERNEL->is_halted()) {
+        if(!machine_task.is_halted()) {
             gcode->stream->printf("ERROR: Move too small,  %1.3f\n", z);
-            THEKERNEL->halt(PROBE_FAIL, "probe failed");
+            machine_task.halt(PROBE_FAIL, "probe failed");
         }
         return;
     }
 
-    // if the probe stopped the move we need to correct the last_milestone as it did not reach where it thought
-    // this also sets last_milestone to the machine coordinates it stopped at
-    THEROBOT.reset_position_from_current_actuator_position();
+    if(probe_watch.hit) THEROBOT.reset_position_from_current_actuator_position();
+
     float pos[3];
     THEROBOT.get_axis_position(pos, 3);
 
@@ -440,7 +439,7 @@ void ZProbe::calibrate_Z(Gcode *gcode)
     if (calibrateok == 0) {
         // issue error if probe was not triggered and subcode is 2 or 4
         gcode->stream->printf("ALARM: Calibrate fail!\n");
-        THEKERNEL->halt(CALIBRATE_FAIL, "calibration failed");
+        machine_task.halt(CALIBRATE_FAIL, "calibration failed");
     }
 
     // M492.3 reads this as "the wireless probe is alive": only a probe that signalled is

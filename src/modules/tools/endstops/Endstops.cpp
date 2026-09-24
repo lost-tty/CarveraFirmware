@@ -30,6 +30,7 @@
 
 #include <ctype.h>
 #include <algorithm>
+#include "modules/robot/MachineTask.h"
 
 // OLD deprecated syntax
 #define endstops_module_enable_checksum         CHECKSUM("endstops_enable")
@@ -440,12 +441,12 @@ void Endstops::service()
 
 void Endstops::check_motor_alarms()
 {
-    if(THEKERNEL->is_halted() || !alarm_pins.any()) return;
+    if(machine_task.is_halted() || !alarm_pins.any()) return;
     for(auto& i : motor_alarms) {
         if(i->pin.get()) {
             char msg[32];
             snprintf(msg, sizeof(msg), "%c motor alarm", i->axis);
-            THEKERNEL->halt(MOTOR_ERROR_X + i->axis_index, msg);
+            machine_task.halt(MOTOR_ERROR_X + i->axis_index, msg);
             return;
         }
     }
@@ -530,7 +531,7 @@ void Endstops::home(axis_bitmap_t a)
         if(!home_axis(order[i])) {
             THEROBOT.reset_position_from_current_actuator_position();
             this->status = NOT_HOMING;
-            if(!THEKERNEL->is_halted()) THEKERNEL->halt(HOME_FAIL, "homing failed");
+            if(!machine_task.is_halted()) machine_task.halt(HOME_FAIL, "homing failed");
             return;
         }
     }
@@ -590,7 +591,7 @@ void Endstops::home_axes(axis_bitmap_t haxis)
                 home(bs);
             }
             // check if on_halt (eg kill)
-            if(THEKERNEL->is_halted()) break;
+            if(machine_task.is_halted()) break;
         }
 
     } else {
@@ -600,7 +601,7 @@ void Endstops::home_axes(axis_bitmap_t haxis)
 
     THEROBOT.put_compensation(savect);
 
-    if(THEKERNEL->is_halted()) {
+    if(machine_task.is_halted()) {
         for (auto &p : homing_axis) p.homed= false;
         return;
     }

@@ -15,6 +15,7 @@
 #include "SwitchPool.h"
 #include "ATCHandlerPublicAccess.h"
 #include "ATCHandler.h"
+#include "modules/robot/MachineTask.h"
 
 SpindleControl *spindle_control = nullptr;
 
@@ -30,7 +31,7 @@ void SpindleControl::start(Gcode *gcode)
     struct tool_status tool;
     bool tool_ok = atc_handler.get_tool_status(&tool) && tool.active_tool > 0;
     if(!tool_ok) {
-        THEKERNEL->halt(MANUAL, "no tool set");
+        machine_task.halt(MANUAL, "no tool set");
         printk("ERROR: No tool or probe tool!\n");
         return;
     }

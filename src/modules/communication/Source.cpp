@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include "modules/robot/MachineTask.h"
 
 void SourceStack::on_module_loaded()
 {
@@ -41,7 +42,7 @@ bool SourceStack::frozen_all() const
 
 void SourceStack::on_main_loop(void *)
 {
-    if(stack.empty() || THEKERNEL->is_halted() || THEKERNEL->is_waiting() || frozen_all()) return;
+    if(stack.empty() || machine_task.is_halted() || THEKERNEL->is_waiting() || frozen_all()) return;
 
     // a line refused while earlier moves are still queued stops the job once they have run
     unsigned int refused;

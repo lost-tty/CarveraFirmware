@@ -19,6 +19,7 @@
 #include "system_LPC17xx.h" // mbed.h lib
 #include <math.h>
 #include <mri.h>
+#include "modules/robot/MachineTask.h"
 
 #ifdef STEPTICKER_DEBUG_PIN
 // debug pins, only used if defined in src/makefile
@@ -167,7 +168,7 @@ void StepTicker::check_limits()
 
     for (uint8_t m = 0; m < num_motors; m++) motor[m]->stop_moving();
     limit_tripped= true;
-    THEKERNEL->halt(HARD_LIMIT, "hard limit");
+    machine_task.halt(HARD_LIMIT, "hard limit");
 }
 
 // the motor ramps down under its own acceleration; cutting the pulses is what a halt does
@@ -218,7 +219,7 @@ void StepTicker::step_tick (void)
         }
     }
 
-    if(THEKERNEL->is_halted()) {
+    if(machine_task.is_halted()) {
         running= false;
         current_tick = 0;
         current_block= nullptr;

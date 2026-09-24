@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include "modules/robot/MachineTask.h"
 
 extern const char _binary_macros_ngc_start[], _binary_macros_ngc_end[]; // src/macros/*.ngc, concatenated by the makefile
 
@@ -121,7 +122,7 @@ void Scripts::finish()
 
 void Scripts::halt(int reason)
 {
-    THEKERNEL->halt(reason, name.empty() ? "script aborted" : name.c_str());
+    machine_task.halt(reason, name.empty() ? "script aborted" : name.c_str());
 }
 
 // M6 T3 -> o<tool_change> with #<t> = 3 and #<subcode> = 0; every word of the block becomes a #<letter>.
@@ -264,7 +265,7 @@ void Scripts::sub_run(std::string cmd, StreamOutput *stream)
     unsigned n= 0;
     while(!cmd.empty() && n < script::Runner::MAX_ARGS) args[n++]= strtof(shift_parameter(cmd).c_str(), nullptr);
     std::string err;
-    if(THEKERNEL->is_halted()) stream->printf("error:Alarm lock\n");
+    if(machine_task.is_halted()) stream->printf("error:Alarm lock\n");
     else if(!run(sub.c_str(), args, n, stream, err)) stream->printf("error:%s\n", err.c_str());
     // ok follows when the script has finished
 }

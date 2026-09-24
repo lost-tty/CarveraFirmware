@@ -92,10 +92,12 @@ void Conveyor::service()
     force_fetch= false;
     collect();
 
-    // the actions went with the blocks they were written after
+    // the actions went with the blocks they were written after. the moves went with them too,
+    // so the planner is now ahead of the machine and has to be pulled back
     if(flush && queue.is_empty()) {
         pending_actions.clear();
         flush= false;
+        THEROBOT.reset_position_from_current_actuator_position();
     }
 }
 
@@ -114,7 +116,7 @@ void Conveyor::collect()
     queue.consume_tail();
 
     // a halt has already stopped the outputs: an action now would switch one back on
-    if(THEKERNEL->is_halted()) pending_actions.clear();
+    if(machine_task.is_halted()) pending_actions.clear();
 
     // an action handler reaches the conveyor again through its own calls; it must not recurse here
     if(in_actions != nullptr) return;
@@ -139,7 +141,7 @@ bool Conveyor::is_idle() const
 bool Conveyor::wait_for_idle(bool wait_for_motors)
 {
     // draining from inside an action would undo its place in the path
-    if(in_actions == xTaskGetCurrentTaskHandle()) return !THEKERNEL->is_halted();
+    if(in_actions == xTaskGetCurrentTaskHandle()) return !machine_task.is_halted();
 
     bool halted= false;
 
@@ -173,7 +175,7 @@ void Conveyor::queue_head_block()
         if(!wait_for_block(halted)) break;
     }
 
-    if(THEKERNEL->is_halted()) {
+    if(machine_task.is_halted()) {
         // we do not want to stick more stuff on the queue if we are in halt state
         // clear and release the block on the head
         queue.head_ref()->clear();
@@ -215,7 +217,7 @@ bool Conveyor::get_next_block(Block **block)
     // default the feerate to zero if there is no block available
     this->current_feedrate= 0;
 
-    if(THEKERNEL->is_halted() || queue.isr_tail_i == queue.head_i) return false; // we do not have anything to give
+    if(machine_task.is_halted() || queue.isr_tail_i == queue.head_i) return false; // we do not have anything to give
 
     // a feed hold stops at the block boundary: the one running finishes, the next one waits
     if(THEKERNEL->get_feed_hold()) return false;
@@ -265,7 +267,7 @@ void Conveyor::block_finished()
 // the motors have stopped
 bool Conveyor::wait_for_block(bool &halted)
 {
-    if(THEKERNEL->is_halted()) {
+    if(machine_task.is_halted()) {
         halted= true;
         return false;
     }

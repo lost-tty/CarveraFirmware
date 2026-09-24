@@ -25,6 +25,7 @@
 #include "utils/Parameters.h"
 #include "SimpleShell.h"
 #include "us_ticker_api.h"
+#include "modules/robot/MachineTask.h"
 
 
 #define ATC_AXIS 4
@@ -264,7 +265,7 @@ void ATCHandler::home_clamp()
 	if(!moved) return;
 
     if (!atc_home_info.triggered) {
-        THEKERNEL->halt(ATC_HOME_FAIL, "tool changer homing failed");
+        machine_task.halt(ATC_HOME_FAIL, "tool changer homing failed");
         printk("ERROR: Homing atc failed - check the atc max travel settings\n");
         return;
     } else {
@@ -337,7 +338,7 @@ void ATCHandler::set_tool_offset()
 
 static void halt(int reason, const char *msg)
 {
-    THEKERNEL->halt(reason, msg);
+    machine_task.halt(reason, msg);
 }
 
 // M490: home the clamp, M490.1 clamp, M490.2 loosen

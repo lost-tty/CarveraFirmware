@@ -167,14 +167,14 @@ bool SimpleShell::control_char(char c, StreamOutput *stream)
             stream->printf("%s\n", THEKERNEL->get_diagnose_string().c_str());
             return true;
         case 'X' - 'A' + 1: // ^X
-            THEKERNEL->halt(MANUAL, "stopped");
+            machine_task.abort(MANUAL, "stopped");
             printk("ALARM: Abort during cycle\n");
             return true;
         case '!':
-            if (THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(true);
+            machine_task.hold(true);
             return true;
         case '~':
-            if (THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(false);
+            machine_task.hold(false);
             return true;
     }
     return false;
@@ -215,10 +215,7 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
                 break;
 
             case 'X':
-                if(THEKERNEL->is_halted()) {
-                    THEKERNEL->clear_halt();
-                    new_message.stream->printf("[Caution: Unlocked]\nok\n");
-                }
+                if(machine_task.unlock()) new_message.stream->printf("[Caution: Unlocked]\n");
                 break;
 
             case '#':
@@ -227,7 +224,7 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
 
             case 'H':
                 {
-                    if(THEKERNEL->is_halted()) THEKERNEL->clear_halt();
+                    machine_task.unlock();
                     // issue G28.2 which is force homing cycle
                     gcode_dispatch.run_line("G28.2", new_message.stream, false);
 
@@ -818,7 +815,7 @@ void SimpleShell::sleep_command(string parameters, StreamOutput *stream)
 	mainbutton.set_power_12(false);
 	mainbutton.set_power_24(false);
 	THEKERNEL->set_sleeping(true);
-	THEKERNEL->halt(MANUAL, "stopped");
+	machine_task.abort(MANUAL, "stopped");
 }
 
 // sleep command
@@ -1063,7 +1060,7 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
 
         if(move) {
             const float pos[3]{x, y, z};
-            THEROBOT.move_to_machine_position(pos);
+            if(!THEROBOT.move_to_machine_position(pos)) stream->printf("error:move refused\n");
         }
 
    } else if (what == "pos") {

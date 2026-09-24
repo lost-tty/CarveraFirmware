@@ -21,6 +21,7 @@
 // Temp sensor implementations:
 #include "Thermistor.h"
 #include "SwitchPool.h"
+#include "modules/robot/MachineTask.h"
 
 #define max_temp_checksum                  CHECKSUM("max_temp")
 #define min_temp_checksum                  CHECKSUM("min_temp")
@@ -132,10 +133,10 @@ void TemperatureControl::read_tick()
     // the ADC says nothing until it has averaged its first samples, which looks the same as an
     // open sensor: give it a few ticks to come up, then a reading that is still missing is a fault
     if(!isfinite(t)) {
-        if(!THEKERNEL->is_halted() && ++bad_readings > k_settle_ticks) {
+        if(!machine_task.is_halted() && ++bad_readings > k_settle_ticks) {
             char msg[32];
             snprintf(msg, sizeof(msg), "%s sensor open", designator.c_str());
-            THEKERNEL->halt(SPINDLE_OVERHEATED, msg);
+            machine_task.halt(SPINDLE_OVERHEATED, msg);
         }
         return;
     }
@@ -144,10 +145,10 @@ void TemperatureControl::read_tick()
     last_reading= t;
     has_reading= true;
 
-    if(!THEKERNEL->is_halted() && (t < min_temp || t > max_temp)) {
+    if(!machine_task.is_halted() && (t < min_temp || t > max_temp)) {
         char msg[32];
         snprintf(msg, sizeof(msg), "%s at %dC, max %d", designator.c_str(), (int)t, (int)max_temp);
-        THEKERNEL->halt(SPINDLE_OVERHEATED, msg);
+        machine_task.halt(SPINDLE_OVERHEATED, msg);
         return;
     }
 
