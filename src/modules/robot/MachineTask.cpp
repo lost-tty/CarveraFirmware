@@ -6,6 +6,7 @@
 #include "libs/Kernel.h"
 #include "libs/Watchdog.h"
 #include "libs/Killable.h"
+#include "StreamOutput.h"
 
 #include <cstring>
 #include "libs/Logging.h"
@@ -241,13 +242,16 @@ void MachineTask::hold(bool on)
     if(THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(on);
 }
 
-bool MachineTask::unlock()
+bool MachineTask::unlock(StreamOutput *stream)
 {
     if(!halted) return false;
     clear_halt();
 
     // the caller goes on to home or move, so the machine is clear by the time this returns
     wait_idle();
+
+    stream->printf("[Caution: Unlocked]\n");
+    stream->printf("WARNING: After HALT you should HOME as position may currently be unknown\n");
     return true;
 }
 

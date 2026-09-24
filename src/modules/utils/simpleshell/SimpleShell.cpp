@@ -215,7 +215,7 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
                 break;
 
             case 'X':
-                if(machine_task.unlock()) new_message.stream->printf("[Caution: Unlocked]\n");
+                machine_task.unlock(new_message.stream);
                 break;
 
             case '#':
@@ -224,7 +224,7 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
 
             case 'H':
                 {
-                    machine_task.unlock();
+                    machine_task.unlock(new_message.stream);
                     // issue G28.2 which is force homing cycle
                     gcode_dispatch.run_line("G28.2", new_message.stream, false);
 
@@ -271,7 +271,6 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
 
         } else if (cmd.substr(0, 2) == "ok") {
             // probably an echo so ignore the whole line
-            //new_message.stream->printf("ok\n");
 
         } else if(!parse_command(cmd.c_str(), possible_command, new_message.stream)) {
             new_message.stream->printf("error:Unsupported command - %s\n", cmd.c_str());

@@ -90,7 +90,7 @@ public:
 
     void hold(bool on);
 
-    bool unlock();
+    bool unlock(StreamOutput *stream);
     void clear_halt();
 
 private:

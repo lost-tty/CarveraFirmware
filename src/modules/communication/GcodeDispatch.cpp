@@ -282,8 +282,7 @@ GcodeDispatch::Gate GcodeDispatch::allowed_while_halted(const gcode::Words &word
 
     for (const gcode::Word &w : words) {
         if(w.letter == 'M' && w.value == 999) {
-            machine_task.clear_halt();
-            stream->printf("WARNING: After HALT you should HOME as position is currently unknown\nok\n");
+            machine_task.unlock(stream);
             return HANDLED;
         }
     }
@@ -305,7 +304,7 @@ GcodeDispatch::Gate GcodeDispatch::homed_enough(const gcode::Words &words, Strea
     for (const gcode::Word &w : words) {
         if(w.letter == 'M' && (w.value == 887 || w.value == 888)) {
             homed_check= (w.value == 887);
-            stream->printf("Homed check %s\nok\n", homed_check ? "enabled" : "disabled");
+            stream->printf("Homed check %s\n", homed_check ? "enabled" : "disabled");
             return HANDLED;
         }
         if(!homed_check || !is_command(w)) continue;

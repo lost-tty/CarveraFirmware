@@ -218,8 +218,7 @@ bool Scripts::run_sub(const char *sub, const float *args, unsigned nargs)
 // only queues the sub, the source stack runs it once the main loop is going
 void Scripts::boot()
 {
-    std::string err;
-    if(!run("boot", nullptr, 0, nullptr, err) && loaded) printk("error:script boot %s\n", err.c_str());
+    run_sub("boot", nullptr, 0);
 }
 
 const SimpleShell::Sub<Scripts> Scripts::SUBS[] = {
