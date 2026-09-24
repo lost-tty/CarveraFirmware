@@ -61,7 +61,7 @@ void Block::clear()
     nominal_length_flag = false;
     max_entry_speed     = 0.0F;
     is_ticking          = false;
-    is_g123             = false;
+    cutting             = false;
     locked              = false;
     s_value             = 0;
 

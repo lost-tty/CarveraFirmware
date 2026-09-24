@@ -43,8 +43,6 @@ class Robot : public Module {
         void motors_off(Gcode *);
         void steps_per_mm(Gcode *);
         void report_position(Gcode *);
-        void push_state_gcode(Gcode *);
-        void pop_state_gcode(Gcode *);
         void max_feedrates(Gcode *);
         void set_acceleration(Gcode *);
         void set_planner_limits(Gcode *);
@@ -66,14 +64,12 @@ class Robot : public Module {
         float get_default_acceleration() const { return default_acceleration; }
         void loadToolOffset(const float offset[N_PRIMARY_AXIS]);
         void saveToolOffset(const float offset[N_PRIMARY_AXIS], const float cur_tool_mz);
-        float get_feed_rate() const;
+        float get_feed_rate(uint8_t motion_mode) const { return motion_mode == 0 ? seek_rate : feed_rate; }
         float get_s_value() const { return s_value; }
         void set_s_value(float s) { s_value= s; }
         float get_max_s_value() const { return max_s_value; }
         float get_max_delta() const { return max_delta; }
         void set_max_delta(float delta) {max_delta = delta; }
-        void  push_state();
-        void  pop_state();
         void check_max_actuator_speeds();
         float to_millimeters( float value ) const { return this->inch_mode ? value * 25.4F : value; }
         float from_millimeters( float value) const { return this->inch_mode ? value/25.4F : value;  }
@@ -128,7 +124,6 @@ class Robot : public Module {
         float    motor_max_rate(uint8_t i) const;
         void     stop_motor(uint8_t i);
         void     stop_motors();
-        uint8_t get_current_motion_mode() const {return current_motion_mode; }
         void clearLaserOffset();
 
         BaseSolution* arm_solution;                           // Selected Arm solution ( millimeters to step calculation )
@@ -156,7 +151,6 @@ class Robot : public Module {
             bool segment_z_moves:1;
             bool save_g92:1;                                  // save g92 on M500 if set
             bool save_g54:1;                                  // save WCS on M500 if set
-            bool is_g123:1;
             bool soft_endstop_enabled:1;
             bool home_on_boot:1;
             bool soft_endstop_halt:1;
@@ -189,9 +183,9 @@ class Robot : public Module {
         bool within_soft_limits(const float transformed_target[], Gcode *gcode);
         bool clear_of_keepout(const float from[], const float to[], Gcode *gcode);
         void load_keepout_config();
-        bool append_milestone(const float target[], float rate_mm_s, Gcode *gcode);
-        bool append_line( Gcode* gcode, const float target[], float rate_mm_s);
-        bool append_arc( Gcode* gcode, const float target[], const float offset[], float radius, bool is_clockwise );
+        bool append_milestone(const float target[], float rate_mm_s, Gcode *gcode, bool cutting);
+        bool append_line( Gcode* gcode, const float target[], float rate_mm_s, bool cutting);
+        bool append_arc( Gcode* gcode, const float target[], const float offset[], float radius, bool is_clockwise, bool cutting );
         bool arc_radius_to_offset(Gcode *gcode, const float target[], MOTION_MODE_T mode, float offset[3]);
         bool compute_arc(Gcode* gcode, const float offset[], const float target[], enum MOTION_MODE_T motion_mode);
         void process_move(Gcode *gcode, enum MOTION_MODE_T);
@@ -207,10 +201,6 @@ class Robot : public Module {
         wcs_t g92_offset;
         wcs_t tool_offset; // used for multiple extruders, sets the tool offset for the current extruder applied first
         std::tuple<float, float, float, uint8_t> last_probe_position{0,0,0,0};
-
-        uint8_t current_motion_mode;
-        using saved_state_t= std::tuple<float, float, bool, bool, bool, uint8_t>; // save current feedrate and absolute mode, e absolute mode, inch mode, is_g123, current_wcs
-        std::stack<saved_state_t> state_stack;               // saves state from M120
 
         float machine_position[k_max_actuators]; // Last requested position, in millimeters, which is what we were requested to move to in the gcode after offsets applied but before compensation transform
         float compensated_machine_position[k_max_actuators]; // Last machine position, which is the position before converting to actuator coordinates (includes compensation transform)

@@ -109,7 +109,7 @@
 // The Robot converts GCodes into actual movements, and then adds them to the Planner, which passes them to the Conveyor so they can be added to the queue
 // It takes care of cutting arcs into segments, same thing for line that are too long
 
-// G21 G90 G90.1 G17. work offsets not touched
+// G21 G90 G91.1 G17. work offsets not touched
 void Robot::reset_modal_state()
 {
     this->inch_mode = false;
@@ -146,8 +146,6 @@ void Robot::on_module_loaded()
     ADD_MCODE(m84,   84, BARRIER,   Robot::motors_off);
     ADD_MCODE(m92,   92, BARRIER,   Robot::steps_per_mm);
     ADD_MCODE(m114, 114, BESIDE_JOB, Robot::report_position);
-    ADD_MCODE(m120, 120, IMMEDIATE, Robot::push_state_gcode);
-    ADD_MCODE(m121, 121, IMMEDIATE, Robot::pop_state_gcode);
     ADD_MCODE(m203, 203, IMMEDIATE, Robot::max_feedrates);
     ADD_MCODE(m204, 204, IMMEDIATE, Robot::set_acceleration);
     ADD_MCODE(m205, 205, IMMEDIATE, Robot::set_planner_limits);
@@ -473,29 +471,6 @@ void Robot::disable_motors(uint32_t axis_mask)
 {
     for (uint8_t i= 0; i < n_motors; i++) {
         if(axis_mask & (1 << i)) actuators[i]->enable(false);
-    }
-}
-
-void  Robot::push_state()
-{
-    bool am = this->absolute_mode;
-    bool im = this->inch_mode;
-    bool g123 = this->is_g123;
-    saved_state_t s(this->feed_rate, this->seek_rate, am, im, g123, current_wcs);
-    state_stack.push(s);
-}
-
-void Robot::pop_state()
-{
-    if(!state_stack.empty()) {
-        auto s = state_stack.top();
-        state_stack.pop();
-        this->feed_rate = std::get<0>(s);
-        this->seek_rate = std::get<1>(s);
-        this->absolute_mode = std::get<2>(s);
-        this->inch_mode = std::get<3>(s);
-        this->is_g123 = std::get<4>(s);
-        this->current_wcs = std::get<5>(s);
     }
 }
 
@@ -869,14 +844,9 @@ void Robot::on_gcode_received(Gcode *argument)
     }
 
     if( motion_mode != NONE) {
-        is_g123= motion_mode != SEEK;
         process_move(gcode, motion_mode);
         // printk("GCode: [%s], mode:[%d]\n", gcode->get_command(), motion_mode);
-    } else {
-        is_g123= false;
     }
-
-    current_motion_mode = motion_mode;
 }
 
 // process a G0/G1/G2/G3
@@ -884,8 +854,8 @@ void Robot::on_gcode_received(Gcode *argument)
 // M2, M30: end of program, back to the modal state a program starts from
 void Robot::end_of_program(Gcode *gcode)
 {
+    reset_modal_state();
     current_wcs = 0;
-    absolute_mode = true;
     keepout_on = true;
     seconds_per_minute= 60;
     tool_head.stop_all();
@@ -936,16 +906,6 @@ void Robot::report_position(Gcode *gcode)
     char buf[80];
     format_position((position_source)gcode->subcode, tags[gcode->subcode], buf, sizeof(buf));
     gcode->stream->printf("%s\n", buf);
-}
-
-void Robot::push_state_gcode(Gcode *gcode)
-{
-    push_state();
-}
-
-void Robot::pop_state_gcode(Gcode *gcode)
-{
-    pop_state();
 }
 
 // M203 the cartesian feedrates, M203.1 the actuator ones
@@ -1295,11 +1255,11 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
         case NONE: break;
 
         case SEEK:
-            moved = this->append_line(gcode, target, this->seek_rate / seconds_per_minute);
+            moved = this->append_line(gcode, target, this->seek_rate / seconds_per_minute, false);
             break;
 
         case LINEAR:
-            moved = this->append_line(gcode, target, this->feed_rate / seconds_per_minute);
+            moved = this->append_line(gcode, target, this->feed_rate / seconds_per_minute, true);
             break;
 
         case CW_ARC:
@@ -1469,7 +1429,7 @@ void Robot::reset_position_from_current_actuator_position()
 // Convert target (in machine coordinates) to machine_position, then convert to actuator position and append this to the planner
 // target is in machine coordinates without the compensation transform, however we save a compensated_machine_position that includes
 // all transforms and is what we actually convert to actuator positions
-bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode)
+bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode, bool cutting)
 {
     float deltas[k_max_actuators];
     float transformed_target[k_max_actuators]; // adjust target for bed compensation
@@ -1659,10 +1619,8 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode
 
     // Append the block to the planner
     // NOTE that distance here should be either the distance travelled by the XYZ axis, or the E mm travel if a solo E move
-    // NOTE this call will bock until there is room in the block queue, on_idle will continue to be called
-    if(THEKERNEL->planner.append_block( actuator_pos, n_motors, rate_mm_s, distance, auxilliary_move ? nullptr : unit_vec, acceleration, s_value, is_g123, gcode != nullptr ? gcode->line : 0)) {
-// 2024
-//    if(THEKERNEL->planner.append_block( actuator_pos, n_motors, rate_mm_s, distance, auxilliary_move ? nullptr : unit_vec, acceleration, s_values, s_count, is_g123, line)) {
+    // NOTE this call blocks until there is room in the block queue
+    if(THEKERNEL->planner.append_block( actuator_pos, n_motors, rate_mm_s, distance, auxilliary_move ? nullptr : unit_vec, acceleration, s_value, cutting, gcode != nullptr ? gcode->line : 0)) {
         // this is the new compensated machine position
         memcpy(this->compensated_machine_position, transformed_target, n_motors * sizeof(float));
         return true;
@@ -1691,9 +1649,7 @@ bool Robot::delta_move(const float *delta, float rate_mm_s, uint8_t naxis)
         target[i] += delta[i];
     }
 
-    is_g123= false; // we don't want the laser to fire
-    // submit for planning and if moved update machine_position
-    if(append_milestone(target, rate_mm_s, nullptr)) {
+    if(append_milestone(target, rate_mm_s, nullptr, false)) {
          memcpy(machine_position, target, n_motors*sizeof(float));
          return true;
     }
@@ -1770,7 +1726,7 @@ bool Robot::clear_of_keepout(const float from[], const float to[], Gcode *gcode)
 }
 
 // Append a move to the queue ( cutting it into segments if needed )
-bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s)
+bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s, bool cutting)
 {
     // checked before segmenting, otherwise the segments inside the limit run before the refusal
     float transformed_target[k_max_actuators];
@@ -1790,7 +1746,7 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s)
 
     if(millimeters_of_travel < 0.00001F) {
         // we have no movement in XYZ, probably E only extrude or retract
-        return this->append_milestone(target, rate_mm_s, gcode);
+        return this->append_milestone(target, rate_mm_s, gcode, cutting);
     }
 
     /*
@@ -1845,14 +1801,14 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s)
 
             // Append the end of this segment to the queue
             // this can block waiting for free block queue or if in feed hold
-            bool b= this->append_milestone(segment_end, rate_mm_s, gcode);
+            bool b= this->append_milestone(segment_end, rate_mm_s, gcode, cutting);
             if(!gcode->error_text.empty()) return moved;
             moved= moved || b;
         }
     }
 
     // Append the end of this full move to the queue
-    if(this->append_milestone(target, rate_mm_s, gcode)) moved= true;
+    if(this->append_milestone(target, rate_mm_s, gcode, cutting)) moved= true;
 
     return moved;
 }
@@ -1860,7 +1816,7 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s)
 
 // Append an arc to the queue ( cutting it into segments as needed )
 // TODO does not support any E parameters so cannot be used for 3D printing.
-bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[], float radius, bool is_clockwise )
+bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[], float radius, bool is_clockwise, bool cutting )
 {
     float rate_mm_s= this->feed_rate / seconds_per_minute;
     // catch negative or zero feed rates and return the same error as GRBL does
@@ -1996,14 +1952,14 @@ bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[]
             arc_target[this->plane_axis_2] += linear_per_segment;
 
             // Append this segment to the queue
-            bool b= this->append_milestone(arc_target, rate_mm_s, gcode);
+            bool b= this->append_milestone(arc_target, rate_mm_s, gcode, cutting);
             if(!gcode->error_text.empty()) return moved;
             moved= moved || b;
         }
     }
 
     // Ensure last segment arrives at target location.
-    if(this->append_milestone(target, rate_mm_s, gcode)) moved= true;
+    if(this->append_milestone(target, rate_mm_s, gcode, cutting)) moved= true;
 
     return moved;
 }
@@ -2022,7 +1978,7 @@ bool Robot::compute_arc(Gcode * gcode, const float offset[], const float target[
     }
 
     // Append arc
-    return this->append_arc(gcode, target, offset,  radius, is_clockwise );
+    return this->append_arc(gcode, target, offset,  radius, is_clockwise, true );
 }
 
 
@@ -2079,12 +2035,6 @@ void Robot::setLaserOffset()
 
 void Robot::clearLaserOffset() {
 	this->g92_offset = wcs_t(0.0F, 0.0F, 0.0F);
-}
-
-
-float Robot::get_feed_rate() const
-{
-    return gcode_dispatch.get_modal_command() == 0 ? seek_rate : feed_rate;
 }
 
 bool Robot::is_homed(uint8_t i) const

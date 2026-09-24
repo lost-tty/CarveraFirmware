@@ -242,6 +242,18 @@ void init() {
 
 // no printf: this can run on the 512 byte main stack with interrupts off, and vfprintf
 // needs more than that. the file and line are in the registers for the debugger to read
+// newlib's heap is shared by every task, and its own lock hooks are empty by default. taking
+// the scheduler out rather than the interrupts: malloc is too long to run with them off
+extern "C" void __malloc_lock(struct _reent *)
+{
+    if(xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) vTaskSuspendAll();
+}
+
+extern "C" void __malloc_unlock(struct _reent *)
+{
+    if(xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) xTaskResumeAll();
+}
+
 extern "C" void vAssertCalled(const char *file, int line) {
     volatile const char *f= file;
     volatile int l= line;

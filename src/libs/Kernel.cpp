@@ -19,6 +19,7 @@
 #include "libs/Watchdog.h"
 #include "modules/robot/MachineTask.h"
 #include "modules/communication/Source.h"
+#include "modules/communication/GcodeDispatch.h"
 #include "modules/communication/SerialConsole.h"
 #include "modules/communication/WirelessProbe.h"
 #include "modules/robot/Planner.h"
@@ -256,7 +257,7 @@ std::string Kernel::get_query_string()
 
     // current feedrate and requested fr and override
     float fr= running ? THEROBOT.from_millimeters(THECONVEYOR.get_current_feedrate()*60.0F) : 0;
-    float frr= THEROBOT.from_millimeters(THEROBOT.get_feed_rate());
+    float frr= THEROBOT.from_millimeters(THEROBOT.get_feed_rate(gcode_dispatch.get_modal_command()));
     float fro= 6000.0F / THEROBOT.get_seconds_per_minute();
     n = snprintf(buf, sizeof(buf), "|F:%1.1f,%1.1f,%1.1f", fr, frr, fro);
     if(n > sizeof(buf)) n= sizeof(buf);

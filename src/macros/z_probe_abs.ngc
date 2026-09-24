@@ -1,5 +1,6 @@
 (probe Z on the rotary reference and set the work Z origin for 4th axis jobs)
 o<z_probe_abs> sub
+  G21 G90 G91.1 G17 (mm, absolute, arc centre relative, XY plane)
   M497.5
   G53 G0 Z#<_clearance_z>
   G53 G0 X[#<_anchor1_x> + #<_rotation_offset_x> - 3] Y[#<_anchor1_y> + #<_rotation_offset_y>]
@@ -8,4 +9,5 @@ o<z_probe_abs> sub
   G38.2 Z[-1 - #<_atc_probe_retract>] F#<_atc_probe_slow_rate>
   G10 L20 P0 Z#<_rotation_offset_z>
   G91 G0 Z#<_atc_probe_retract>
+  G90
 o<z_probe_abs> endsub

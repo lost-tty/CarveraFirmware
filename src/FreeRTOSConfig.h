@@ -47,6 +47,7 @@ void vAssertCalled(const char *file, int line);
 #define INCLUDE_vTaskDelayUntil             1
 #define INCLUDE_vTaskDelay                  1
 #define INCLUDE_uxTaskGetStackHighWaterMark	1
+#define INCLUDE_xTaskGetSchedulerState      1
 
 #define configKERNEL_INTERRUPT_PRIORITY 		( 7 << 5 )	/* Priority 7, or 255 as only the top three bits are implemented.  This is the lowest priority. */
 #define configMAX_SYSCALL_INTERRUPT_PRIORITY 	( 5 << 5 )  /* Priority 5, or 160 as only the top three bits are implemented. */

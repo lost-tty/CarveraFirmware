@@ -1,5 +1,6 @@
 (grid probe #3 x #4 mm from work #1 #2 with #5 x #6 points, safe height #7)
 o<auto_level> sub
+  G21 G90 G91.1 G17 (mm, absolute, arc centre relative, XY plane)
   M497.6
   G90 G0 X#1 Y#2
   G32 R1 X0 Y0 A#3 B#4 I#5 J#6 H#7

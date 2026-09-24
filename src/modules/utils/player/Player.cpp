@@ -191,8 +191,6 @@ void Player::play_command( string parameters, StreamOutput *stream )
         stream->printf("  File size %ld\r\n", file.size());
     }
     this->start_time = xTaskGetTickCount();
-
-    machine_task.prepare_for_job();
 }
 
 // Goto a certain line when playing a file

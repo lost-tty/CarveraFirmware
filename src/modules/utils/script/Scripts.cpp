@@ -106,15 +106,12 @@ bool Scripts::run(const char *sub, const float *args, unsigned nargs, StreamOutp
     if(!runner->start(sub, args, nargs, err)) return false;
     name= sub;
     reply= stream;
-    preamble= true;
-    machine_task.push_modal_state();
     sources.push(this);
     return true;
 }
 
 void Scripts::finish()
 {
-    machine_task.pop_modal_state();
     machine_task.enforce_keepout();
     atc_handler.set_state(0);
     reply= nullptr;
@@ -148,12 +145,6 @@ bool Scripts::trigger(const Gcode &gcode, StreamOutput *stream, std::string &err
 
 Source::Result Scripts::next(SerialMessage &msg)
 {
-    if(preamble) { // scripts are written in mm, absolute
-        preamble= false;
-        msg.message= "G21 G90";
-        return LINE;
-    }
-
     std::string err;
     switch(runner->step(msg.message, err)) {
         case script::Runner::LINE:

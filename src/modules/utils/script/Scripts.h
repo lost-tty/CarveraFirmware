@@ -42,7 +42,6 @@ private:
     script::Runner *runner= nullptr;
     StreamOutput *reply= nullptr;       // caller waiting for ok/error
     std::string name;                   // sub being run, for messages
-    bool preamble= false;               // G21 G90 still to be sent before the first script line
     bool loaded= false;
     bool trace= false;                  // echo every executed line with its origin
 };

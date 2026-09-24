@@ -38,6 +38,7 @@ public:
     void init();
 
     uint8_t get_modal_command() const { return modal_group_1; }
+
     bool homed_check_enabled() const { return homed_check; }
     Parameters &parameters() { return params; }
     void set_script_hook(ScriptHook *hook) { scripts= hook; }

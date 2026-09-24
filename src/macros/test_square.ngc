@@ -1,5 +1,6 @@
 (square of #1 mm at feed #2, #3 times, from the current position)
 o<test_square> sub
+  G21 G90 G91.1 G17 (mm, absolute, arc centre relative, XY plane)
   G91
   o1 repeat [#3]
     G1 X#1 F#2

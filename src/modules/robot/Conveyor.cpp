@@ -127,11 +127,10 @@ void Conveyor::collect()
 
 // see if we are idle
 // this checks the block queue is empty, and that the step queue is empty and
-// checks that all motors are no longer moving
 unsigned int Conveyor::running_line() const
 {
     const Block *block= THEKERNEL->step_ticker.get_current_block();
-    if(block != nullptr && block->is_ready && block->is_g123) return block->line;
+    if(block != nullptr && block->is_ready) return block->line;
     return 0;
 }
 

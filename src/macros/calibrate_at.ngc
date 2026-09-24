@@ -15,4 +15,5 @@ o<calibrate_at> sub
   o2 if [#2 NE 0]
     M492.3
   o2 endif
+  G90
 o<calibrate_at> endsub

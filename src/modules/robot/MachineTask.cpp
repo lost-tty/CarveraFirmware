@@ -104,21 +104,6 @@ bool MachineTask::homed() const
     return THEROBOT.is_homed_all_axes();
 }
 
-void MachineTask::push_modal_state()
-{
-    THEROBOT.push_state();
-}
-
-void MachineTask::pop_modal_state()
-{
-    THEROBOT.pop_state();
-}
-
-bool MachineTask::prepare_for_job()
-{
-    return post([](Gcode &, OnMachine) { THEROBOT.reset_modal_state(); }, Gcode{});
-}
-
 void MachineTask::enforce_keepout()
 {
     THEROBOT.set_keepout(true);

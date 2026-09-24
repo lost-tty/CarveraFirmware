@@ -71,7 +71,7 @@ class Block {
             bool nominal_length_flag:1;          // Planner flag for nominal speed always reached
             bool is_ready:1;
             bool primary_axis:1;                 // set if this move is a primary axis
-            bool is_g123:1;                      // set if this is a G1, G2 or G3
+            bool cutting:1;                      // G1/G2/G3: the laser fires only on these
 
             uint16_t s_value:12;                 // for laser 1.11 Fixed point
         };

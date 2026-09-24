@@ -50,8 +50,8 @@ void Planner::config_load()
 
 // Append a block to the queue, compute it's speed factors
 // 2024
-bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors, float rate_mm_s, float distance, float *unit_vec, float acceleration, float s_value, bool g123, unsigned int _line)
-// bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors, float rate_mm_s, float distance, float *unit_vec, float acceleration, float *s_values, int s_count, bool g123, unsigned int _line)
+bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors, float rate_mm_s, float distance, float *unit_vec, float acceleration, float s_value, bool cutting, unsigned int _line)
+// bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors, float rate_mm_s, float distance, float *unit_vec, float acceleration, float *s_values, int s_count, bool cutting, unsigned int _line)
 {
     // Create ( recycle ) a new block
     Block* block = THECONVEYOR.queue.head_ref();
@@ -99,7 +99,7 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
     // 2024
     float power = s_value / THEROBOT.get_max_s_value();
     block->s_value = roundf((power < 0.0F ? 0.0F : power > 1.0F ? 1.0F : power) * (1 << 11));
-    block->is_g123 = g123;
+    block->cutting = cutting;
 
     /*
 	block->move_axis = bigaxis;
@@ -109,7 +109,7 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
 	}
 	block->s_value = block->s_values[0];
 
-	block->is_g123 = g123;
+	block->cutting = cutting;
 	*/
 
     // use default JD

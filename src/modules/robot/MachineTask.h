@@ -86,11 +86,7 @@ public:
     unsigned int running_line() const;
 
     bool homed() const;
-    bool prepare_for_job();
     void enforce_keepout();
-
-    void push_modal_state();
-    void pop_modal_state();
 
     void drop_all();
 

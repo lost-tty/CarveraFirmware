@@ -276,7 +276,7 @@ bool Laser::get_laser_power(float& power) const
 
     // Note to avoid a race condition where the block is being cleared we check the is_ready flag which gets cleared first,
     // as this is an interrupt if that flag is not clear then it cannot be cleared while this is running and the block will still be valid (albeit it may have finished)
-    if (block != nullptr && block->is_ready && block->is_g123) {
+    if (block != nullptr && block->is_ready && block->cutting) {
     	// 2024
         float requested_power = (float)block->s_value / (1 << 11);
         float ratio = current_speed_ratio(block);
