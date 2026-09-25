@@ -9,6 +9,7 @@
 #include "Persist.h"
 #include "checksumm.h"
 #include <cstring>
+#include <math.h>
 #include "libs/Kernel.h"
 #include "GcodeDispatch.h"
 #include "Config.h"
@@ -78,7 +79,6 @@ void ATCHandler::on_module_loaded()
 	tool_detected = false;
     atc_home_info.clamp_status = UNHOMED;
     atc_home_info.triggered = false;
-    detector_info.triggered = false;
 
 
     ADD_MCODE(m490, 490, BARRIER, ATCHandler::clamp_gcode);
@@ -91,9 +91,6 @@ void ATCHandler::on_module_loaded()
 
     this->register_params();
     SimpleShell::add_command(shell_slot, "atc", &ATCHandler::shell, this, "atc [rack] - tool and clamp state, rack geometry");
-
-	read_endstop_timer.start();
-	read_detector_timer.start();
 }
 
 void ATCHandler::on_config_reload(void *argument)
@@ -150,44 +147,6 @@ void ATCHandler::cleanup()
     this->atc_home_info.clamp_status = UNHOMED;
 }
 
-// Called every millisecond in an ISR
-void ATCHandler::read_endstop()
-{
-
-	if(!atc_homing || atc_home_info.triggered) return;
-
-    if(THEROBOT.motor_is_moving(ATC_AXIS)) {
-        // if it is moving then we check the probe, and debounce it
-        if(atc_home_info.pin.get()) {
-            if(debounce < atc_home_info.debounce_ms) {
-                debounce++;
-            } else {
-            	THEROBOT.stop_motor(ATC_AXIS);
-            	atc_home_info.triggered = true;
-                debounce = 0;
-            }
-
-        } else {
-            // The endstop was not hit yet
-            debounce = 0;
-        }
-    }
-
-    return;
-}
-
-// Called every millisecond in an ISR
-void ATCHandler::read_detector()
-{
-    if(!detecting || detector_info.triggered) return;
-
-    if (detector_info.detect_pin.get()) {
-    	detector_info.triggered = true;
-    }
-
-    return;
-}
-
 void ATCHandler::countdown_probe_laser()
 {
 	if (this->probe_laser_countdown > 0) {
@@ -211,20 +170,26 @@ bool ATCHandler::laser_detect() {
     }
 
     // move around and check laser detector
-    detecting = true;
-    detector_info.triggered = false;
+    atc_watch.inputs.clear();
+    atc_watch.witness.clear();
+    atc_watch.inputs.add(detector_info.detect_pin);
+    atc_watch.motors= 1 << Y_AXIS;
+    atc_watch.hysteresis= 0;
+    atc_watch.observe= true;
 
 	float delta[Y_AXIS + 1] = {0};
 	float half = detector_info.detect_travel / 2;
+	bool detected = false;
 	delta[Y_AXIS] = half;
-	if(!THEROBOT.delta_move_sync(delta, detector_info.detect_rate, Y_AXIS + 1)) return false;
+	if(!THEROBOT.delta_move_watch(delta, detector_info.detect_rate, Y_AXIS + 1, atc_watch)) return false;
+	detected |= atc_watch.hit;
 	delta[Y_AXIS] = -detector_info.detect_travel;
-	if(!THEROBOT.delta_move_sync(delta, detector_info.detect_rate, Y_AXIS + 1)) return false;
+	if(!THEROBOT.delta_move_watch(delta, detector_info.detect_rate, Y_AXIS + 1, atc_watch)) return false;
+	detected |= atc_watch.hit;
 	delta[Y_AXIS] = half;
-	if(!THEROBOT.delta_move_sync(delta, detector_info.detect_rate, Y_AXIS + 1)) return false;
+	if(!THEROBOT.delta_move_watch(delta, detector_info.detect_rate, Y_AXIS + 1, atc_watch)) return false;
+	detected |= atc_watch.hit;
 
-
-	detecting = false;
 	// switch off detector
 	switch_state = false;
     ok = SwitchPool::set_state(detector_switch_checksum, switch_state);
@@ -236,7 +201,7 @@ bool ATCHandler::laser_detect() {
     // reset position
     THEROBOT.reset_position_from_current_actuator_position();
 
-    return detector_info.triggered;
+    return detected;
 }
 
 bool ATCHandler::probe_detect() {
@@ -254,14 +219,21 @@ void ATCHandler::home_clamp()
 
     atc_home_info.triggered = false;
     atc_home_info.clamp_status = UNHOMED;
-    debounce = 0;
-    atc_homing = true;
 
-    // home atc
+    atc_watch.inputs.clear();
+    atc_watch.witness.clear();
+    atc_watch.inputs.add(atc_home_info.pin);
+    atc_watch.motors= 1 << ATC_AXIS;
+    float steps_per_mm = THEROBOT.motor_steps_per_mm(ATC_AXIS);
+    // the switch has to hold for debounce_ms at the homing rate, at least one step
+    atc_watch.hysteresis= (uint16_t)ceilf(atc_home_info.debounce_ms / 1000.0F * atc_home_info.homing_rate
+                                          * steps_per_mm);
+    atc_watch.observe= false;
+
 	float delta[ATC_AXIS + 1] = {0};
 	delta[ATC_AXIS] = atc_home_info.max_travel; // we go the max
-	bool moved = THEROBOT.delta_move_sync(delta, atc_home_info.homing_rate, ATC_AXIS + 1);
-	atc_homing = false;
+	bool moved = THEROBOT.delta_move_watch(delta, atc_home_info.homing_rate, ATC_AXIS + 1, atc_watch);
+	atc_home_info.triggered = atc_watch.hit;
 	if(!moved) return;
 
     if (!atc_home_info.triggered) {
@@ -272,8 +244,9 @@ void ATCHandler::home_clamp()
     	THEROBOT.reset_position_from_current_actuator_position();
     }
 
-    // Move back
-	delta[ATC_AXIS] = -atc_home_info.retract; // we go to retract position
+    // the retract is measured from the switch edge, not from where the braking ended
+	float past_edge = (THEROBOT.motor_step(ATC_AXIS) - atc_watch.at_steps[ATC_AXIS]) / steps_per_mm;
+	delta[ATC_AXIS] = -atc_home_info.retract - past_edge;
 	if(!THEROBOT.delta_move_sync(delta, atc_home_info.homing_rate, ATC_AXIS + 1)) return;
 
 	atc_home_info.clamp_status = CLAMPED;

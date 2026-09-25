@@ -197,8 +197,10 @@ void StepTicker::check_watch()
     }
     if(!travelled) return;
 
-    for (uint8_t m = 0; m < num_motors; m++) {
-        if(watch->motors & (1 << m)) stop_motor(m);
+    if(!watch->observe) {
+        for (uint8_t m = 0; m < num_motors; m++) {
+            if(watch->motors & (1 << m)) stop_motor(m);
+        }
     }
     watch->hit= true;
 }

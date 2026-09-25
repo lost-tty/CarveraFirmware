@@ -10,6 +10,7 @@ class Gcode;
 #include "SoftTimer.h"
 #include "SimpleShell.h"
 #include "libs/McodeRegistry.h"
+#include "libs/Watch.h"
 
 class ATCHandler : public Module, public Killable
 {
@@ -24,9 +25,7 @@ public:
     void set_ref_tool_mz();
 
     ATCHandler()
-    : probe_laser_timer("ProbeLaserCountdown", 1000, true, this, &ATCHandler::countdown_probe_laser),
-	read_endstop_timer("AtcReadEndstop", 1, true, this, &ATCHandler::read_endstop), // 1kHz
-	read_detector_timer("AtcReadDetector", 1, true, this, &ATCHandler::read_detector) // 1kHz
+    : probe_laser_timer("ProbeLaserCountdown", 1000, true, this, &ATCHandler::countdown_probe_laser)
     {}
 
     void on_module_loaded();
@@ -59,8 +58,6 @@ private:
     } CLAMP_STATUS;
 
 
-    void read_endstop(void);
-    void read_detector(void);
     void countdown_probe_laser();
 
     void switch_probe_laser(bool state);
@@ -90,16 +87,12 @@ private:
 
 
 
-    uint16_t debounce;
-    bool atc_homing;
-    bool detecting;
+    Watch atc_watch;   // the isr holds a pointer to this, so it outlives the move
     bool tool_detected; // result of the last M492 laser check
 
 
     uint16_t probe_laser_countdown;
     SoftTimer probe_laser_timer;
-    SoftTimer read_endstop_timer;
-    SoftTimer read_detector_timer;
 
     using atc_homing_info_t = struct {
         Pin pin;
@@ -121,7 +114,6 @@ private:
         Pin detect_pin;
         float detect_rate;
         float detect_travel;
-        bool triggered;
     };
     detector_info_t detector_info;
 
