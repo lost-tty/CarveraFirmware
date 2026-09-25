@@ -22,13 +22,14 @@
 #include "Robot.h"
 #include "MachineTask.h"
 #include "StepperMotor.h"
+#include "libs/StepCompress.h"
 #include "libs/DeferredWake.h"
 
 #include <functional>
 
 #include "mbed.h"
 
-#define queue_delay_time_ms_checksum CHECKSUM("queue_delay_time_ms")
+#define brake_limit_checksum         CHECKSUM("brake_limit")
 
 /*
  * The conveyor holds the queue of blocks, takes care of creating them, and starting the executing chain of blocks
@@ -61,21 +62,27 @@
 void Conveyor::init()
 {
     running = false;
-    allow_fetch = false;
     flush = false;
-    force_fetch = false;
 }
 
 void Conveyor::on_module_loaded()
 {
+    brake_limit = THEKERNEL->config->value(brake_limit_checksum)->by_default(8.0F)->as_number();
+    if(brake_limit < 1.0F) {
+        printk("FATAL: brake_limit must be >= 1.0, got %f\n", brake_limit);
+        return;
+    }
 
-    // Attach to the end_of_move stepper event
-    queue_delay_time_ms = THEKERNEL->config->value(queue_delay_time_ms_checksum)->by_default(100)->as_number();
+    initialized= true;
 }
 
 // we allocate the queue here after config is completed so we do not run out of memory during config
 void Conveyor::start(uint8_t n_actuators)
 {
+    if(!initialized) {
+        printk("FATAL: conveyor not configured, the machine will not move\n");
+        return;
+    }
     Block::init(n_actuators);
 
     running = true;
@@ -86,11 +93,102 @@ void Conveyor::cleanup()
     flush_queue();
 }
 
+void Conveyor::rewind_feed()
+{
+    THEKERNEL->step_ticker.steps().clear();
+    for (unsigned int i = queue.isr_tail_i; i != queue.head_i; i= queue.next(i)) {
+        queue.item_ref(i)->is_ticking= false;
+    }
+    fed_i= queue.isr_tail_i;
+    fed_steps= 0;
+}
+
+void Conveyor::feed_stream()
+{
+    StepTicker &ticker= THEKERNEL->step_ticker;
+
+    if(flush) {
+        return;
+    }
+
+    while(fed_i != queue.head_i) {
+        Block *b= queue.item_ref(fed_i);
+        if(!b->is_ready || b->locked) {
+            break;
+        }
+
+        unsigned int ahead= 0;
+        for (unsigned int i= queue.isr_tail_i; i != fed_i; i= queue.next(i)) {
+            ahead++;
+        }
+        if(ahead >= k_feed_ahead && queue.next(fed_i) != queue.head_i) {
+            break;
+        }
+
+        uint32_t whole= b->steps_event_count();
+        uint32_t total= whole > b->resume_at ? whole - b->resume_at : 0;
+        if(total == 0) {
+            fed_i= queue.next(fed_i);
+            fed_steps= 0;
+            continue;
+        }
+
+        if(ticker.steps().full()) {
+            break;
+        }
+
+        uint32_t up= b->ramp.accel_steps;
+        uint32_t down= b->ramp.decel_steps;
+        if(up > total) up= total;
+        if(down > total - up) down= total - up;
+        uint32_t plateau_end= total - down;
+
+        if(fed_steps == 0) {
+            int32_t decel= 0;
+            if(b->millimeters > 0.0F) {
+                float per_mm= (float)whole / b->millimeters;
+                decel= (int32_t)(b->acceleration * brake_limit * per_mm);
+            }
+            if(decel < 1) decel= 1;
+            if(!ticker.steps().push_mark(fed_i, decel)) {
+                break;
+            }
+            b->is_ticking= true;
+        }
+
+        if(fed_steps < up) {
+            fed_steps= StepCompress::ramp(ticker.steps(), b->ramp.entry_rate,
+                                          b->ramp.plateau_rate, up, fed_steps);
+            if(fed_steps < up) {
+                break;                   // the ring filled inside the ramp
+            }
+        }
+
+        if(fed_steps >= up && fed_steps < plateau_end) {
+            fed_steps+= StepCompress::plateau(ticker.steps(), b->ramp.plateau_rate,
+                                              plateau_end - fed_steps);
+        }
+
+        if(fed_steps >= plateau_end && fed_steps < total) {
+            uint32_t into= StepCompress::ramp(ticker.steps(), b->ramp.plateau_rate,
+                                              b->ramp.exit_rate, down, fed_steps - plateau_end);
+            fed_steps= plateau_end + into;
+        }
+
+        if(fed_steps < total) {
+            break;
+        }
+
+        fed_i= queue.next(fed_i);
+        fed_steps= 0;
+    }
+}
+
 void Conveyor::service()
 {
     // running is false while the main task drains: then every block goes to the ticker at once
-    check_queue(!running || force_fetch);
-    force_fetch= false;
+    feed_stream();
+
     collect();
 
     // the actions went with the blocks they were written after. the moves went with them too,
@@ -120,7 +218,14 @@ void Conveyor::collect()
     queue.consume_tail();
 
     // a halt has already stopped the outputs: an action now would switch one back on
-    if(machine_task.is_halted()) pending_actions.clear();
+    if(machine_task.is_halted()) {
+        pending_actions.clear();
+        for (unsigned int i = queue.isr_tail_i; i != queue.head_i; i= queue.next(i)) {
+            queue.item_ref(i)->is_ticking= false;
+        }
+        fed_i= queue.isr_tail_i;
+        fed_steps= 0;
+    }
 
     // an action handler reaches the conveyor again through its own calls; it must not recurse here
     if(in_actions != nullptr) return;
@@ -199,53 +304,8 @@ void Conveyor::queue_head_block()
     THEROBOT.enable_motors(true);
 }
 
-void Conveyor::check_queue(bool force)
-{
-    static uint32_t last_time_check = us_ticker_read();
-
-    if(queue.is_empty()) {
-        allow_fetch = false;
-        last_time_check = us_ticker_read(); // reset timeout
-        return;
-    }
-
-    // if we have been waiting for more than the required waiting time and the queue is not empty, or the queue is full, then allow stepticker to get the tail
-    // we do this to allow an idle system to pre load the queue a bit so the first few blocks run smoothly.
-    if(force || queue.is_full() || (us_ticker_read() - last_time_check) >= (queue_delay_time_ms * 1000)) {
-        last_time_check = us_ticker_read(); // reset timeout
-        if(!flush) allow_fetch = true;
-        return;
-    }
-}
 
 // called from step ticker ISR
-bool Conveyor::get_next_block(Block **block)
-{
-    // mark entire queue for GC if flush flag is asserted
-
-    // default the feerate to zero if there is no block available
-    this->current_feedrate= 0;
-
-    if(machine_task.is_halted() || queue.isr_tail_i == queue.head_i) return false; // we do not have anything to give
-
-
-    // wait for queue to fill up, optimizes planning
-    if(!allow_fetch) return false;
-
-    Block *b= queue.item_ref(queue.isr_tail_i);
-    // we cannot use this now if it is being updated
-    if(!b->locked) {
-        if(!b->is_ready) __debugbreak(); // should never happen
-
-        b->is_ticking= true;
-        b->recalculate_flag= false;
-        this->current_feedrate= b->nominal_speed;
-        *block= b;
-        return true;
-    }
-
-    return false;
-}
 
 // the step ticker is above configMAX_SYSCALL_INTERRUPT_PRIORITY, so it cannot notify directly
 extern "C" void RIT_IRQHandler(void)
@@ -261,6 +321,14 @@ void Conveyor::wake_server()
 }
 
 // called from step ticker ISR when block is finished, do not do anything slow here
+Block *Conveyor::take_block(unsigned int i)
+{
+    queue.isr_tail_i= i;
+    Block *b= queue.item_ref(i);
+    current_feedrate= b->nominal_speed;
+    return b;
+}
+
 void Conveyor::block_finished()
 {
     // we increment the isr_tail_i so we can get the next block
@@ -294,7 +362,6 @@ bool Conveyor::wait_for_block(bool &halted)
 */
 void Conveyor::force_queue()
 {
-    force_fetch= true;
     if(server != nullptr) xTaskNotifyGiveIndexed(server, k_notify_index);
 }
 
@@ -320,7 +387,12 @@ void Conveyor::flush_queue()
 // from the step ISR, only while it stands: the queue is dropped in one move
 void Conveyor::drop_queue()
 {
-    if(flush) queue.isr_tail_i= queue.head_i;
+    if(flush) {
+        THEKERNEL->step_ticker.steps().clear();
+        queue.isr_tail_i= queue.head_i;
+        fed_i= queue.head_i;
+        fed_steps= 0;
+    }
 }
 
 // Debug function

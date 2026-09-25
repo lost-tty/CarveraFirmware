@@ -118,12 +118,12 @@ GPIO leds[4] = {
 
 Watchdog watchdog (10000, WDT_RESET);  // 10 seconds default, WDT_RESET
 Kernel kernel;
-Conveyor THECONVEYOR __attribute__((section("AHBSRAM")));
+Conveyor THECONVEYOR;
 Robot THEROBOT;
 GcodeDispatch gcode_dispatch;
 SourceStack sources;
 SimpleShell simpleshell __attribute__((section("AHBSRAM")));
-WifiProvider wifi_provider;
+WifiProvider wifi_provider __attribute__((section("AHBSRAM")));
 WebServer web_server (&wifi_provider);
 
 Player player;
@@ -298,7 +298,7 @@ void vTaskMainLoop(void *pvParameters) {
 #define MAINLOOP_STACK_SIZE 1024
 #endif
 
-StackType_t mainLoopStackBuffer[MAINLOOP_STACK_SIZE];
+StackType_t mainLoopStackBuffer[MAINLOOP_STACK_SIZE] __attribute__((section("AHBSRAM")));
 StaticTask_t mainLoopTaskBuffer;
 
 int main() {

@@ -34,11 +34,13 @@ public:
     bool wait_for_idle(bool wait_for_motors=true); // false when a halt cut the wait short
     bool stop_soon();
 
-    bool get_next_block(Block **block);
+    Block *take_block(unsigned int i);
     void block_finished();
     void wake_server();
 
     void flush_queue(void);
+
+    void rewind_feed();
     void drop_queue(void);   // ISR, while standing: the flushed queue goes in one move
     bool flushing() const { return flush; }
     void force_queue();   // a jog runs now, not after the pre-load wait
@@ -73,9 +75,11 @@ public:
 private:
     void dump_queue(void);
     bool is_queue_full() { return queue.is_full(); };
-    void check_queue(bool force= false);
     void collect();
     void queue_head_block(void);
+
+    static const unsigned int k_feed_ahead= 8;
+    void feed_stream();
 
     static const UBaseType_t k_notify_index = 1;
     bool wait_for_block(bool &halted);
@@ -89,14 +93,15 @@ private:
     volatile TaskHandle_t in_actions{nullptr};   // the task inside an action handler, if any
     uint32_t queued{0};
     volatile uint32_t finished{0};
+    unsigned int fed_i{0};
+    uint32_t fed_steps{0};
 
 
-    uint32_t queue_delay_time_ms;
+    float brake_limit;
+    bool initialized{false};
     float current_feedrate{0}; // actual nominal feedrate that current block is running at in mm/sec
 
     // separate bytes so unlocked cross-task writes do not read-modify-write each other
     volatile bool running;
-    volatile bool allow_fetch;
     volatile bool flush;
-    volatile bool force_fetch;
 };

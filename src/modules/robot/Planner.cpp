@@ -234,19 +234,24 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
 
 void Planner::resume_held()
 {
-    uint32_t done[k_max_actuators];
-    if(!THEKERNEL->step_ticker.take_held(done, k_max_actuators)) return;
+    if(THEKERNEL->step_ticker.motion() != StepTicker::HELD) return;
 
     Conveyor::Queue_t &queue= THECONVEYOR.queue;
     if(queue.isr_tail_i == queue.head_i) return;
 
     Block *held= queue.item_ref(queue.isr_tail_i);
-    held->shorten_by(done, k_max_actuators, minimum_planner_speed);
+    uint32_t at= THEKERNEL->step_ticker.held_path();
+    uint32_t total= held->steps_event_count();
+    held->resume_at= at > total ? total : at;
+    held->entry_speed= held->max_entry_speed= minimum_planner_speed;
+    held->recalculate_flag= true;
+    held->is_ticking= false;
 
-    // the pass stops at the first flag an earlier pass cleared: everything from the standstill on is planned again
+    THECONVEYOR.rewind_feed();
+
     for (unsigned int i = queue.isr_tail_i; i != queue.head_i; i = queue.next(i))
         queue.item_ref(i)->recalculate_flag= true;
-    recalculate(queue.prev(queue.head_i));   // head_i is the empty slot
+    recalculate(queue.prev(queue.head_i));
 }
 
 void Planner::recalculate()

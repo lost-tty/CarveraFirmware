@@ -248,14 +248,11 @@ void MachineTask::trace()
         printk("[motion] +%lums %s feed_hold=%d paused=%d slots=%d\n", (unsigned long)ms, names[m], hold, t.paused(), used);
         return;
     }
-    float f= t.get_frequency();
-    float fp= (float)STEPTICKER_FPSCALE;
-    float cap= (float)t.hold_rate() / fp * f;                                  // steps/s, longest axis
-    float a= (float)b->ramp.brake_change / fp * f * f;                          // steps/s^2, longest axis
     uint32_t steps= b->steps_event_count();
-    float plateau= steps ? (float)b->ramp.plateau_rate / fp * f * b->millimeters / steps : 0.f;
-    printk("[motion] +%lums %s feed_hold=%d paused=%d resumable=%d slots=%d cap=%.0f a=%.0f | %.3fmm entry=%.2f plateau=%.2f exit=%.2f\n",
-           (unsigned long)ms, names[m], hold, t.paused(), t.resumable(), used, cap, a,
+    float cap= t.path_rate(); // steps/s, longest axis
+    float plateau= steps ? b->ramp.plateau_rate * b->millimeters / steps : 0.f;
+    printk("[motion] +%lums %s feed_hold=%d paused=%d resumable=%d slots=%d cap=%.0f | %.3fmm entry=%.2f plateau=%.2f exit=%.2f\n",
+           (unsigned long)ms, names[m], hold, t.paused(), t.resumable(), used, cap,
            b->millimeters, b->entry_speed, plateau, b->exit_speed);
 }
 

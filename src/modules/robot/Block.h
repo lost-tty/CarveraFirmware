@@ -26,20 +26,18 @@ class Block {
         void ready() { is_ready= true; }
         void clear();
 
-        void shorten_by(const uint32_t done[], uint8_t n, float standstill);
+        uint32_t resume_at{0};
+        float remaining_mm() const;
         void set_ratios();
 
         uint32_t steps_event_count() const; // steps of the longest axis
         float nominal_rate() const { return steps_event_count() * nominal_speed / millimeters; } // steps per second
 
-        static float ticks_squared() { return fp_scale; }
 
     private:
         float max_allowable_speed( float acceleration, float target_velocity, float distance);
-        void prepare(float initial_rate, float maximum_rate, float acceleration_in_steps, float deceleration_in_steps, float brake_in_steps);
+        void prepare(float initial_rate, float maximum_rate, float final_rate, float accel_distance, float decel_distance);
 
-        static float fp_scale;      // 2.62 per tick^2 for a steps/s^2 value
-        static float tick_seconds;  // 1 / step ticker frequency
 
     public:
         std::array<uint32_t, k_max_actuators> steps; // Number of steps for each axis for this block
@@ -52,22 +50,18 @@ class Block {
         float max_entry_speed;
         unsigned int line;
 
-        // this is tick info needed for this block. applies to all motors
-        uint32_t accelerate_until;
-        uint32_t decelerate_after;
-        uint32_t total_move_ticks;
         uint8_t direction_bits;   // one bit per motor
 
-        // ramp of the longest axis in 2.62 fixed point; each motor's position follows the path by its
-        // ratio. The running state lives in StepTicker.
+        // the trapezoid of the longest axis, in steps/s
         struct {
-            int64_t steps_per_tick;      // at block start
-            int64_t acceleration_change; // at block start, signed
-            int64_t deceleration_change;
-            int64_t plateau_rate;
-            int64_t brake_change;   // the configured deceleration, for a hold: deceleration_change is 0 on a block that cruises out
+            float entry_rate;      // steps/s at the start
+            float plateau_rate;    // steps/s once it is up to speed
+            float exit_rate;       // steps/s at the end
+            uint32_t accel_steps;  // steps spent getting to the plateau
+            uint32_t decel_steps;  // steps spent coming off it
         } ramp;
         uint32_t ratio[k_max_actuators]; // steps[m] / steps_event_count in 0.32 fixed point, 0 for the longest axis
+        uint64_t first_owed[k_max_actuators];
 
         static uint8_t n_actuators;
 

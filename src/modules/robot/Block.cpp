@@ -11,6 +11,7 @@
 #include <cmath>
 #include <string>
 #include "Block.h"
+#include "StepTicker.h"
 #include "libs/Profile.h"
 #include "Conveyor.h"
 #include "Gcode.h"
@@ -25,8 +26,6 @@ using std::min;
 #define STEP_TICKER_FREQUENCY THEKERNEL->step_ticker.get_frequency()
 
 uint8_t Block::n_actuators= 0;
-float Block::fp_scale= 0;
-float Block::tick_seconds= 0;
 
 // A block represents a movement, it's length for each stepper motor, and the corresponding acceleration curves.
 // It's stacked on a queue, and that queue is then executed in order, to move the motors.
@@ -42,8 +41,6 @@ Block::Block()
 void Block::init(uint8_t n)
 {
     n_actuators= n;
-    fp_scale= (float)((double)STEPTICKER_FPSCALE / pow((double)STEP_TICKER_FREQUENCY, 2.0));
-    tick_seconds= 1.0F / STEP_TICKER_FREQUENCY;
 }
 
 void Block::clear()
@@ -57,56 +54,45 @@ void Block::clear()
     entry_speed         = 0.0F;
     exit_speed          = 0.0F;
     acceleration        = 100.0F; // we don't want to get divide by zeroes if this is not set
-    accelerate_until    = 0;
-    decelerate_after    = 0;
-    total_move_ticks    = 0;
     recalculate_flag    = false;
     nominal_length_flag = false;
     max_entry_speed     = 0.0F;
     is_ticking          = false;
+    resume_at           = 0;
     cutting             = false;
     locked              = false;
     s_value             = 0;
 
-    ramp.steps_per_tick= 0;
-    ramp.acceleration_change= 0;
-    ramp.deceleration_change= 0;
-    ramp.brake_change= 0;
+    ramp.entry_rate= 0;
     ramp.plateau_rate= 0;
-    for(int i = 0; i < n_actuators; ++i) ratio[i]= 0;
+    ramp.exit_rate= 0;
+    ramp.accel_steps= 0;
+    ramp.decel_steps= 0;
+    for(int i = 0; i < n_actuators; ++i) { ratio[i]= 0; first_owed[i]= 0; }
 }
 
 // each motor's share of the longest axis, 0.32 fixed point; 0 marks the longest axis itself
+float Block::remaining_mm() const
+{
+    uint32_t total= steps_event_count();
+    if(total == 0 || resume_at == 0) {
+        return millimeters;
+    }
+    if(resume_at >= total) {
+        return 0.0F;
+    }
+    return millimeters * (float)(total - resume_at) / (float)total;
+}
+
 void Block::set_ratios()
 {
     uint32_t longest= steps_event_count();
-    for (uint8_t i = 0; i < n_actuators; i++)
+    for (uint8_t i = 0; i < n_actuators; i++) {
         ratio[i]= steps[i] == longest ? 0 : (uint32_t)((((uint64_t)steps[i] << 32) + longest / 2) / longest);
-}
-
-void Block::shorten_by(const uint32_t done[], uint8_t n, float standstill)
-{
-    uint32_t was= steps_event_count();
-    if(was == 0) return;
-
-    for (uint8_t i = 0; i < n && i < n_actuators; i++)
-        steps[i]= done[i] >= steps[i] ? 0 : steps[i] - done[i];
-
-    uint32_t left= steps_event_count();
-    if(left == 0) {
-        exit_speed= standstill;   // nothing left: start_next_block drops it; still ticking, so the planner leaves it be
-        return;
+        first_owed[i]= StepTicker::owed_at(1, ratio[i]);
     }
-
-    millimeters*= (float)left / was;
-    set_ratios();
-
-    // the rest starts from a standstill; the trapezoid is the planner's, against the block behind it
-    entry_speed= max_entry_speed= standstill;
-    nominal_length_flag= nominal_speed <= max_allowable_speed(-acceleration, standstill, millimeters);
-    recalculate_flag= true;
-    is_ticking= false;
 }
+
 
 uint32_t Block::steps_event_count() const
 {
@@ -121,15 +107,16 @@ void Block::debug() const
     for (size_t i = E_AXIS; i < n_actuators; ++i) {
         printk("%c:%lu ", 'A' + i-E_AXIS, this->steps[i]);
     }
-    printk("(max:%lu) nominal:r%1.4f/s%1.4f mm:%1.4f acc:%1.2f accu:%lu decu:%lu ticks:%lu entry/max:%1.4f/%1.4f exit:%1.4f primary:%d ready:%d locked:%d ticking:%d recalc:%d nomlen:%d time:%f\r\n",
+    printk("(max:%lu) nominal:r%1.4f/s%1.4f mm:%1.4f acc:%1.2f accel/plat/decel:%lu/%lu/%lu "
+           "entry/max:%1.4f/%1.4f exit:%1.4f primary:%d ready:%d locked:%d ticking:%d recalc:%d nomlen:%d\r\n",
                                steps_event_count(),
                                nominal_rate(),
                                this->nominal_speed,
                                this->millimeters,
                                this->acceleration,
-                               this->accelerate_until,
-                               this->decelerate_after,
-                               this->total_move_ticks,
+                               (unsigned long)ramp.accel_steps,
+                               (unsigned long)(steps_event_count() - ramp.accel_steps - ramp.decel_steps),
+                               (unsigned long)ramp.decel_steps,
                                this->entry_speed,
                                this->max_entry_speed,
                                this->exit_speed,
@@ -138,8 +125,7 @@ void Block::debug() const
                                this->locked,
                                this->is_ticking,
                                recalculate_flag ? 1 : 0,
-                               nominal_length_flag ? 1 : 0,
-                               total_move_ticks/STEP_TICKER_FREQUENCY
+                               nominal_length_flag ? 1 : 0
                               );
 }
 
@@ -159,8 +145,11 @@ void Block::calculate_trapezoid( float entryspeed, float exitspeed )
     // if block is currently executing, don't touch anything!
     if (is_ticking) return;
 
-    uint32_t steps_event_count = this->steps_event_count();
-    float steps_per_mm = steps_event_count / this->millimeters;   // along the longest axis
+    uint32_t total = this->steps_event_count();
+    uint32_t played = this->resume_at < total ? this->resume_at : total;
+    uint32_t steps_event_count = total - played;
+    if(steps_event_count == 0) steps_event_count = 1;
+    float steps_per_mm = total / this->millimeters;               // along the longest axis
     float nominal_rate = steps_per_mm * this->nominal_speed;      // steps/sec
     float initial_rate = steps_per_mm * entryspeed;
     float final_rate = steps_per_mm * exitspeed;
@@ -190,16 +179,12 @@ void Block::calculate_trapezoid( float entryspeed, float exitspeed )
     // is the plateau if there is one
     float plateau_time = 0;
 
+    float acceleration_distance = ( initial_rate + maximum_rate ) * 0.5F * time_to_accelerate;
+    float deceleration_distance = ( maximum_rate + final_rate ) * 0.5F * time_to_decelerate;
+
     // Only if there is actually a plateau ( we are limited by nominal_rate )
     if(maximum_possible_rate > nominal_rate) {
-        // Figure out the acceleration and deceleration distances ( in steps )
-        float acceleration_distance = ( initial_rate + maximum_rate ) * 0.5F * time_to_accelerate;
-        float deceleration_distance = ( maximum_rate + final_rate ) * 0.5F * time_to_decelerate;
-
-        // Figure out the plateau steps
         float plateau_distance = steps_event_count - acceleration_distance - deceleration_distance;
-
-        // Figure out the plateau time in seconds
         plateau_time = plateau_distance / maximum_rate;
     }
 
@@ -207,50 +192,16 @@ void Block::calculate_trapezoid( float entryspeed, float exitspeed )
     float total_move_time = time_to_accelerate + time_to_decelerate + plateau_time;
     //puts "total move time: #{total_move_time}s time to accelerate: #{time_to_accelerate}, time to decelerate: #{time_to_decelerate}"
 
-    // We now have the full timing for acceleration, plateau and deceleration,
-    // yay \o/ Now this is very important these are in seconds, and we need to
-    // round them into ticks. This means instead of accelerating in 100.23
-    // ticks we'll accelerate in 100 ticks. Which means to reach the exact
-    // speed we want to reach, we must figure out a new/slightly different
-    // acceleration/deceleration to be sure we accelerate and decelerate at
-    // the exact rate we want
-
-    // First off round total time, acceleration time and deceleration time in ticks
-    // the times are positive, so the conversion truncates as floorf would
-    float frequency = STEP_TICKER_FREQUENCY;
-    uint32_t acceleration_ticks = (uint32_t)( time_to_accelerate * frequency );
-    uint32_t deceleration_ticks = (uint32_t)( time_to_decelerate * frequency );
-    uint32_t total_move_ticks   = (uint32_t)( total_move_time    * frequency );
-
-    // Now deduce the plateau time for those new values expressed in tick
-    //uint32_t plateau_ticks = total_move_ticks - acceleration_ticks - deceleration_ticks;
-
-    if(acceleration_ticks > total_move_ticks) acceleration_ticks = total_move_ticks;
-    if(deceleration_ticks > total_move_ticks - acceleration_ticks) deceleration_ticks = total_move_ticks - acceleration_ticks;
-
-    // Now we figure out the acceleration value to reach EXACTLY maximum_rate(steps/s) in EXACTLY acceleration_ticks(ticks) amount of time in seconds
-    // from the rounded ticks, not the times above: the rate has to land exactly on the tick
-    float acceleration_time = acceleration_ticks * tick_seconds;
-    float deceleration_time = deceleration_ticks * tick_seconds;
-
-    float acceleration_in_steps = (acceleration_time > 0.0F ) ? ( maximum_rate - initial_rate ) / acceleration_time : 0;
-    float deceleration_in_steps =  (deceleration_time > 0.0F ) ? ( maximum_rate - final_rate ) / deceleration_time : 0;
+    (void)total_move_time;
 
     // we have a potential race condition here as we could get interrupted anywhere in the middle of this call, we need to lock
     // the updates to the blocks to get around it
     this->locked= true;
-    // Now figure out the two acceleration ramp change events in ticks
-    this->accelerate_until = acceleration_ticks;
-    this->decelerate_after = total_move_ticks - deceleration_ticks;
-
-    // We now have everything we need for this block to call a Steppermotor->move method !!!!
-    // Theorically, if accel is done per tick, the speed curve should be perfect.
-    this->total_move_ticks = total_move_ticks;
 
     this->exit_speed = exitspeed;
 
     // prepare the block for stepticker
-    this->prepare(initial_rate, maximum_rate, acceleration_in_steps, deceleration_in_steps, acceleration_per_second);
+    this->prepare(initial_rate, maximum_rate, final_rate, acceleration_distance, deceleration_distance);
 
     this->locked= false;
 }
@@ -272,7 +223,7 @@ float Block::reverse_pass(float exit_speed)
         // If nominal length true, max junction speed is guaranteed to be reached. Only compute
         // for max allowable speed if block is decelerating and nominal length is false.
         if ((!this->nominal_length_flag) && (this->max_entry_speed > exit_speed)) {
-            float max_entry_speed = max_allowable_speed(-this->acceleration, exit_speed, this->millimeters);
+            float max_entry_speed = max_allowable_speed(-this->acceleration, exit_speed, remaining_mm());
 
             this->entry_speed = min(max_entry_speed, this->max_entry_speed);
 
@@ -313,6 +264,7 @@ float Block::forward_pass(float prev_max_exit_speed)
     return max_exit_speed();
 }
 
+
 float Block::max_exit_speed()
 {
     // if block is currently executing, return cached exit speed from calculate_trapezoid
@@ -327,7 +279,7 @@ float Block::max_exit_speed()
         return nominal_speed;
 
     // otherwise, we have to work out max exit speed based on entry and acceleration
-    float max = max_allowable_speed(-this->acceleration, this->entry_speed, this->millimeters);
+    float max = max_allowable_speed(-this->acceleration, this->entry_speed, remaining_mm());
 
     return min(max, nominal_speed);
 }
@@ -340,23 +292,37 @@ static inline int64_t to_fixed(float v)
     return (int64_t)(v + (v >= 0 ? 0.5F : -0.5F));
 }
 
-void Block::prepare(float initial_rate, float maximum_rate, float acceleration_in_steps, float deceleration_in_steps, float brake_in_steps)
+void Block::prepare(float initial_rate, float maximum_rate, float final_rate,
+                    float accel_distance, float decel_distance)
 {
-    float acceleration_per_tick = acceleration_in_steps * fp_scale;
-    float deceleration_per_tick = deceleration_in_steps * fp_scale;
+    ramp.entry_rate= initial_rate;
+    ramp.plateau_rate= maximum_rate;
+    ramp.exit_rate= final_rate;
 
-    // the ramp the block starts with: accelerating, or decelerating right away, or the plateau
-    float acceleration_change = 0;
-    if(this->accelerate_until != 0) {
-        acceleration_change = acceleration_per_tick;
-    } else if(this->decelerate_after == 0) {
-        acceleration_change = -deceleration_per_tick;
+    uint32_t whole= steps_event_count();
+    uint32_t total= whole > resume_at ? whole - resume_at : 0;
+    uint32_t up= (uint32_t)(accel_distance + 0.5F);
+    uint32_t down= (uint32_t)(decel_distance + 0.5F);
+    if(up > total) up= total;
+    if(down > total - up) down= total - up;
+
+    ramp.accel_steps= up;
+    ramp.decel_steps= down;
+
+    // Lower the plateau to the peak the clamped legs reach at this block's acceleration.
+    if(whole == 0 || millimeters <= 0.0F) {
+        return;
     }
+    float a= acceleration * (whole / millimeters);   // steps/s^2
 
-    const float rate_scale = tick_seconds * (float)STEPTICKER_FPSCALE;   // steps/s to 2.62 steps per tick
-    ramp.steps_per_tick = to_fixed(initial_rate * rate_scale);
-    ramp.acceleration_change= to_fixed(acceleration_change);
-    ramp.deceleration_change= -to_fixed(deceleration_per_tick);
-    ramp.brake_change= to_fixed(brake_in_steps * fp_scale);
-    ramp.plateau_rate= to_fixed(maximum_rate * rate_scale);
+    if(up != 0) {
+        float v2= initial_rate * initial_rate + 2.0F * a * up;
+        float peak= v2 > 0.0F ? sqrtf(v2) : initial_rate;
+        if(peak < ramp.plateau_rate) ramp.plateau_rate= peak;
+    }
+    if(down != 0) {
+        float v2= final_rate * final_rate + 2.0F * a * down;
+        float peak= v2 > 0.0F ? sqrtf(v2) : final_rate;
+        if(peak < ramp.plateau_rate) ramp.plateau_rate= peak;
+    }
 }

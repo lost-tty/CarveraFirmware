@@ -79,6 +79,7 @@ public:
     bool post_drain();
     bool idle() const { return (xEventGroupGetBits(state) & k_idle) != 0; }
     bool full() const { return uxQueueMessagesWaiting(free_slots) == 0; }
+    bool work_pending() const { return uxQueueMessagesWaiting(full_slots) != 0; }
 
     uint32_t motion_mark() const;
     bool motion_passed(uint32_t mark) const;
@@ -93,6 +94,7 @@ public:
     void halt(uint8_t reason, const char *msg = nullptr);
     bool is_halted() const { return halted; }
     bool interrupted() const { return halted || stopping; }
+    bool tracing_motion() const { return tracing; }
     void trace_motion(bool on) { tracing= on; traced_motion= 255; }   // `motion on`: the ticker's state changes, on the console
     void trace();   // from the main loop, when tracing   // a halt or a stop is in: no wait goes on, nothing more is queued
     uint8_t halt_reason() const { return reason; }
