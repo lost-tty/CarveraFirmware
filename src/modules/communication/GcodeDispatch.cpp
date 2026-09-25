@@ -18,6 +18,7 @@
 #include "libs/StreamOutput.h"
 #include "checksumm.h"
 #include "Source.h"
+#include "BlockActions.h"
 
 #include <cctype>
 #include <cstdlib>
@@ -175,6 +176,7 @@ void GcodeDispatch::init()
 
     ADD_MCODE(m500, 500, IMMEDIATE, GcodeDispatch::report_settings);
     ADD_MCODE(m503, 503, BESIDE_JOB, GcodeDispatch::report_settings);
+    ADD_SUBCODE(m118, 118, 0, ACTION, GcodeDispatch::say);
 }
 
 // no module writes the config, so M500 has always only reported, like M503
@@ -253,9 +255,60 @@ bool GcodeDispatch::dispatch(const SerialMessage &msg, bool nested)
     }
     if(j < s.size() && s[j] == '#') return parameter_statement(s.c_str() + j, msg.stream);
 
+    // M118 carries free text
+    if(s.size() - j >= 4 && memcmp(s.data() + j, "M118", 4) == 0
+       && (j + 4 == s.size() || s[j + 4] == ' ' || s[j + 4] == '\t')) {
+        if(machine_task.is_halted()) {
+            msg.stream->printf("error:Alarm lock\n");
+            return false;
+        }
+        return announce(s, j + 4, msg.stream, msg.line);
+    }
+
     gcode::Line parsed; // local: modules may dispatch console lines while a line executes
     if(!parsed.parse(s.c_str() + i, &params)) return fail(msg.stream, parsed.error_text().c_str());
     return execute(parsed.words(), s.substr(i), msg.stream, msg.line, nested);
+}
+
+void GcodeDispatch::say(Gcode *gcode)
+{
+    THEKERNEL->streams.printf("%s\r\n", gcode->text.c_str());
+}
+
+bool GcodeDispatch::announce(const string &line, size_t from, StreamOutput *stream, unsigned int number)
+{
+    string out;
+    while(from < line.size() && (line[from] == ' ' || line[from] == '\t')) from++;
+
+    for (size_t i= from; i < line.size(); i++) {
+        char c= line[i];
+        if(c == ';' || c == '\r' || c == '\n') {
+            break;
+        }
+        if(c == '(') {
+            while(i < line.size() && line[i] != ')') i++;
+            continue;
+        }
+        out+= c;
+    }
+
+    size_t end= out.find_last_not_of(" \t");
+    if(end == string::npos) {
+        out.clear();
+    }else{
+        out.erase(end + 1);
+    }
+    // to what a pending action can hold, so the length never depends on what is queued
+    if(out.size() >= BlockActions::k_max_text) {
+        out.erase(BlockActions::k_max_text - 1);
+    }
+
+    gcode::Words words;
+    words.push_back(gcode::Word{.letter= 'M', .subcode= 0, .has_value= true, .value= 118.0F});
+    Gcode gcode(words, 0, stream, number);
+    gcode.text= out;
+    run_mcode(gcode, false);
+    return true;
 }
 
 // "#n = expr" assigns, "#n" prints

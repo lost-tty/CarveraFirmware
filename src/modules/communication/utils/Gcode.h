@@ -49,6 +49,7 @@ class Gcode {
 
         StreamOutput* stream;
         string error_text;
+        string text;        // the part of the line that is not g-code
 
     private:
         const gcode::Word* find(char letter) const;

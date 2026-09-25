@@ -156,7 +156,7 @@ private:
     volatile bool halted{false};
     volatile bool pending{false};
     uint8_t reason{0};
-    char msg[32]{};
+    char msg[64]{};   // the longest reason is 59 characters
     volatile bool draining{false};
     volatile bool stopping{false};
     volatile bool tracing{false};
