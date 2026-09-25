@@ -11,6 +11,7 @@
 #include "libs/Kernel.h"
 
 #include "Robot.h"
+#include "libs/Profile.h"
 #include "Conveyor.h"
 #include "MachineTask.h"
 #include "Endstops.h"
@@ -1431,6 +1432,7 @@ void Robot::reset_position_from_current_actuator_position()
 // all transforms and is what we actually convert to actuator positions
 bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode, bool cutting)
 {
+    PROFILE("append_milestone");
     float deltas[k_max_actuators];
     float transformed_target[k_max_actuators]; // adjust target for bed compensation
     float unit_vec[N_PRIMARY_AXIS];
@@ -1457,7 +1459,7 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode
         // at least one non zero delta
         move = true;
         if(i < N_PRIMARY_AXIS) {
-            sos += powf(deltas[i], 2);
+            sos += deltas[i] * deltas[i];
         }
     }
 
@@ -1523,7 +1525,8 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode
         actuator_pos[i]= transformed_target[i];
         if (auxilliary_move) {
             // for E only moves we need to use the scaled E to calculate the distance
-            sos += powf(actuator_pos[i] - actuators[i]->get_last_milestone(), 2);
+            float d= actuator_pos[i] - actuators[i]->get_last_milestone();
+            sos += d * d;
         }
     }
     if (auxilliary_move) {
@@ -1555,7 +1558,7 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode
 	        wcs_t curr_wpos = this->mcs2wcs(curr_mpos);
 			float abs_y_wcs = fabsf(std::get<Y_AXIS>(curr_wpos));
 			float abs_z_wcs = fabsf(std::get<Z_AXIS>(curr_wpos));
-			float rotation_radius = (abs_y_wcs > 0.00001 || abs_z_wcs > 0.00001) ? sqrtf(powf(abs_y_wcs, 2) + powf(abs_z_wcs, 2)) : 0;
+			float rotation_radius = (abs_y_wcs > 0.00001 || abs_z_wcs > 0.00001) ? sqrtf(abs_y_wcs * abs_y_wcs + abs_z_wcs * abs_z_wcs) : 0;
 			if (rotation_radius > 1.0) {
 				a_perimeter = PI * 2 * rotation_radius + 30;
 		    }
@@ -1742,7 +1745,10 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s, boo
     }
 
     // Find out the distance for this move in XYZ in MCS
-    float millimeters_of_travel = sqrtf(powf( target[X_AXIS] - machine_position[X_AXIS], 2 ) +  powf( target[Y_AXIS] - machine_position[Y_AXIS], 2 ) +  powf( target[Z_AXIS] - machine_position[Z_AXIS], 2 ));
+    float dx= target[X_AXIS] - machine_position[X_AXIS];
+    float dy= target[Y_AXIS] - machine_position[Y_AXIS];
+    float dz= target[Z_AXIS] - machine_position[Z_AXIS];
+    float millimeters_of_travel = sqrtf(dx * dx + dy * dy + dz * dz);
 
     if(millimeters_of_travel < 0.00001F) {
         // we have no movement in XYZ, probably E only extrude or retract

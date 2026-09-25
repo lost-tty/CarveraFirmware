@@ -238,22 +238,9 @@ void Laser::set_scale(Gcode *gcode)
 // calculates the current speed ratio from the currently executing block
 float Laser::current_speed_ratio(const Block *block) const
 {
-    // find the primary moving actuator (the one with the most steps)
-
-	// 2024
-    size_t pm = 0;
-    uint32_t max_steps = 0;
-    for (size_t i = 0; i < THEROBOT.get_number_registered_motors(); i++) {
-        // find the motor with the most steps
-        if(block->steps[i] > max_steps) {
-            max_steps = block->steps[i];
-            pm = i;
-        }
-    }
-
     // figure out the ratio of its speed, from 0 to 1 based on where it is on the trapezoid,
     // this is based on the fraction it is of the requested rate (nominal rate)
-    float ratio = THEKERNEL->step_ticker.get_trapezoid_rate(pm) / block->nominal_rate();
+    float ratio = THEKERNEL->step_ticker.path_rate() / block->nominal_rate();
 
     return ratio;
 

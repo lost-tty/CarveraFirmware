@@ -101,7 +101,7 @@ bool SourceStack::stop_after_queued(unsigned int line)
     return true;
 }
 
-// the hold stops at a block boundary, so the queue survives and resuming just lets it run
+// the hold brakes on the path and keeps the queue, so resuming carries on from where it stood
 void SourceStack::suspend()
 {
     frozen= stack.size();

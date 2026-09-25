@@ -15,6 +15,7 @@
 #include "Logging.h"
 #include "Block.h"
 #include "Conveyor.h"
+#include "DeferredWake.h"
 
 #include "system_LPC17xx.h" // mbed.h lib
 #include <math.h>
@@ -52,7 +53,7 @@ void StepTicker::init()
     this->unstep = 0;
     this->num_motors = 0;
 
-    this->running = false;
+    this->state_ = IDLE;
     this->current_block = nullptr;
 
     #ifdef STEPTICKER_DEBUG_PIN
@@ -63,8 +64,25 @@ void StepTicker::init()
 }
 
 //called when everything is setup and interrupts can start
+#if defined(__arm__)
+// core cycle counter
+#define DWT_CTRL   (*(volatile uint32_t *)0xE0001000)
+#define DWT_CYCCNT (*(volatile uint32_t *)0xE0001004)
+
+struct IsrClock {
+    StepTicker &t; uint32_t start;
+    explicit IsrClock(StepTicker &ticker) : t(ticker), start(DWT_CYCCNT) {}
+    ~IsrClock() { t.isr_cycles += DWT_CYCCNT - start; t.isr_ticks++; }
+};
+#endif
+
 void StepTicker::start()
 {
+#if defined(__arm__)
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA;   // the cycle counter for the interrupt
+    DWT_CYCCNT= 0;
+    DWT_CTRL |= 1;                                // CYCCNTENA
+#endif
     NVIC_SetVector(TIMER0_IRQn, (uintptr_t)&_TIMER0_isr);
     NVIC_SetVector(TIMER1_IRQn, (uintptr_t)&_TIMER1_isr);
 
@@ -171,10 +189,54 @@ void StepTicker::check_limits()
     machine_task.halt(HARD_LIMIT, "hard limit");
 }
 
-// the motor ramps down under its own acceleration; cutting the pulses is what a halt does
-void StepTicker::stop_motor(uint8_t m)
+void StepTicker::brake(bool may_resume)
 {
-    if(m < num_motors) state[m].stopping= true;
+    if(state_ == BRAKING || state_ == HELD) {
+        if(!may_resume) resumable_= false;   // an approach that hit its switch must not be resumed
+        return;
+    }
+    if(state_ != MOVING) return;
+
+    resumable_= may_resume;
+    hold_rate_= path.steps_per_tick;   // the cap starts at the rate the path has now
+    state_= BRAKING;
+}
+
+void StepTicker::hold(bool on)
+{
+    paused_= on;
+    if(on) brake(true);
+}
+
+void StepTicker::stop()
+{
+    brake(false);
+}
+
+uint32_t StepTicker::held_path() const
+{
+    return state_ == HELD ? path.step_count : 0;
+}
+
+bool StepTicker::take_held(uint32_t done[], uint8_t n)
+{
+    if(state_ != HELD) return false;
+
+    for (uint8_t m = 0; m < n && m < num_motors; m++) done[m]= state[m].step_count;
+    return true;
+}
+
+void StepTicker::release()
+{
+    if(state_ == HELD) state_= IDLE;
+}
+
+// the steps a motor has made at this point of the path: path steps with a 0.32 fraction, times the
+// motor's ratio, to the nearest step, so it lands on its last step with the path's last step
+static inline uint32_t owed(uint32_t path_steps, uint32_t path_frac, uint32_t ratio)
+{
+    uint64_t v= (uint64_t)path_steps * ratio + (((uint64_t)path_frac * ratio) >> 32) + (1u << 31);
+    return (uint32_t)(v >> 32);
 }
 
 // at_steps is taken on the first asserted tick, so the hysteresis does not bias it
@@ -197,94 +259,106 @@ void StepTicker::check_watch()
     }
     if(!travelled) return;
 
-    if(!watch->observe) {
-        for (uint8_t m = 0; m < num_motors; m++) {
-            if(watch->motors & (1 << m)) stop_motor(m);
-        }
-    }
     watch->hit= true;
+    if(!watch->observe) stop();
 }
 
 void StepTicker::step_tick (void)
 {
+#if defined(__arm__)
+    IsrClock clock(*this);
+#endif
 
-    //SET_STEPTICKER_DEBUG_PIN(running ? 1 : 0);
+    //SET_STEPTICKER_DEBUG_PIN(state_ != IDLE ? 1 : 0);
 
-    // if nothing has been setup we ignore the ticks
-    if(!running){
-        // check if anything new available
-        if(THECONVEYOR.get_next_block(&current_block)) { // returns false if no new block is available
-            running= start_next_block(); // returns true if there is at least one motor with steps to issue
-            if(!running) return;
-        }else{
-            return;
-        }
+    // brake() runs in task context and cannot mask this interrupt: it may have stamped BRAKING onto
+    // a ticker whose last block ended in the same tick
+    if(state_ == BRAKING && current_block == nullptr) state_= IDLE;
+
+    // a flush lands only while the ticker stands, so a brake runs out before the queue goes
+    if(state_ == IDLE || state_ == HELD) THECONVEYOR.drop_queue();
+    if(state_ == HELD) return;
+    if(state_ == IDLE) {
+        if(paused_) return;
+        if(!THECONVEYOR.get_next_block(&current_block)) return;
+        if(!start_next_block()) return;
+        state_= MOVING;
     }
 
     if(machine_task.is_halted()) {
-        running= false;
+        state_= IDLE;
         current_tick = 0;
         current_block= nullptr;
         return;
     }
 
     if(watch != nullptr && !watch->hit) check_watch();
-    if(n_limits != 0 && !limit_tripped) check_limits();
+    // check limits every 8 ticks
+    if(n_limits != 0 && !limit_tripped && (current_tick & 7) == 0) check_limits();
 
-    bool still_moving= false;
+    if(state_ == BRAKING) {
+        int64_t a= current_block->ramp.brake_change;
+        hold_rate_= hold_rate_ > a ? hold_rate_ - a : 0;
+
+        if(hold_rate_ == 0) {
+            for (uint8_t m = 0; m < num_motors; m++) motor[m]->stop_moving();
+            current_tick= 0;
+            state_= HELD;
+            defer_wake();
+            return;
+        }
+    }
+
     bool accel_end= current_tick == current_block->accelerate_until && current_block->accelerate_until != 0;
     bool decel_start= current_tick == current_block->decelerate_after;
-    // foreach motor, if it is active see if time to issue a step to that motor
+
+    path.steps_per_tick += path.acceleration_change;
+
+    if(accel_end) { // done accelerating: plateau, unless deceleration starts right here
+        path.acceleration_change = 0;
+        if(current_block->decelerate_after < current_block->total_move_ticks && !decel_start) {
+            path.steps_per_tick = path.plateau_rate;
+        }
+    }
+    if(decel_start) {
+        path.acceleration_change = path.deceleration_change;
+    }
+
+    // protect against rounding errors and such
+    if(path.steps_per_tick <= 0) {
+        if(state_ != BRAKING) path.counter = STEPTICKER_FPSCALE; // we force completion this step by setting to 1.0
+        path.steps_per_tick = 0;
+    }
+
+    int64_t rate= path.steps_per_tick;
+    if(state_ == BRAKING && hold_rate_ < rate) rate= hold_rate_;
+    path.counter += rate;
+
+    if(path.counter >= STEPTICKER_FPSCALE) { // >= 1.0 step time
+        path.counter -= STEPTICKER_FPSCALE;
+        ++path.step_count;
+    }
+    uint32_t frac= (uint32_t)(path.counter >> 30);
+
+    bool still_moving= false;
     for (uint8_t m = 0; m < num_motors; m++) {
         if(state[m].steps_to_move == 0) continue; // not active
 
-        if(state[m].stopping) {
-            state[m].steps_per_tick -= state[m].decel_per_tick;
-            if(state[m].steps_per_tick <= 0) {
-                state[m].steps_to_move = 0;
-                motor[m]->stop_moving();
-                continue;
-            }
+        uint32_t due= state[m].ratio == 0 ? path.step_count : owed(path.step_count, frac, state[m].ratio);
+        if(due > state[m].steps_to_move) due= state[m].steps_to_move;
 
-        } else {
-            state[m].steps_per_tick += state[m].acceleration_change;
-
-            if(accel_end) { // done accelerating: plateau, unless deceleration starts right here
-                state[m].acceleration_change = 0;
-                if(current_block->decelerate_after < current_block->total_move_ticks && !decel_start) {
-                    state[m].steps_per_tick = state[m].plateau_rate;
-                }
-            }
-            if(decel_start) {
-                state[m].acceleration_change = state[m].deceleration_change;
-            }
-
-            // protect against rounding errors and such
-            if(state[m].steps_per_tick <= 0) {
-                state[m].counter = STEPTICKER_FPSCALE; // we force completion this step by setting to 1.0
-                state[m].steps_per_tick = 0;
-            }
-        }
-
-        state[m].counter += state[m].steps_per_tick;
-
-        if(state[m].counter >= STEPTICKER_FPSCALE) { // >= 1.0 step time
-            state[m].counter -= STEPTICKER_FPSCALE; // -= 1.0F;
+        if(due > state[m].step_count) {
             ++state[m].step_count;
 
-            // step the motor
             bool ismoving= motor[m]->step(); // returns false if the moving flag was set to false externally (probes, endstops etc)
-            // we stepped so schedule an unstep
             unstep |= 1 << m;
 
             if(!ismoving || state[m].step_count == state[m].steps_to_move) {
-                // done
                 state[m].steps_to_move = 0;
-                motor[m]->stop_moving(); // let motor know it is no longer moving
+                motor[m]->stop_moving();
             }
         }
 
-        // see if any motors are still moving after this tick
         if(motor[m]->is_moving()) still_moving= true;
     }
 
@@ -312,23 +386,19 @@ void StepTicker::step_tick (void)
         // do it here so there is no delay in ticks
         THECONVEYOR.block_finished();
 
-        if(THECONVEYOR.get_next_block(&current_block)) { // returns false if no new block is available
-            running= start_next_block(); // returns true if there is at least one motor with steps to issue
+        bool running= THECONVEYOR.get_next_block(&current_block) && start_next_block();
 
+        if(running) return;
+
+        current_block= nullptr;
+
+        if(state_ == BRAKING) {
+            state_= HELD;
+            defer_wake();
         }else{
-            current_block= nullptr;
-            running= false;
+            state_= IDLE;
         }
     }
-}
-
-// 2.62 value scaled by a 0.32 ratio, 0 meaning 1.0
-static inline int64_t scale(int64_t v, uint32_t ratio)
-{
-    if(ratio == 0) return v;
-    int64_t hi= (int64_t)(int32_t)(v >> 32) * ratio;
-    uint64_t lo= ((uint64_t)(uint32_t)v * ratio) >> 32;
-    return hi + (int64_t)lo;
 }
 
 // only called from the step tick ISR (single consumer)
@@ -337,19 +407,13 @@ bool StepTicker::start_next_block()
     if(current_block == nullptr) return false;
 
     bool ok= false;
-    // need to prepare each active motor
+    path.steps= 0;
     for (uint8_t m = 0; m < num_motors; m++) {
         state[m].steps_to_move= current_block->steps[m];
         if(state[m].steps_to_move == 0) continue;
         state[m].step_count= 0;
-        state[m].counter= 0;
-        uint32_t ratio= current_block->ratio[m];
-        state[m].steps_per_tick= scale(current_block->ramp.steps_per_tick, ratio);
-        state[m].acceleration_change= scale(current_block->ramp.acceleration_change, ratio);
-        state[m].deceleration_change= scale(current_block->ramp.deceleration_change, ratio);
-        state[m].plateau_rate= scale(current_block->ramp.plateau_rate, ratio);
-        state[m].decel_per_tick= (int64_t)round(motor[m]->decel_steps_per_s2() * Block::ticks_squared());
-        state[m].stopping= false;
+        state[m].ratio= current_block->ratio[m];
+        if(state[m].steps_to_move > path.steps) path.steps= state[m].steps_to_move;
 
         ok= true; // mark at least one motor is moving
         // set direction bit here
@@ -359,6 +423,12 @@ bool StepTicker::start_next_block()
         motor[m]->start_moving(); // also let motor know it is moving now
     }
 
+    path.step_count= 0;
+    path.counter= 0;
+    path.steps_per_tick= current_block->ramp.steps_per_tick;
+    path.acceleration_change= current_block->ramp.acceleration_change;
+    path.deceleration_change= current_block->ramp.deceleration_change;
+    path.plateau_rate= current_block->ramp.plateau_rate;
     current_tick= 0;
 
     if(ok) {

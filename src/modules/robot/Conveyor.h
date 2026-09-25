@@ -39,6 +39,7 @@ public:
     void wake_server();
 
     void flush_queue(void);
+    void drop_queue(void);   // ISR, while standing: the flushed queue goes in one move
     bool flushing() const { return flush; }
     void force_queue();   // a jog runs now, not after the pre-load wait
 
@@ -50,6 +51,20 @@ public:
 
     bool is_idle() const;
     bool is_queue_empty() { return queue.is_empty(); };
+
+    struct Planned { const Block *block; bool running; bool spent; bool free; };
+    template<class F> void each_slot(F f) const
+    {
+        bool spent = true, free = false;
+        unsigned i = queue.tail_i;
+        do {
+            if (i == queue.isr_tail_i) spent = false;
+            if (i == queue.head_i) free = true;
+            f(Planned{queue.item_ref(i), i == queue.isr_tail_i && !free, spent && !free, free});
+            i = queue.next(i);
+        } while (i != queue.tail_i);
+    }
+
     unsigned int running_line() const;
     float get_current_feedrate() const { return current_feedrate; }
 

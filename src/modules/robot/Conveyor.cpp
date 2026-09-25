@@ -22,6 +22,7 @@
 #include "Robot.h"
 #include "MachineTask.h"
 #include "StepperMotor.h"
+#include "libs/DeferredWake.h"
 
 #include <functional>
 
@@ -97,6 +98,9 @@ void Conveyor::service()
     if(flush && queue.is_empty()) {
         pending_actions.clear();
         flush= false;
+        // the dropped blocks never went through block_finished: everything queued is over now,
+        // or a later refusal waits on a mark that is never reached
+        finished= queued;
         THEROBOT.reset_position_from_current_actuator_position();
     }
 }
@@ -181,11 +185,11 @@ void Conveyor::queue_head_block()
         if(!wait_for_block(halted)) break;
     }
 
-    if(machine_task.is_halted()) {
-        // we do not want to stick more stuff on the queue if we are in halt state
-        // clear and release the block on the head
+    // nothing more goes on the queue once a halt or a stop is in: the block is dropped, and
+    // produce_head would otherwise spin on a queue that is still full
+    if(machine_task.interrupted()) {
         queue.head_ref()->clear();
-        return; // if we got a halt then we are done here
+        return;
     }
 
     queue.produce_head();
@@ -218,15 +222,12 @@ void Conveyor::check_queue(bool force)
 bool Conveyor::get_next_block(Block **block)
 {
     // mark entire queue for GC if flush flag is asserted
-    if (flush) queue.isr_tail_i = queue.head_i;
 
     // default the feerate to zero if there is no block available
     this->current_feedrate= 0;
 
     if(machine_task.is_halted() || queue.isr_tail_i == queue.head_i) return false; // we do not have anything to give
 
-    // a feed hold stops at the block boundary: the one running finishes, the next one waits
-    if(THEKERNEL->get_feed_hold()) return false;
 
     // wait for queue to fill up, optimizes planning
     if(!allow_fetch) return false;
@@ -266,14 +267,16 @@ void Conveyor::block_finished()
     queue.isr_tail_i= queue.next(queue.isr_tail_i);
     finished++;
 
-    NVIC_SetPendingIRQ(RIT_IRQn);
+    defer_wake();
 }
 
 // the step ticker only notifies when a block ends, so the timeout is there to re-check whether
 // the motors have stopped
+// a pending stop ends a wait the way a halt does: the waiter may be the very job that holds the
+// machine task away from the loop that would run the stop
 bool Conveyor::wait_for_block(bool &halted)
 {
-    if(machine_task.is_halted()) {
+    if(machine_task.interrupted()) {
         halted= true;
         return false;
     }
@@ -301,27 +304,23 @@ bool Conveyor::hold_action(const McodeRegistry::Mcode *code, const Gcode &gcode)
     return pending_actions.hold(code, gcode, queued);
 }
 
-// stopping at a block boundary keeps the position exact
 bool Conveyor::stop_soon()
 {
-    bool held= THEKERNEL->get_feed_hold();
-    if(!held) THEKERNEL->set_feed_hold(true);
-
-    bool halted= false;
-    while(THEROBOT.any_motor_moving() && !halted) {
-        if(!wait_for_block(halted)) break;
-    }
-
-    // flush before releasing the hold, or the ISR fetches the block this meant to stop
     flush_queue();
-    if(!held) THEKERNEL->set_feed_hold(false);
-    return !halted;
+    THEKERNEL->step_ticker.stop();   // brakes if it moves; the flush lands once it stands
+    return wait_for_idle();
 }
 
 // the blocks are dropped, not run, so there is nothing to wait for
 void Conveyor::flush_queue()
 {
     flush= true;
+}
+
+// from the step ISR, only while it stands: the queue is dropped in one move
+void Conveyor::drop_queue()
+{
+    if(flush) queue.isr_tail_i= queue.head_i;
 }
 
 // Debug function

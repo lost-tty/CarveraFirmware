@@ -101,7 +101,10 @@ static std::string pick(int tool, bool from_clearance) {
 }
 static std::string cali(int lift_z, bool probe, bool laser = false) {
     char b[300];
-    snprintf(b, sizeof(b), "M497.3|G23|%sG53 G0 Z%d|G53 G0 X-3 Y-54|G38.6 Z-145 F300|G91 G0 Z2|G38.6 Z-3 F60|M493.1|G53 G0 Z-10%s", laser ? "M490.1|" : "", lift_z, probe ? "|M492.3" : "");
+    snprintf(b, sizeof(b),
+             "M497.3|G23|%sG53 G0 Z%d|G53 G0 X-3 Y-54|G38.6 Z-145 F300|G91 G0 Z2|G38.6 Z-3 F60"
+             "|M493.1|G53 G0 Z-10%s|G90",
+             laser ? "M490.1|" : "", lift_z, probe ? "|M492.3" : "");
     return b;
 }
 static const std::string home = "G53 G0 Z-3|G53 G0 X100 Y50";
@@ -170,19 +173,30 @@ int main() {
     std::string probe_tool = drop(2) + "|" + pick(0, false) + "|" + cali(-10, true) + "|M493.2 T0";
     CHECK(run(m, "auto_work", {}, {{'X', 10}, {'Y', 20}, {'C', 50}, {'D', 60}}) == probe_tool + "|M497.4|M494.1|G53 G0 Z-3|G90 G0 X10 Y20|G90 G1 X10 Y60 F1000|G90 G1 X50 Y60 F1000|G90 G1 X50 Y20 F1000|G90 G1 X10 Y20 F1000|M494.2");
     m.named["_active_tool"] = 0;
-    CHECK(run(m, "auto_work", {}, {{'X', 10}, {'Y', 20}, {'O', 5}, {'F', 6}, {'P', 0}}) == "M497.5|G53 G0 Z-3|G90 G0 X15 Y26|G38.2 Z-145 F300|G91 G0 Z2|G38.2 Z-3 F60|G10 L20 P0 Z0|G91 G0 Z2|G53 G0 Z-3|G90 G0 X10 Y20");
-    CHECK(run(m, "auto_work", {}, {{'X', 10}, {'Y', 20}, {'O', 5}}) == "M497.5|G53 G0 Z-3|G53 G0 X-370 Y-196.5|G38.2 Z-145 F300|G91 G0 Z2|G38.2 Z-3 F60|G10 L20 P0 Z22.5|G91 G0 Z2");
+    CHECK(run(m, "auto_work", {}, {{'X', 10}, {'Y', 20}, {'O', 5}, {'F', 6}, {'P', 0}}) ==
+          "G21 G90 G91.1 G17|M497.5|G53 G0 Z-3|G90 G0 X15 Y26|G38.2 Z-145 F300|G91 G0 Z2"
+          "|G38.2 Z-3 F60|G10 L20 P0 Z0|G91 G0 Z2|G90|G53 G0 Z-3|G90 G0 X10 Y20");
+    CHECK(run(m, "auto_work", {}, {{'X', 10}, {'Y', 20}, {'O', 5}}) ==
+          "G21 G90 G91.1 G17|M497.5|G53 G0 Z-3|G53 G0 X-370 Y-196.5|G38.2 Z-145 F300|G91 G0 Z2"
+          "|G38.2 Z-3 F60|G10 L20 P0 Z22.5|G91 G0 Z2|G90");
     CHECK(run(m, "auto_work", {}, {{'X', 10}, {'Y', 20}, {'A', 100}, {'B', 80}, {'I', 5}, {'J', 4}, {'H', 5}}) == "M497.6|G90 G0 X10 Y20|G32 R1 X0 Y0 A100 B80 I5 J4 H5");
     CHECK(run(m, "auto_work", {}, {{'X', 10}, {'Y', 20}, {'P', 0}}) == "G53 G0 Z-3|G90 G0 X10 Y20");
     CHECK(run(m, "auto_work", {}, {{'X', 10}}) == "");
-    CHECK(run(m, "auto_work", {}, {{'D', 6}, {'H', 12}}, 3) == "M497.5|G38.2 Z-145 F60|G10 L20 P0 Z12|G91 G0 Z2|G38.2 X-35 F60|G10 L20 P0 X3|G91 G0 X5|G38.2 Y-35 F60|G10 L20 P0 Y3|G91 G0 Y5|G91 G0 Z15|G91 G0 X-8 Y-8");
-    CHECK(run(m, "auto_work", {}, {}, 3) == "M497.5|G38.2 Z-145 F60|G10 L20 P0 Z9|G91 G0 Z2|G38.2 X-35 F60|G10 L20 P0 X1.5875|G91 G0 X5|G38.2 Y-35 F60|G10 L20 P0 Y1.5875|G91 G0 Y5|G91 G0 Z15|G91 G0 X-6.5875 Y-6.5875");
+    CHECK(run(m, "auto_work", {}, {{'D', 6}, {'H', 12}}, 3) ==
+          "G21 G90 G91.1 G17|M497.5|G38.2 Z-145 F60|G10 L20 P0 Z12|G91 G0 Z2|G38.2 X-35 F60"
+          "|G10 L20 P0 X3|G91 G0 X5|G38.2 Y-35 F60|G10 L20 P0 Y3|G91 G0 Y5|G91 G0 Z15"
+          "|G91 G0 X-8 Y-8|G90");
+    CHECK(run(m, "auto_work", {}, {}, 3) ==
+          "G21 G90 G91.1 G17|M497.5|G38.2 Z-145 F60|G10 L20 P0 Z9|G91 G0 Z2|G38.2 X-35 F60"
+          "|G10 L20 P0 X1.5875|G91 G0 X5|G38.2 Y-35 F60|G10 L20 P0 Y1.5875|G91 G0 Y5|G91 G0 Z15"
+          "|G91 G0 X-6.5875 Y-6.5875|G90");
 
     // hooks and demo macros
-    CHECK(run(m, "before_resume", {10, 20, -5}) == "G90 G0 X10 Y20|G90 G1 Z-5 F1000");
-    CHECK(run(m, "test_square", {10, 500, 1}) == "G91|G1 X10 F500|G1 Y10|G1 X-10|G1 Y-10|G90");
-    CHECK(run(m, "test_circle", {5, 600, 2}) == "G91 G0 X-5|G2 X0 Y0 I5 J0 F600|G2 X0 Y0 I5 J0 F600|G91 G0 X5|G90");
-    CHECK(run(m, "test_jog", {3, 400, 1}) == "G91|G1 X3 F400|G1 X-3|G90");
+    CHECK(run(m, "test_square", {10, 500, 1}) ==
+          "G21 G90 G91.1 G17|G91|G1 X10 F500|G1 Y10|G1 X-10|G1 Y-10|G90");
+    CHECK(run(m, "test_circle", {5, 600, 2}) ==
+          "G21 G90 G91.1 G17|G91 G0 X-5|G2 X0 Y0 I5 J0 F600|G2 X0 Y0 I5 J0 F600|G91 G0 X5|G90");
+    CHECK(run(m, "test_jog", {3, 400, 1}) == "G21 G90 G91.1 G17|G91|G1 X3 F400|G1 X-3|G90");
 
     // laser mode switching: mode first, then the tool goes back, then the offset
     m.named["_active_tool"] = 2;

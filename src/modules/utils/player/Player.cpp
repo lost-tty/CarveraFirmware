@@ -137,7 +137,7 @@ void Player::resume_gcode(Gcode *gcode)
 const Player::Cmd Player::COMMANDS[] = {
     {"play",     &Player::play_command,     "play file [-v] - play a gcode file"},
     {"progress", &Player::progress_command, "progress [-b] - progress of the file being played"},
-    {"abort",    &Player::abort_command,    "abort - abort the file being played"},
+    {"abort",    &Player::abort_command,    "abort - stop the machine, held or not, and close the file if one is playing"},
     {"suspend",  &Player::suspend_command,  "suspend [h] - suspend the job, h keeps the spindle on"},
     {"resume",   &Player::resume_command,   "resume - resume a suspended job"},
     {"goto",     &Player::goto_command,     "goto line - jump to a line while suspended"},
@@ -291,15 +291,12 @@ void Player::abort()
     machine_task.enforce_keepout();
 }
 
+// stops whatever the machine is doing, held or not, and closes the file if one is open: a hold
+// in MDI has no other way out than this
 void Player::abort_command( string parameters, StreamOutput *stream )
 {
-    if(sources.empty()) {
-        stream->printf("Not currently playing\r\n");
-        return;
-    }
-
+    bool file= !sources.empty();
     sources.clear(); // the file and any script on top of it, or a script alone
-    sources.resume();
 
     if(machine_task.is_halted()) {
         printk("Aborted by halt\n");
@@ -308,7 +305,8 @@ void Player::abort_command( string parameters, StreamOutput *stream )
 
     if (parameters.empty()) {
         if(machine_task.post_stop()) tool_head.stop_all();
-        stream->printf("Aborted playing or paused file. \r\n");
+        machine_task.hold(false);   // after the stop: lifted before it, the held block would resume
+        stream->printf(file ? "Aborted playing or paused file. \r\n" : "Stopped\r\n");
     }
 }
 

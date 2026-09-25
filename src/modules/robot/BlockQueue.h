@@ -76,6 +76,7 @@ protected:
      */
     Block& item(unsigned int i) { return ring[i]; }
     Block* item_ref(unsigned int i) { return &ring[i]; }
+    const Block* item_ref(unsigned int i) const { return &ring[i]; }
 
     unsigned int next(unsigned int i) const {
         if (length == 0)

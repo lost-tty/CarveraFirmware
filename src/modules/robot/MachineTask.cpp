@@ -1,9 +1,15 @@
 #include "MachineTask.h"
+#include "us_ticker_api.h"
+#include "libs/Profile.h"
+
+Profile::Slot Profile::slots[Profile::k_max];
+uint8_t Profile::used= 0;
 
 #include "Conveyor.h"
 #include "Robot.h"
 #include "Scripts.h"
 #include "libs/Kernel.h"
+#include "libs/StepTicker.h"
 #include "libs/Watchdog.h"
 #include "libs/Killable.h"
 #include "StreamOutput.h"
@@ -23,7 +29,9 @@ void MachineTask::start()
 
     for (uint8_t i = 0; i < k_max_tickets; ++i) xQueueSend(free_slots, &i, 0);
 
-    xTaskCreateStatic(run, "Machine", k_stack_words, this, k_priority, stack, &task);
+    handle= xTaskCreateStatic(run, "Machine", k_stack_words, this, tskIDLE_PRIORITY, stack, &task);
+    THECONVEYOR.wake_on_block(handle);
+    vTaskPrioritySet(handle, k_priority);
 }
 
 OnMachine MachineTask::proof() const
@@ -32,13 +40,9 @@ OnMachine MachineTask::proof() const
     return OnMachine{};
 }
 
-// this task preempts its creator, so it runs before xTaskCreateStatic returns the handle
 void MachineTask::run(void *self)
 {
-    MachineTask *me= (MachineTask *)self;
-    me->handle= xTaskGetCurrentTaskHandle();
-    THECONVEYOR.wake_on_block(me->handle);
-    me->loop();
+    ((MachineTask *)self)->loop();
 }
 
 bool MachineTask::post(Job job, const Gcode &gcode)
@@ -197,7 +201,9 @@ void MachineTask::serve_tickets()
 {
     uint8_t slot;
     while(xQueueReceive(full_slots, &slot, 0) == pdTRUE) {
-        if(halted) {
+        // a job that returns into a pending stop must not be followed by the next one: the loop
+        // that runs the stop comes after this
+        if(interrupted()) {
             xQueueSend(free_slots, &slot, 0);
             drop_all();
             return;
@@ -220,9 +226,55 @@ void MachineTask::serve_tickets()
 }
 
 // the queue pre-load runs off a clock, so the wait has to come back even when nothing wakes it
+// what the step ticker is doing, whenever it changes: the numbers a hold is made of. Read here,
+// printed from the main loop: a print from the machine task stalls the planner on the console
+void MachineTask::trace()
+{
+    if(!tracing) return;
+    static const char *names[]= {"IDLE", "MOVING", "BRAKING", "HELD"};
+    StepTicker &t= THEKERNEL->step_ticker;
+    int used= 0;
+    THECONVEYOR.each_slot([&](Conveyor::Planned p) { if(!p.free) used++; });
+    uint8_t m= t.motion();
+    bool hold= THEKERNEL->get_feed_hold();
+    if(m == traced_motion && used == traced_used && hold == traced_hold) return;
+    traced_motion= m; traced_used= used; traced_hold= hold;
+    uint32_t now= us_ticker_read();
+    uint32_t ms= (now - traced_at) / 1000;
+    traced_at= now;
+
+    const Block *b= t.get_current_block();
+    if(m == StepTicker::IDLE || b == nullptr) {
+        printk("[motion] +%lums %s feed_hold=%d paused=%d slots=%d\n", (unsigned long)ms, names[m], hold, t.paused(), used);
+        return;
+    }
+    float f= t.get_frequency();
+    float fp= (float)STEPTICKER_FPSCALE;
+    float cap= (float)t.hold_rate() / fp * f;                                  // steps/s, longest axis
+    float a= (float)b->ramp.brake_change / fp * f * f;                          // steps/s^2, longest axis
+    uint32_t steps= b->steps_event_count();
+    float plateau= steps ? (float)b->ramp.plateau_rate / fp * f * b->millimeters / steps : 0.f;
+    printk("[motion] +%lums %s feed_hold=%d paused=%d resumable=%d slots=%d cap=%.0f a=%.0f | %.3fmm entry=%.2f plateau=%.2f exit=%.2f\n",
+           (unsigned long)ms, names[m], hold, t.paused(), t.resumable(), used, cap, a,
+           b->millimeters, b->entry_speed, plateau, b->exit_speed);
+}
+
 void MachineTask::tick()
 {
     if(!on_task()) __debugbreak();
+
+    // here, not in the loop: a wait for the queue runs the tick itself and cannot end before this
+    StepTicker &ticker= THEKERNEL->step_ticker;
+    if(ticker.motion() == StepTicker::HELD) {
+        if(!ticker.resumable()) {
+            THECONVEYOR.flush_queue();
+            ticker.release();
+        } else if(!THEKERNEL->get_feed_hold()) {
+            THEKERNEL->planner.resume_held();
+            ticker.release();
+        }
+    }
+
     THECONVEYOR.service();
     ulTaskNotifyTakeIndexed(k_notify_index, pdTRUE, pdMS_TO_TICKS(k_poll_ms));
 }
@@ -261,7 +313,14 @@ void MachineTask::abort(uint8_t why, const char *what)
 
 void MachineTask::hold(bool on)
 {
-    if(THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(on);
+    if(!THEKERNEL->is_feed_hold_enabled()) return;
+    THEKERNEL->set_feed_hold(on);
+    THEKERNEL->step_ticker.hold(on);
+    if(tracing) {
+        uint32_t now= us_ticker_read();
+        printk("[hold] +%lums %s\n", (unsigned long)((now - traced_at) / 1000), on ? "on" : "off");
+        traced_at= now;
+    }
 }
 
 bool MachineTask::unlock(StreamOutput *stream)
@@ -280,6 +339,7 @@ bool MachineTask::unlock(StreamOutput *stream)
 void MachineTask::clear_halt()
 {
     THEKERNEL->set_feed_hold(false);
+    THEKERNEL->step_ticker.hold(false);   // a hold from before the halt would keep the ticker from fetching
     Killable::restore_all();
 
     vTaskSuspendAll();
@@ -325,7 +385,11 @@ void MachineTask::loop()
         draining= stopping= false;
         taskEXIT_CRITICAL();
 
-        if(stop) THECONVEYOR.stop_soon();
+        // jobs posted ahead of the stop would run after it: they go the way they do on a halt
+        if(stop) {
+            THECONVEYOR.stop_soon();
+            drop_all();
+        }
         else if(drain) THECONVEYOR.wait_for_idle();
 
         serve_tickets();

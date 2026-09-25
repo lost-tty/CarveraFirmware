@@ -224,13 +224,13 @@ std::string Kernel::get_query_string()
 
     size_t n;
     char buf[128];
+    // at rest the milestone is the position; in motion, held or paused only the actuators know
     float mpos[3];
-    if(running) {
-        THEROBOT.get_real_machine_position(mpos);
-    } else {
-        // return the last milestone if idle
+    if(THECONVEYOR.is_idle()) {
         Robot::wcs_t m = THEROBOT.get_axis_position();
         mpos[0] = std::get<X_AXIS>(m); mpos[1] = std::get<Y_AXIS>(m); mpos[2] = std::get<Z_AXIS>(m);
+    } else {
+        THEROBOT.get_real_machine_position(mpos);
     }
 
     // machine position
@@ -457,6 +457,7 @@ void Kernel::register_for_event(_EVENT_ENUM id_event, Module *mod)
 void Kernel::serve_main()
 {
     watchdog.alive();
+    machine_task.trace();
     call_event(ON_MAIN_LOOP);
     call_event(ON_IDLE);
 }

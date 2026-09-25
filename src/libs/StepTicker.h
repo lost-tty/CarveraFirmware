@@ -36,7 +36,13 @@ class StepTicker{
         float get_frequency() const { return frequency; }
         void unstep_tick();
         const Block *get_current_block() const { return current_block; }
-        float get_trapezoid_rate(int m) const { return STEPTICKER_FROMFP(state[m].steps_per_tick) * frequency; } // steps/sec now
+        // steps/sec of the longest axis now: the cap, while braking, is the rate that is being run
+        float path_rate() const
+        {
+            int64_t r= path.steps_per_tick;
+            if(state_ == BRAKING && hold_rate_ < r) r= hold_rate_;
+            return state_ == HELD ? 0.0F : STEPTICKER_FROMFP(r) * frequency;
+        }
 
         void set_watch(Watch *w) { watch= w; }
         bool watching() const { return watch != nullptr; }
@@ -46,9 +52,23 @@ class StepTicker{
         bool limit_hit() const { return limit_tripped; }
         void clear_limit() { limit_tripped= false; limit_seen= false; }
 
-        void stop_motor(uint8_t m);
+        // a hold or a stop brakes the path to HELD; whether the block may then be resumed is all the ticker remembers
+        enum Motion { IDLE, MOVING, BRAKING, HELD };
+        Motion motion() const { return state_; }
+        bool resumable() const { return resumable_; }
+        bool paused() const { return paused_; }
+        int64_t hold_rate() const { return hold_rate_; }   // the cap, 2.62 steps per tick of the longest axis
+
+        void hold(bool on);   // on: brake, and no block starts until off
+        void stop();          // brake, and the rest is not to be resumed
+        bool take_held(uint32_t done[], uint8_t n);   // HELD only: what the block ran
+        uint32_t held_path() const;                   // of the longest axis
+        void release();                               // HELD -> IDLE, the queue is sorted out
 
         void step_tick (void);
+        // cycles the tick has cost so far
+        volatile uint32_t isr_cycles{0};
+        volatile uint32_t isr_ticks{0};
         void handle_finish (void);
         void start();
 
@@ -87,12 +107,21 @@ class StepTicker{
             int64_t acceleration_change;
             int64_t deceleration_change;
             int64_t plateau_rate;
-            int64_t decel_per_tick;
+            uint32_t steps;
+            uint32_t step_count;
+        } path;
+        struct {
             uint32_t steps_to_move; // 0: not moving in this block, or done
             uint32_t step_count;
-            bool stopping;
+            uint32_t ratio;
         } state[k_max_actuators];
 
-        volatile bool running;
+        void brake(bool may_resume);
+
+        volatile Motion state_{IDLE};
+        volatile bool resumable_{true};
+        volatile bool paused_{false};   // no block starts while a hold is on
+        int64_t hold_rate_{0};
+
         uint8_t num_motors;
 };

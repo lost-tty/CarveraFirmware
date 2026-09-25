@@ -7,6 +7,7 @@
 
 
 #include "SimpleShell.h"
+#include "libs/Profile.h"
 #include "Persist.h"
 
 #include "rtc_time.h"
@@ -97,6 +98,8 @@ const SimpleShell::ptentry_t SimpleShell::commands_table[] = {
     {"?",         &SimpleShell::help_command,      "? - display available commands"},
     {"ftype",     &SimpleShell::ftype_command,     "ftype file - display file type"},
     {"version",   &SimpleShell::version_command,   "version - display firmware version"},
+    {"motion",    &SimpleShell::motion_command,    "motion [on|off] - trace the step ticker's state changes"},
+    {"prof",      &SimpleShell::prof_command,      "prof - planner timings since the last prof"},
     {"model",     &SimpleShell::model_command,     "model - display machine model"},
     {"mem",       &SimpleShell::mem_command,       "mem [-v] - display memory usage"},
     {"task",      &SimpleShell::task_command,      "task - display task information"},
@@ -623,7 +626,15 @@ void SimpleShell::task_command(string parameters, StreamOutput *stream)
     }
 
     // Get task status information
-    UBaseType_t tasksFetched = uxTaskGetSystemState(taskStatusArray, taskCount, NULL);
+    uint32_t total= 0;
+    UBaseType_t tasksFetched = uxTaskGetSystemState(taskStatusArray, taskCount, &total);
+
+    // the share of the CPU each task had since the last `task`: run it once before and once
+    // during whatever is slow, and the second answer is about exactly that stretch
+    static uint32_t last_run[8]= {0};
+    static uint32_t last_total= 0;
+    uint32_t span= total - last_total;
+    last_total= total;
 
     // Iterate through each task and print task information with indentation
     for (UBaseType_t i = 0; i < tasksFetched; i++)
@@ -637,14 +648,16 @@ void SimpleShell::task_command(string parameters, StreamOutput *stream)
         stream->printf("    Handle: %p\r\n", taskStatus->xHandle);
         stream->printf("    Stack: %p\r\n", taskStatus->pxStackBase);
         stream->printf("    Stack High Water Mark (Unused): %lu bytes\r\n", (unsigned long)taskStatus->usStackHighWaterMark * sizeof(StackType_t));
-        stream->printf("    Runtime Counter: %lu\r\n", (unsigned long)taskStatus->ulRunTimeCounter);
-
-        #if ( configGENERATE_RUN_TIME_STATS == 1 )
-        // If FreeRTOS runtime stats are enabled, print task CPU usage percentage
-        char cpuUsageBuffer[50];
-        vTaskGetRunTimeStats(cpuUsageBuffer);  // Fill the buffer with CPU stats
-        stream->printf("    CPU Usage:\r\n%s", cpuUsageBuffer);
-        #endif
+        uint32_t n= taskStatus->xTaskNumber;
+        uint32_t ran= taskStatus->ulRunTimeCounter;
+        if(n < 8) {
+            uint32_t delta= ran - last_run[n];
+            last_run[n]= ran;
+            if(span > 0) {
+                uint32_t tenths= (uint32_t)(((uint64_t)delta * 1000) / span);
+                stream->printf("    CPU since last task: %lu.%lu%%\r\n", (unsigned long)(tenths / 10), (unsigned long)(tenths % 10));
+            }
+        }
 
         // Add additional indentation for better structure
         stream->printf("\r\n");  // Separate each task block
@@ -849,6 +862,51 @@ void SimpleShell::ftype_command( string parameters, StreamOutput *stream )
 	stream->printf("ftype = %s\n", FILETYPE);
 }
 // print out build version
+void SimpleShell::prof_command( string parameters, StreamOutput *stream )
+{
+    if(parameters.find("bench") != string::npos) {
+        static Block b;
+        b.clear();
+        b.steps[0]= 113; b.steps[1]= 61; b.steps[2]= 9;   // a 0.57 mm arc segment
+        b.millimeters= 0.566F;
+        b.nominal_speed= 50.0F;
+        b.acceleration= 150.0F;
+        b.entry_speed= 47.0F;
+        b.exit_speed= 45.0F;
+        uint32_t t0= us_ticker_read();
+        for (int i = 0; i < 1000; i++) b.calculate_trapezoid(47.0F, 45.0F - (i & 1));
+        uint32_t dt= us_ticker_read() - t0;
+        stream->printf("calculate_trapezoid: %lu us each, standing still\n", (unsigned long)(dt / 1000));
+        return;
+    }
+    {
+        StepTicker &t= THEKERNEL->step_ticker;
+        static uint32_t last_cycles= 0, last_ticks= 0, last_us= 0;
+        uint32_t cycles= t.isr_cycles - last_cycles, ticks= t.isr_ticks - last_ticks;
+        uint32_t now= us_ticker_read(), span_us= now - last_us;
+        last_cycles= t.isr_cycles; last_ticks= t.isr_ticks; last_us= now;
+        if(ticks > 0 && span_us > 0) {
+            uint32_t per_tick= cycles / ticks;
+            uint32_t share_tenths= (uint32_t)(((uint64_t)cycles * 1000) / ((uint64_t)span_us * (SystemCoreClock / 1000000)));
+            stream->printf("%-20s ticks %8lu  mean %5lu cycles  share %lu.%lu%%\n", "step isr", (unsigned long)ticks,
+                           (unsigned long)per_tick, (unsigned long)(share_tenths / 10), (unsigned long)(share_tenths % 10));
+        }
+    }
+    for (uint8_t i = 0; i < Profile::used; i++) {
+        const Profile::Slot &s= Profile::slots[i];
+        stream->printf("%-20s calls %6lu  mean %5lu us  worst %5lu us\n", s.name, (unsigned long)s.calls,
+                       (unsigned long)(s.calls ? s.us / s.calls : 0), (unsigned long)s.worst);
+    }
+    Profile::reset();
+}
+
+void SimpleShell::motion_command( string parameters, StreamOutput *stream )
+{
+    bool on= parameters.find("off") == string::npos;
+    machine_task.trace_motion(on);
+    stream->printf("motion trace %s\n", on ? "on" : "off");
+}
+
 void SimpleShell::version_command( string parameters, StreamOutput *stream )
 {
 	stream->printf("version = %s\n", VERSION);

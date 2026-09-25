@@ -18,6 +18,16 @@
 #define configMINIMAL_STACK_SIZE        ( ( unsigned short ) 40 )
 #define configMAX_TASK_NAME_LEN	        ( 12 )
 #define configUSE_TRACE_FACILITY        1
+// `task` shows each task's share of the CPU; the microsecond ticker is the clock
+#include <stdint.h>
+#ifdef __cplusplus
+extern "C" uint32_t us_ticker_read(void);
+#else
+uint32_t us_ticker_read(void);
+#endif
+#define configGENERATE_RUN_TIME_STATS   1
+#define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS()
+#define portGET_RUN_TIME_COUNTER_VALUE() us_ticker_read()
 #define configIDLE_SHOULD_YIELD         0
 #define configUSE_CO_ROUTINES           0
 #define configUSE_MUTEXES               1

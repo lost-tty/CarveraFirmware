@@ -126,7 +126,7 @@ void Pendant::key_down(uint8_t key, bool shifted)
                 line("M220 S%d", feed_pct);
                 break;
             case HOLD:
-                if (THEKERNEL->is_feed_hold_enabled()) THEKERNEL->set_feed_hold(!THEKERNEL->get_feed_hold());
+                if (THEKERNEL->is_feed_hold_enabled()) machine_task.hold(!THEKERNEL->get_feed_hold());
                 else line(sources.suspended() ? "resume" : "suspend");
                 break;
             case ABORT:

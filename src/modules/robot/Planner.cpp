@@ -15,6 +15,7 @@ using namespace std;
 #include "Kernel.h"
 #include "Block.h"
 #include "Planner.h"
+#include "libs/Profile.h"
 #include "Conveyor.h"
 #include "StepperMotor.h"
 #include "Config.h"
@@ -53,6 +54,7 @@ void Planner::config_load()
 bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors, float rate_mm_s, float distance, float *unit_vec, float acceleration, float s_value, bool cutting, unsigned int _line)
 // bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors, float rate_mm_s, float distance, float *unit_vec, float acceleration, float *s_values, int s_count, bool cutting, unsigned int _line)
 {
+    PROFILE("append_block");
     // Create ( recycle ) a new block
     Block* block = THECONVEYOR.queue.head_ref();
     block->line = _line;
@@ -139,11 +141,7 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
 
     block->acceleration = acceleration; // save in block
 
-    // each motor's share of the longest axis, the step ticker scales the ramp with it
-    uint32_t steps_event_count = block->steps_event_count();
-    for (size_t i = 0; i < n_motors; i++) {
-        block->ratio[i] = block->steps[i] == steps_event_count ? 0 : (uint32_t)((((uint64_t)block->steps[i] << 32) + steps_event_count / 2) / steps_event_count);
-    }
+    block->set_ratios();
 
     block->millimeters = distance;
     block->nominal_speed = distance > 0.0F ? rate_mm_s : 0.0F; // (mm/s)
@@ -234,8 +232,31 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
     return true;
 }
 
+void Planner::resume_held()
+{
+    uint32_t done[k_max_actuators];
+    if(!THEKERNEL->step_ticker.take_held(done, k_max_actuators)) return;
+
+    Conveyor::Queue_t &queue= THECONVEYOR.queue;
+    if(queue.isr_tail_i == queue.head_i) return;
+
+    Block *held= queue.item_ref(queue.isr_tail_i);
+    held->shorten_by(done, k_max_actuators, minimum_planner_speed);
+
+    // the pass stops at the first flag an earlier pass cleared: everything from the standstill on is planned again
+    for (unsigned int i = queue.isr_tail_i; i != queue.head_i; i = queue.next(i))
+        queue.item_ref(i)->recalculate_flag= true;
+    recalculate(queue.prev(queue.head_i));   // head_i is the empty slot
+}
+
 void Planner::recalculate()
 {
+    recalculate(THECONVEYOR.queue.head_i);
+}
+
+void Planner::recalculate(unsigned int newest)
+{
+    PROFILE("recalculate");
     Conveyor::Queue_t &queue = THECONVEYOR.queue;
 
     unsigned int block_index;
@@ -276,7 +297,7 @@ void Planner::recalculate()
 
     float entry_speed = minimum_planner_speed;
 
-    block_index = queue.head_i;
+    block_index = newest;
     current     = queue.item_ref(block_index);
 
     if (!queue.is_empty()) {
@@ -298,7 +319,7 @@ void Planner::recalculate()
 
         float exit_speed = current->max_exit_speed();
 
-        while (block_index != queue.head_i) {
+        while (block_index != newest) {
             previous    = current;
             block_index = queue.next(block_index);
             current     = queue.item_ref(block_index);
@@ -316,8 +337,7 @@ void Planner::recalculate()
      * work out trapezoid for final (and newest) block
      */
 
-    // now current points to the head item
-    // which has not had calculate_trapezoid run yet
+    // now current points to the newest block, which has not had calculate_trapezoid run yet
     current->calculate_trapezoid(current->entry_speed, minimum_planner_speed);
 }
 

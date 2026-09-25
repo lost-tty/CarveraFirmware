@@ -92,6 +92,9 @@ public:
 
     void halt(uint8_t reason, const char *msg = nullptr);
     bool is_halted() const { return halted; }
+    bool interrupted() const { return halted || stopping; }
+    void trace_motion(bool on) { tracing= on; traced_motion= 255; }   // `motion on`: the ticker's state changes, on the console
+    void trace();   // from the main loop, when tracing   // a halt or a stop is in: no wait goes on, nothing more is queued
     uint8_t halt_reason() const { return reason; }
 
     void dispatch_halt();
@@ -120,7 +123,7 @@ private:
     void finish_clear();
 
     static const uint16_t k_stack_words = 768;
-    static const UBaseType_t k_priority = 2;   // above the main loop, below the tickers
+    static const UBaseType_t k_priority = 2;
     static const UBaseType_t k_notify_index = 1;
     static const uint32_t k_poll_ms = 10;   // the conveyor waits on the same notification
     static const uint32_t k_room_wait_ms = 10;   // short enough to keep feeding the watchdog
@@ -156,6 +159,11 @@ private:
     char msg[32]{};
     volatile bool draining{false};
     volatile bool stopping{false};
+    volatile bool tracing{false};
+    uint8_t traced_motion{255};
+    int traced_used{-1};
+    bool traced_hold{false};
+    uint32_t traced_at{0};
 
     EventGroupHandle_t state{nullptr};
     StaticEventGroup_t state_store;

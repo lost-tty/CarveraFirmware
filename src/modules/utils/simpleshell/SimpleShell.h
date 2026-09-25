@@ -63,6 +63,8 @@ public:
     bool parse_command(const char *cmd, string args, StreamOutput *stream);
     void print_mem(StreamOutput *stream) { mem_command("", stream); }
     void version_command(string parameters, StreamOutput *stream );
+    void motion_command(string parameters, StreamOutput *stream );
+    void prof_command(string parameters, StreamOutput *stream );
         void model_command(std::string parameters, StreamOutput *stream );
     void ftype_command( string parameters, StreamOutput *stream );
 

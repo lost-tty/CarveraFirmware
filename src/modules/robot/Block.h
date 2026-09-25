@@ -26,16 +26,20 @@ class Block {
         void ready() { is_ready= true; }
         void clear();
 
+        void shorten_by(const uint32_t done[], uint8_t n, float standstill);
+        void set_ratios();
+
         uint32_t steps_event_count() const; // steps of the longest axis
         float nominal_rate() const { return steps_event_count() * nominal_speed / millimeters; } // steps per second
 
-        static double ticks_squared() { return fp_scale; }
+        static float ticks_squared() { return fp_scale; }
 
     private:
         float max_allowable_speed( float acceleration, float target_velocity, float distance);
-        void prepare(float initial_rate, float maximum_rate, float acceleration_in_steps, float deceleration_in_steps);
+        void prepare(float initial_rate, float maximum_rate, float acceleration_in_steps, float deceleration_in_steps, float brake_in_steps);
 
-        static double fp_scale; // optimize to store this as it does not change
+        static float fp_scale;      // 2.62 per tick^2 for a steps/s^2 value
+        static float tick_seconds;  // 1 / step ticker frequency
 
     public:
         std::array<uint32_t, k_max_actuators> steps; // Number of steps for each axis for this block
@@ -54,13 +58,14 @@ class Block {
         uint32_t total_move_ticks;
         uint8_t direction_bits;   // one bit per motor
 
-        // ramp of the longest axis in 2.62 fixed point; each motor scales it by its ratio. The running
-        // state lives in StepTicker.
+        // ramp of the longest axis in 2.62 fixed point; each motor's position follows the path by its
+        // ratio. The running state lives in StepTicker.
         struct {
             int64_t steps_per_tick;      // at block start
             int64_t acceleration_change; // at block start, signed
             int64_t deceleration_change;
             int64_t plateau_rate;
+            int64_t brake_change;   // the configured deceleration, for a hold: deceleration_change is 0 on a block that cruises out
         } ramp;
         uint32_t ratio[k_max_actuators]; // steps[m] / steps_event_count in 0.32 fixed point, 0 for the longest axis
 
