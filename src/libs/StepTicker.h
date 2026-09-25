@@ -66,9 +66,11 @@ class StepTicker{
         void release();                               // HELD -> IDLE, the queue is sorted out
 
         void step_tick (void);
-        // cycles the tick has cost so far
+        // cycles the tick has cost so far, while `prof on` has the counting switched in
         volatile uint32_t isr_cycles{0};
         volatile uint32_t isr_ticks{0};
+        bool counting() const { return counting_; }
+        void count(bool on) { isr_cycles= 0; isr_ticks= 0; counting_= on; }
         void handle_finish (void);
         void start();
 
@@ -81,7 +83,7 @@ class StepTicker{
         static void _TIMER1_isr(void);
 
         bool start_next_block();
-        void check_watch();
+        Motion check_watch();
         void check_limits();
 
         float frequency;
@@ -121,6 +123,7 @@ class StepTicker{
         volatile Motion state_{IDLE};
         volatile bool resumable_{true};
         volatile bool paused_{false};   // no block starts while a hold is on
+        volatile bool counting_{false};
         int64_t hold_rate_{0};
 
         uint8_t num_motors;

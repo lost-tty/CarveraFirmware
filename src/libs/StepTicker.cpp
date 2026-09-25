@@ -70,9 +70,17 @@ void StepTicker::init()
 #define DWT_CYCCNT (*(volatile uint32_t *)0xE0001004)
 
 struct IsrClock {
-    StepTicker &t; uint32_t start;
-    explicit IsrClock(StepTicker &ticker) : t(ticker), start(DWT_CYCCNT) {}
-    ~IsrClock() { t.isr_cycles += DWT_CYCCNT - start; t.isr_ticks++; }
+    StepTicker &t; uint32_t start; bool on;
+    explicit IsrClock(StepTicker &ticker) : t(ticker), start(0), on(ticker.counting())
+    {
+        if(on) start= DWT_CYCCNT;
+    }
+    ~IsrClock()
+    {
+        if(!on) return;
+        t.isr_cycles += DWT_CYCCNT - start;
+        t.isr_ticks++;
+    }
 };
 #endif
 
@@ -240,11 +248,11 @@ static inline uint32_t owed(uint32_t path_steps, uint32_t path_frac, uint32_t ra
 }
 
 // at_steps is taken on the first asserted tick, so the hysteresis does not bias it
-void StepTicker::check_watch()
+StepTicker::Motion StepTicker::check_watch()
 {
     if(!watch->inputs.any()) {
         watch->seen= false;
-        return;
+        return state_;
     }
 
     if(!watch->seen) {
@@ -257,10 +265,11 @@ void StepTicker::check_watch()
     for (uint8_t m = 0; m < num_motors; m++) {
         if((watch->motors & (1 << m)) && abs(motor[m]->get_current_step() - watch->at_steps[m]) >= watch->hysteresis) travelled= true;
     }
-    if(!travelled) return;
+    if(!travelled) return state_;
 
     watch->hit= true;
     if(!watch->observe) stop();
+    return state_;
 }
 
 void StepTicker::step_tick (void)
@@ -271,17 +280,23 @@ void StepTicker::step_tick (void)
 
     //SET_STEPTICKER_DEBUG_PIN(state_ != IDLE ? 1 : 0);
 
+    Motion motion= state_;
+
     // brake() runs in task context and cannot mask this interrupt: it may have stamped BRAKING onto
     // a ticker whose last block ended in the same tick
-    if(state_ == BRAKING && current_block == nullptr) state_= IDLE;
+    if(motion == BRAKING && current_block == nullptr) {
+        motion= IDLE;
+        state_= IDLE;
+    }
 
     // a flush lands only while the ticker stands, so a brake runs out before the queue goes
-    if(state_ == IDLE || state_ == HELD) THECONVEYOR.drop_queue();
-    if(state_ == HELD) return;
-    if(state_ == IDLE) {
+    if(motion == IDLE || motion == HELD) THECONVEYOR.drop_queue();
+    if(motion == HELD) return;
+    if(motion == IDLE) {
         if(paused_) return;
         if(!THECONVEYOR.get_next_block(&current_block)) return;
         if(!start_next_block()) return;
+        motion= MOVING;
         state_= MOVING;
     }
 
@@ -292,11 +307,12 @@ void StepTicker::step_tick (void)
         return;
     }
 
-    if(watch != nullptr && !watch->hit) check_watch();
+    if(watch != nullptr && !watch->hit)
+        motion= check_watch();
     // check limits every 8 ticks
     if(n_limits != 0 && !limit_tripped && (current_tick & 7) == 0) check_limits();
 
-    if(state_ == BRAKING) {
+    if(motion == BRAKING) {
         int64_t a= current_block->ramp.brake_change;
         hold_rate_= hold_rate_ > a ? hold_rate_ - a : 0;
 
@@ -326,12 +342,12 @@ void StepTicker::step_tick (void)
 
     // protect against rounding errors and such
     if(path.steps_per_tick <= 0) {
-        if(state_ != BRAKING) path.counter = STEPTICKER_FPSCALE; // we force completion this step by setting to 1.0
+        if(motion != BRAKING) path.counter = STEPTICKER_FPSCALE; // we force completion this step by setting to 1.0
         path.steps_per_tick = 0;
     }
 
     int64_t rate= path.steps_per_tick;
-    if(state_ == BRAKING && hold_rate_ < rate) rate= hold_rate_;
+    if(motion == BRAKING && hold_rate_ < rate) rate= hold_rate_;
     path.counter += rate;
 
     if(path.counter >= STEPTICKER_FPSCALE) { // >= 1.0 step time
@@ -392,7 +408,7 @@ void StepTicker::step_tick (void)
 
         current_block= nullptr;
 
-        if(state_ == BRAKING) {
+        if(motion == BRAKING) {
             state_= HELD;
             defer_wake();
         }else{

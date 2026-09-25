@@ -220,6 +220,9 @@ GCFLAGS += -Wall -Wextra -Wno-unused-parameter -Wcast-align -Wpointer-arith -Wre
 
 GPFLAGS += $(GCFLAGS) -fno-rtti -std=gnu++11
 
+# The project builds at -Os for size; the motion hot path builds at -O3 for speed, which saves CPU.
+$(filter %/Block.o %/Planner.o %/StepTicker.o,$(OBJECTS)): GPFLAGS += -O3
+
 AS_GCFLAGS += -g3 $(DEVICE_FLAGS) -x assembler-with-cpp
 AS_GCFLAGS += $(patsubst %,-I%,$(INCDIRS))
 AS_FLAGS += -g3 $(DEVICE_FLAGS)
