@@ -12,8 +12,6 @@ using std::string;
 #include "libs/Kernel.h"
 #include "GcodeDispatch.h"
 #include "Gcode.h"
-#include "Config.h"
-#include "ConfigValue.h"
 #include "libs/nuts_bolts.h"
 #include "WirelessProbe.h"
 #include "libs/RingBuffer.h"
@@ -22,12 +20,34 @@ using std::string;
 #include "libs/StreamOutput.h"
 #include "SwitchPublicAccess.h"
 #include "SwitchPool.h"
+#include "ConfigTable.h"
 
-#define wp_checksum						CHECKSUM("wp")
-#define min_voltage_checksum			CHECKSUM("min_voltage")
-#define max_voltage_checksum			CHECKSUM("max_voltage")
-#define baud_rate_setting_checksum 		CHECKSUM("baud_rate")
-#define uart_checksum              		CHECKSUM("uart")
+#define WIRELESSPROBE_CONFIG(X) \
+    X(float, min_voltage, "min_voltage", 3.6f) \
+    X(float, max_voltage, "max_voltage", 4.1f)
+CONFIG_STRUCT(WirelessProbeConfig, WIRELESSPROBE_CONFIG);
+CONFIG_KEYS(wp_config_keys, WirelessProbeConfig, WIRELESSPROBE_CONFIG);
+
+#define UART_CONFIG(X) \
+    X(float, baud_rate, "baud_rate", 115200.0f)
+CONFIG_STRUCT(UartConfig, UART_CONFIG);
+CONFIG_KEYS(uart_config_keys, UartConfig, UART_CONFIG);
+extern WirelessProbe wireless_probe;
+static void wp_config_changed(const ConfigTable::Group *, const void *c)
+{
+    wireless_probe.configure(c);
+}
+CONFIG_GROUPS(wireless_probe_config_groups,
+    CFG_GROUP("wp", wp_config_keys, WirelessProbeConfig, wp_config_changed),
+    CFG_GROUP("uart", uart_config_keys, UartConfig, nullptr));
+
+void WirelessProbe::configure(const void *cfg)
+{
+    const WirelessProbeConfig &c = *(const WirelessProbeConfig *)cfg;
+    this->min_voltage = c.min_voltage;
+    this->max_voltage = c.max_voltage;
+}
+
 
 
 // Wireless probe serial reading module
@@ -39,13 +59,12 @@ void WirelessProbe::on_module_loaded() {
     this->wp_voltage = 0.0;
 
 	this->serial = new mbed::Serial( USBTX, USBRX );
-    this->serial->baud(THEKERNEL->config->value(uart_checksum, baud_rate_setting_checksum)->by_default(DEFAULT_SERIAL_BAUD_RATE)->as_number());
+    configure(&ConfigTable::config<WirelessProbeConfig>(wireless_probe_config_groups));
+    this->serial->baud(ConfigTable::config<UartConfig>(&wireless_probe_config_groups[1]).baud_rate);
 
     // We want to be called every time a new char is received
     this->serial->attach(this, &WirelessProbe::on_serial_char_received, mbed::Serial::RxIrq);
 
-    this->min_voltage = THEKERNEL->config->value(wp_checksum, min_voltage_checksum)->by_default(3.6F)->as_number();
-    this->max_voltage = THEKERNEL->config->value(wp_checksum, max_voltage_checksum)->by_default(4.1F)->as_number();
 
     // We only call the command dispatcher in the main loop, nowhere else
     this->register_for_event(ON_MAIN_LOOP);

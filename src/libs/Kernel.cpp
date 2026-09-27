@@ -8,12 +8,11 @@
 #include "libs/Kernel.h"
 #include "libs/Module.h"
 #include "libs/Killable.h"
-#include "libs/Config.h"
 #include "libs/nuts_bolts.h"
+#include "ConfigTable.h"
 #include "libs/StreamOutputPool.h"
 #include <mri.h>
 #include "checksumm.h"
-#include "ConfigValue.h"
 
 #include "libs/StepTicker.h"
 #include "libs/Watchdog.h"
@@ -57,13 +56,29 @@
 #include "Kernel.h"
 
 #define laser_checksum CHECKSUM("laser")
-#define baud_rate_setting_checksum CHECKSUM("baud_rate")
-#define uart_checksum              CHECKSUM("uart")
 
-#define base_stepping_frequency_checksum            CHECKSUM("base_stepping_frequency")
-#define microseconds_per_step_pulse_checksum        CHECKSUM("microseconds_per_step_pulse")
-#define disable_leds_checksum                       CHECKSUM("leds_disable")
-#define feed_hold_enable_checksum                   CHECKSUM("enable_feed_hold")
+#define KERNEL_CONFIG(X) \
+    X(float, base_stepping_frequency, "base_stepping_frequency", 100000.0f) \
+    X(float, microseconds_per_step_pulse, "microseconds_per_step_pulse", 1.0f) \
+    X(bool, leds_disable, "leds_disable", false) \
+    X(bool, enable_feed_hold, "enable_feed_hold", true)
+CONFIG_STRUCT(KernelConfig, KERNEL_CONFIG);
+CONFIG_KEYS(kernel_config_keys, KernelConfig, KERNEL_CONFIG);
+static void kernel_config_changed(const ConfigTable::Group *, const void *c)
+{
+    THEKERNEL->configure(c);
+}
+CONFIG_GROUPS(kernel_config_groups,
+    CFG_GROUP("", kernel_config_keys, KernelConfig, kernel_config_changed));
+
+// Step timing is fixed in init(); only these settings change at runtime.
+void Kernel::configure(const void *cfg)
+{
+    const KernelConfig &c = *(const KernelConfig *)cfg;
+    this->enable_feed_hold = c.enable_feed_hold;
+    this->use_leds = !c.leds_disable;
+}
+
 
 // The kernel is the central point in Smoothie : it stores modules, and handles event calls
 void Kernel::init()
@@ -80,11 +95,12 @@ void Kernel::init()
     this->serial = new SerialConsole(P2_8, P2_9, DEFAULT_SERIAL_BAUD_RATE);
     // this->serial = new SerialConsole(USBTX, USBRX, DEFAULT_SERIAL_BAUD_RATE);
 
-    // Config next, but does not load cache yet
-    this->config = new Config();
-
-    // Pre-load the config cache, do after setting up serial so we can report errors to serial
-    this->config->config_cache_load();
+    // Built after the serial console so that config errors can be reported.
+    ConfigTable::build("/sd/config.txt");
+#ifdef CONFIG_XCHECK
+    extern void config_xcheck_run();
+    config_xcheck_run();
+#endif
 
     // now config is loaded we can do normal setup for serial based on config
     delete this->serial;
@@ -96,14 +112,10 @@ void Kernel::init()
 
     // default
     if(this->serial == NULL) {
-        // this->serial = new SerialConsole(P2_8, P2_9, this->config->value(uart_checksum, baud_rate_setting_checksum)->by_default(DEFAULT_SERIAL_BAUD_RATE)->as_number());
     	this->serial = new SerialConsole(P2_8, P2_9, 115200);
     }
 
-    //some boards don't have leds.. TOO BAD!
-    this->use_leds = !this->config->value( disable_leds_checksum )->by_default(false)->as_bool();
-
-    this->enable_feed_hold = this->config->value( feed_hold_enable_checksum )->by_default(true)->as_bool();
+    configure(&ConfigTable::config<KernelConfig>(kernel_config_groups));
 
     this->add_module( this->serial );
 
@@ -140,8 +152,9 @@ void Kernel::init()
     }
 
     // Configure the step ticker
-    this->base_stepping_frequency = this->config->value(base_stepping_frequency_checksum)->by_default(100000)->as_number();
-    float microseconds_per_step_pulse = this->config->value(microseconds_per_step_pulse_checksum)->by_default(1)->as_number();
+    const KernelConfig &kc = ConfigTable::config<KernelConfig>(kernel_config_groups);
+    this->base_stepping_frequency = kc.base_stepping_frequency;
+    float microseconds_per_step_pulse = kc.microseconds_per_step_pulse;
 
     // Configure the step ticker
     step_ticker.init();
@@ -166,6 +179,8 @@ void Kernel::printk(const char* format, ...) {
 void Kernel::vprintk(const char* format, va_list args) {
     streams.vprintf(format, args);
 }
+
+// some boards don't have leds.. TOO BAD!
 
 // get current state
 uint8_t Kernel::get_state()

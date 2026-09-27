@@ -5,16 +5,18 @@
 #include "libs/Pin.h"
 #include "libs/SerialMessage.h"
 #include "libs/StreamOutput.h"
-#include "Config.h"
-#include "ConfigValue.h"
-#include "checksumm.h"
+#include "ConfigTable.h"
 #include "mbed.h"
 #include "tusb.h"
 #include "host/hcd.h"
 
-#define usb_host_checksum    CHECKSUM("usb_host")
-#define enable_checksum      CHECKSUM("enable")
-#define enable_pin_checksum  CHECKSUM("enable_pin")
+#define USB_HOST_CONFIG(X) \
+    X(bool, enable,     "enable",     true) \
+    X(pin,  enable_pin, "enable_pin", "1.19!")
+CONFIG_STRUCT(UsbHostConfig, USB_HOST_CONFIG);
+CONFIG_KEYS(usb_host_config_keys, UsbHostConfig, USB_HOST_CONFIG);
+CONFIG_GROUPS(usb_host_config_groups,
+    CFG_GROUP("usb_host", usb_host_config_keys, UsbHostConfig, nullptr));
 
 UsbHost* UsbHost::instance = nullptr;
 
@@ -42,10 +44,11 @@ extern "C" void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t idx, uint8_
 
 void UsbHost::on_module_loaded()
 {
-    if (!THEKERNEL->config->value(usb_host_checksum, enable_checksum)->by_default(false)->as_bool()) return;
+    const UsbHostConfig &c = ConfigTable::config<UsbHostConfig>(usb_host_config_groups);
+    if (!c.enable) return;
 
     Pin enable_pin;
-    enable_pin.from_string(THEKERNEL->config->value(usb_host_checksum, enable_pin_checksum)->by_default("1.19!")->as_string())->as_output();
+    enable_pin.from_spec(c.enable_pin)->as_output();
     enable_pin.set(false);
 
     if (!init_controller()) { printk("USB host: clock not ready, disabled\n"); return; }

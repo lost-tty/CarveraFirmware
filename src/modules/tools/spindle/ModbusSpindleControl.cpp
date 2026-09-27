@@ -10,36 +10,30 @@
 #include "libs/Pin.h"
 #include "mbed.h"
 #include "Modbus.h"
-#include "Config.h"
-#include "checksumm.h"
-#include "ConfigValue.h"
+#include "SpindleConfig.h"
 #include "ModbusSpindleControl.h"
-
-#define spindle_checksum                    CHECKSUM("spindle")
-#define spindle_rx_pin_checksum             CHECKSUM("rx_pin")
-#define spindle_tx_pin_checksum             CHECKSUM("tx_pin")
-#define spindle_dir_pin_checksum            CHECKSUM("dir_pin")
 
 void ModbusSpindleControl::on_module_loaded()
 {
+    const SpindleConfigT &spindle_config = spindle_cfg();
 
     spindle_on = false;
     PinName rx_pin;
     PinName tx_pin;
     PinName dir_pin;
-    
+
     // preparing PinName objects from the config string
     {
         Pin *smoothie_pin = new Pin();
-        smoothie_pin->from_string(THEKERNEL->config->value(spindle_checksum, spindle_rx_pin_checksum)->by_default("nc")->as_string());
+        smoothie_pin->from_spec(spindle_config.rx_pin);
         smoothie_pin->as_input();
         rx_pin = port_pin((PortName)smoothie_pin->port_number, smoothie_pin->pin);
-        
-        smoothie_pin->from_string(THEKERNEL->config->value(spindle_checksum, spindle_tx_pin_checksum)->by_default("nc")->as_string());
+
+        smoothie_pin->from_spec(spindle_config.tx_pin);
         smoothie_pin->as_input();
         tx_pin = port_pin((PortName)smoothie_pin->port_number, smoothie_pin->pin);
-        
-        smoothie_pin->from_string(THEKERNEL->config->value(spindle_checksum, spindle_dir_pin_checksum)->by_default("nc")->as_string());
+
+        smoothie_pin->from_spec(spindle_config.dir_pin);
         smoothie_pin->as_input();
         dir_pin = port_pin((PortName)smoothie_pin->port_number, smoothie_pin->pin);
 

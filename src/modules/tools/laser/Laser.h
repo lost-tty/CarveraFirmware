@@ -55,6 +55,7 @@ class Laser : public Module, public Killable {
         void kill() override;
         void cleanup() override;
         void get_status(struct laser_status *t);
+        void configure(const void *cfg);
         void set_scale(float s) { scale= s/100; }
         float get_scale() const { return scale*100; }
         bool set_laser_power(float p);
@@ -69,11 +70,8 @@ class Laser : public Module, public Killable {
         Pin *laser_pin= nullptr;
         mbed::PwmOut *pwm_pin= nullptr;
         Pin *ttl_pin= nullptr;
-        float laser_test_power;    // laser power when doing calibration
-        float laser_maximum_power; // maximum allowed laser power to be output on the pwm pin
-        float laser_minimum_power; // value used to tickle the laser on moves.  Also minimum value for auto-scaling
-        float laser_maximum_s_value; // Value of S code that will represent max power
         float scale;
+        float test_power, maximum_power, minimum_power;
 
         int32_t ms_per_tick; // ms between each ticks, depends on PWM frequency
 

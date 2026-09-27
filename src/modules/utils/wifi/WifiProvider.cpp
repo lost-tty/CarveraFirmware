@@ -13,8 +13,7 @@
 
 #include "libs/Module.h"
 #include "libs/Kernel.h"
-#include "Config.h"
-#include "ConfigValue.h"
+#include "ConfigTable.h"
 #include "checksumm.h"
 #include "Gcode.h"
 #include "libs/Logging.h"
@@ -34,14 +33,35 @@
 
 #include <math.h>
 
-#define wifi_checksum                   CHECKSUM("wifi")
-#define wifi_enable                     CHECKSUM("enable")
-#define wifi_interrupt_pin_checksum     CHECKSUM("interrupt_pin")
-#define machine_name_checksum           CHECKSUM("machine_name")
-#define tcp_port_checksum               CHECKSUM("tcp_port")
-#define udp_send_port_checksum          CHECKSUM("udp_send_port")
-#define udp_recv_port_checksum          CHECKSUM("udp_recv_port")
-#define tcp_timeout_s_checksum          CHECKSUM("tcp_timeout_s")
+#define WIFI_CONFIG(X) \
+    X(bool, enable, "enable", true) \
+    X(int, tcp_port, "tcp_port", 2222) \
+    X(int, udp_send_port, "udp_send_port", 3333) \
+    X(int, udp_recv_port, "udp_recv_port", 4444) \
+    X(int, tcp_timeout_s, "tcp_timeout_s", 10) \
+    X(str, machine_name, "machine_name", "CARVERA_01001", 32) \
+    X(pin, interrupt_pin, "interrupt_pin", "2.11")
+CONFIG_STRUCT(WifiConfig, WIFI_CONFIG);
+CONFIG_KEYS(wifi_config_keys, WifiConfig, WIFI_CONFIG);
+extern WifiProvider wifi_provider;
+static void wifi_config_changed(const ConfigTable::Group *, const void *c)
+{
+    wifi_provider.configure(c);
+}
+CONFIG_GROUPS(wifi_provider_config_groups,
+    CFG_GROUP("wifi", wifi_config_keys, WifiConfig, wifi_config_changed));
+
+// Ports take effect on the next connection setup, the name on the next broadcast.
+void WifiProvider::configure(const void *cfg)
+{
+    const WifiConfig &c = *(const WifiConfig *)cfg;
+    this->tcp_port = c.tcp_port;
+    this->udp_send_port = c.udp_send_port;
+    this->udp_recv_port = c.udp_recv_port;
+    this->tcp_timeout_s = c.tcp_timeout_s;
+    strncpy(this->machine_name, c.machine_name, sizeof(this->machine_name));
+}
+
 
 void WifiProvider::on_module_loaded()
 {
@@ -52,27 +72,22 @@ void WifiProvider::on_module_loaded()
     has_data_flag = false;
     connection_fail_count = 0;
 
-    // Check if WiFi is enabled in the configuration
-    if (!THEKERNEL->config->value(wifi_checksum, wifi_enable)->by_default(true)->as_bool()) {
+    const WifiConfig &wifi_config = ConfigTable::config<WifiConfig>(wifi_provider_config_groups);
+    configure(&wifi_config);
+    if (!wifi_config.enable) {
         // Not needed; free up resources
         return;
     }
 
 	data_callbacks.clear();
 
-    // Load configuration values
-    this->tcp_port = THEKERNEL->config->value(wifi_checksum, tcp_port_checksum)->by_default(2222)->as_int();
-    this->udp_send_port = THEKERNEL->config->value(wifi_checksum, udp_send_port_checksum)->by_default(3333)->as_int();
-    this->udp_recv_port = THEKERNEL->config->value(wifi_checksum, udp_recv_port_checksum)->by_default(4444)->as_int();
-    this->tcp_timeout_s = THEKERNEL->config->value(wifi_checksum, tcp_timeout_s_checksum)->by_default(10)->as_int();
-    this->machine_name = THEKERNEL->config->value(wifi_checksum, machine_name_checksum)->by_default("CARVERA")->as_string();
 
     // Initialize WiFi module
     this->init_wifi_module(false);
 
     // Set up interrupt for WiFi data reception
     Pin* smoothie_pin = new Pin();
-    smoothie_pin->from_string(THEKERNEL->config->value(wifi_checksum, wifi_interrupt_pin_checksum)->by_default("2.11")->as_string());
+    smoothie_pin->from_spec(wifi_config.interrupt_pin);
     smoothie_pin->as_input();
     if (smoothie_pin->port_number == 0 || smoothie_pin->port_number == 2) {
         PinName pinname = port_pin((PortName)smoothie_pin->port_number, smoothie_pin->pin);
@@ -282,7 +297,7 @@ void WifiProvider::on_second_tick(void*)
         M8266WIFI_SPI_Query_STA_Param(STA_PARAM_TYPE_NETMASK_ADDR, (u8*)this->sta_netmask, &param_len, &status);
         // Calculate broadcast address and send UDP data
         get_broadcast_from_ip_and_netmask(address, this->sta_address, this->sta_netmask);
-        snprintf(udp_buff, sizeof(udp_buff), "%s,%s,%d,%d", this->machine_name.c_str(), this->sta_address, this->tcp_port, client_num > 0 ? 1 : 0);
+        snprintf(udp_buff, sizeof(udp_buff), "%s,%s,%d,%d", this->machine_name, this->sta_address, this->tcp_port, client_num > 0 ? 1 : 0);
         M8266WIFI_SPI_Send_Udp_Data((u8*)udp_buff, strlen(udp_buff), udp_link_no, address, this->udp_send_port, &status);
         connection_fail_count = 0;
     } else if (connection_status == 2 || connection_status == 3 || connection_status == 4) {
@@ -302,12 +317,17 @@ void WifiProvider::on_second_tick(void*)
     // Send AP info through UDP
     memset(udp_buff, 0, sizeof(udp_buff));
     get_broadcast_from_ip_and_netmask(address, this->ap_address, this->ap_netmask);
-    snprintf(udp_buff, sizeof(udp_buff), "%s,%s,%d,%d", this->machine_name.c_str(), this->ap_address, this->tcp_port, client_num > 0 ? 1 : 0);
+    snprintf(udp_buff, sizeof(udp_buff), "%s,%s,%d,%d", this->machine_name, this->ap_address, this->tcp_port, client_num > 0 ? 1 : 0);
     M8266WIFI_SPI_Send_Udp_Data((u8*)udp_buff, strlen(udp_buff), udp_link_no, address, this->udp_send_port, &status);
 }
 
 void WifiProvider::on_idle(void* argument)
 {
+    if (beacon_due) {
+        beacon_due= false;
+        on_second_tick(nullptr);
+    }
+
     if (is_transferring()) return; // the transfer reads the TCP data itself
 
     // Check for incoming data
@@ -319,11 +339,6 @@ void WifiProvider::on_idle(void* argument)
 
 void WifiProvider::on_main_loop(void* argument)
 {
-    if (beacon_due) {
-        beacon_due= false;
-        on_second_tick(nullptr);
-    }
-
     string line;
     if (next_line(line)) SimpleShell::run(line, this);
 }
@@ -617,7 +632,7 @@ void WifiProvider::init_wifi_module(bool reset)
     }
 
     // Set TCP server auto-disconnect timeout
-    if (M8266WIFI_SPI_Set_TcpServer_Auto_Discon_Timeout(tcp_link_no, tcp_timeout_s, &status) == 0) {
+    if (M8266WIFI_SPI_Set_TcpServer_Auto_Discon_Timeout(tcp_link_no, this->tcp_timeout_s, &status) == 0) {
         printk("M8266WIFI_SPI_Set_TcpServer_Auto_Discon_Timeout ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
     }
 

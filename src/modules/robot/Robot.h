@@ -111,6 +111,8 @@ class Robot : public Module {
         bool step_motor(uint8_t axis, bool dir, unsigned steps, unsigned steps_per_sec, std::string &err);
         uint8_t register_motor(StepperMotor*);
         void home_on_startup();
+        void configure(int group, const void *cfg);   // Only while the config is built.
+        float configured_acceleration(size_t actuator) const;   // Only while the config is built.
         void enable_motors(bool on);
         void disable_motors(uint32_t axis_mask); // bit per axis, X is bit 0
         uint8_t get_number_registered_motors() const {return n_motors; }
@@ -148,12 +150,7 @@ class Robot : public Module {
         struct {
             bool absolute_arc_centre:1;                       // G90.1: I/J/K are centre coordinates, not offsets
             bool disable_arm_solution:1;                      // set to disable the arm solution
-            bool segment_z_moves:1;
-            bool save_g92:1;                                  // save g92 on M500 if set
-            bool save_g54:1;                                  // save WCS on M500 if set
-            bool soft_endstop_enabled:1;
-            bool home_on_boot:1;
-            bool soft_endstop_halt:1;
+            bool soft_endstop_enabled:1;                      // Set from config, changed by M211.
         };
 
     private:
@@ -182,7 +179,6 @@ class Robot : public Module {
         void load_config();
         bool within_soft_limits(const float transformed_target[], Gcode *gcode);
         bool clear_of_keepout(const float from[], const float to[], Gcode *gcode);
-        void load_keepout_config();
         bool append_milestone(const float target[], float rate_mm_s, Gcode *gcode, bool cutting);
         bool append_line( Gcode* gcode, const float target[], float rate_mm_s, bool cutting);
         bool append_arc( Gcode* gcode, const float target[], const float offset[], float radius, bool is_clockwise, bool cutting );
@@ -207,12 +203,10 @@ class Robot : public Module {
 
         float seek_rate;                                     // Current rate for seeking moves ( mm/min )
         float feed_rate;                                     // Current rate for feeding moves ( mm/min )
-        float mm_per_line_segment;                           // Setting : Used to split lines into segments
-        float mm_per_arc_segment;                            // Setting : Used to split arcs into segments
-        float mm_max_arc_error;                              // Setting : Used to limit total arc segments to max error
-        float delta_segments_per_second;                     // Setting : Used to split lines into segments for delta based on speed
+        float mm_per_line_segment;                           // Set from config, changed by M665 U.
+        float delta_segments_per_second;                     // Set from config, changed by M665 S.
         float seconds_per_minute;                            // for realtime speed change
-        float default_acceleration;                          // the defualt accleration if not set for each axis
+        float default_acceleration;                          // Set from config, changed by M204 S.
         float s_value;                                       // modal S value
         float max_s_value;                                   // S that means full power, laser_module_maximum_s_value
         // 2024
@@ -223,18 +217,8 @@ class Robot : public Module {
         float arc_milestone[3];                              // used as start of an arc command
         float max_delta;
 
-        float laser_module_offset_x;
-		float laser_module_offset_y;
-		float laser_module_offset_z;
-
-		// Number of arc generation iterations by small angle approximation before exact arc trajectory
-        // correction. This parameter may be decreased if there are issues with the accuracy of the arc
-        // generations. In general, the default value is more than enough for the intended CNC applications
-        // of grbl, and should be on the order or greater than the size of the buffer to help with the
-        // computational efficiency of generating arcs.
-        int arc_correction;                                  // Setting : how often to rectify arc computation
-        float max_speeds[3];                                 // Setting : max allowable speed in mm/s for each axis
-        float max_speed;                                     // Setting : maximum feedrate in mm/s as specified by F parameter
+        float max_speeds[3];                                 // Set from config, changed by M203.
+        float max_speed;                                     // Set from config, changed by M203 S.
 
         float soft_endstop_min[3], soft_endstop_max[3];
         Settings::Sink settings_slot;
@@ -242,8 +226,19 @@ class Robot : public Module {
         McodeRegistry::Mcode m203, m204, m205, m211, m220, m331, m332, m400, m665;
         static const uint8_t k_keepout_zones= 4;
         KeepOut keepout[k_keepout_zones];
-        float keepout_tool_z;
         bool keepout_on= true;
+
+        struct {
+            float mm_per_arc_segment, mm_max_arc_error;
+            float laser_offset[3];
+            float keepout_tool_z;
+            int arc_correction;
+            bool segment_z_moves:1;
+            bool save_g92:1;
+            bool save_g54:1;
+            bool home_on_boot:1;
+            bool soft_endstop_halt:1;
+        } cfg;
 
         uint8_t n_motors;                                    //count of the motors/axis registered
 

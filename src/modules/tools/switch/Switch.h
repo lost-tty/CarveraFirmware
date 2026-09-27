@@ -11,6 +11,7 @@
 #include "Pwm.h"
 #include "SoftPWM.h"
 #include "SoftTimer.h"
+#include "SwitchConfig.h"
 
 #include <math.h>
 #include <string>
@@ -37,14 +38,17 @@ class Switch : public Module, public Killable {
             ignore_on_halt= false;
             failsafe= 0;
             digital_pin= nullptr;
+            on_command= off_command= ConfigTable::GCODE_NONE;
+            subcode= 0;
+            output_on_command= output_off_command= nullptr;
         }
 
         void kill() override;
         void cleanup() override;
         uint16_t get_name() const { return name_checksum; }
         uint8_t get_subcode() const { return subcode; }
-        uint16_t get_on_mcode() const { return input_on_command_letter == 'M' ? input_on_command_code : 0; }
-        uint16_t get_off_mcode() const { return input_off_command_letter == 'M' ? input_off_command_code : 0; }
+        uint16_t get_on_mcode() const { return mcode_of(on_command); }
+        uint16_t get_off_mcode() const { return mcode_of(off_command); }
         void get_state(struct pad_switch *pad) const;
         void set_state(bool on);
         void set_state(bool on, float value);
@@ -52,7 +56,9 @@ class Switch : public Module, public Killable {
         void on_module_loaded();
         void on_main_loop(void *argument);
         void drive_output();
-        void on_config_reload(void* argument);
+        void load_config(const SwitchConfigT &cfg);
+        // Codes and pins are claimed at boot; changing them requires a restart.
+        void configure(const SwitchConfigT &cfg);
         void on_gcode_received(Gcode *argument);
         void on_gcode(Gcode *);
         void off_gcode(Gcode *);
@@ -61,11 +67,21 @@ class Switch : public Module, public Killable {
         enum OUTPUT_TYPE {NONE, SIGMADELTA, DIGITAL, HWPWM, SWPWM, DIGITALPWM};
 
     private:
+        static uint16_t mcode_of(uint16_t code) {
+            return (code == ConfigTable::GCODE_NONE || (code & ConfigTable::GCODE_G)) ? 0 : code;
+        }
         void flip();
         bool match_input_on_gcode(const Gcode* gcode) const;
         bool match_input_off_gcode(const Gcode* gcode) const;
         void turn_on_switch(float value);
         void turn_off_switch();
+
+        // nullptr when unset.
+        char *output_on_command;
+        char *output_off_command;
+        uint16_t on_command;
+        uint16_t off_command;
+        uint8_t subcode;
 
         SoftTimer pinpoll_timer;
         SoftTimer pwm_timer;
@@ -85,16 +101,9 @@ class Switch : public Module, public Killable {
             mbed::PwmOut *pwm_pin;
             SoftPWM      *swpwm_pin;
         };
-        std::string    output_on_command;
-        std::string    output_off_command;
         struct {
             uint16_t  name_checksum:16;
             uint16_t  input_pin_behavior:16;
-            uint16_t  input_on_command_code:16;
-            uint16_t  input_off_command_code:16;
-            char      input_on_command_letter:8;
-            char      input_off_command_letter:8;
-            uint8_t   subcode:4;
             bool      switch_changed:1;
             bool      input_pin_state:1;
             bool      switch_state:1;

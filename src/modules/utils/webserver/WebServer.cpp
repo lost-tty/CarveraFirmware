@@ -1,8 +1,7 @@
 #include "WebServer.h"
 #include "TcpServer.h"
 #include "HttpRequestHandler.h"
-#include "ConfigValue.h"
-#include "Config.h"
+#include "ConfigTable.h"
 #include "checksumm.h"
 #include "utils.h"
 #include "libs/Kernel.h"
@@ -17,9 +16,13 @@
 //#include "ConsoleStreamHandler.h"
 //#include "StatusStreamHandler.h"
 
-#define webserver_checksum            CHECKSUM("webserver")
-#define webserver_enable_checksum     CHECKSUM("enable")
-#define webserver_port_checksum       CHECKSUM("port")
+#define WEBSERVER_CONFIG(X) \
+    X(int, port, "port", 80)
+CONFIG_STRUCT(WebServerConfig, WEBSERVER_CONFIG);
+CONFIG_KEYS(webserver_config_keys, WebServerConfig, WEBSERVER_CONFIG);
+CONFIG_GROUPS(web_server_config_groups,
+    CFG_GROUP("webserver", webserver_config_keys, WebServerConfig, nullptr));
+
 
 WebServer::WebServer(WifiProvider* wifi_provider) : wifi_provider(wifi_provider)
 {
@@ -33,8 +36,7 @@ void WebServer::on_module_loaded()
         return;
     }
 
-    // Load the webserver port from the configuration
-    uint16_t webserver_port = THEKERNEL->config->value(webserver_checksum, webserver_port_checksum)->by_default(80)->as_int();
+    uint16_t webserver_port = ConfigTable::config<WebServerConfig>(web_server_config_groups).port;
 
     tcpserver = new TcpServer(wifi_provider, webserver_port);
 

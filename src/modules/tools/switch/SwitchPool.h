@@ -17,6 +17,10 @@
 class Switch;
 class Gcode;
 struct pad_switch;
+struct SwitchConfigT;
+
+// MainButton follows the light's startup state.
+extern const SwitchConfigT &switch_light_config();
 
 class SwitchPool{
     public:

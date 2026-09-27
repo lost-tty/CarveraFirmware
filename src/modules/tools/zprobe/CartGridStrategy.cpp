@@ -85,15 +85,14 @@
 #include "CartGridStrategy.h"
 
 #include "Kernel.h"
-#include "Config.h"
 #include "Robot.h"
 #include "Logging.h"
 #include "Gcode.h"
 #include "GcodeDispatch.h"
 #include "checksumm.h"
-#include "ConfigValue.h"
 #include "Conveyor.h"
 #include "ZProbe.h"
+#include "ZProbeConfig.h"
 #include "nuts_bolts.h"
 #include "utils.h"
 
@@ -103,22 +102,12 @@
 #include <cmath>
 #include <fastmath.h>
 
-#define grid_size_checksum           CHECKSUM("size")
-#define grid_x_size_checksum         CHECKSUM("grid_x_size")
-#define grid_y_size_checksum         CHECKSUM("grid_y_size")
-#define tolerance_checksum           CHECKSUM("tolerance")
-#define save_checksum                CHECKSUM("save")
-#define probe_offsets_checksum       CHECKSUM("probe_offsets")
-#define initial_height_checksum      CHECKSUM("initial_height")
-#define x_size_checksum              CHECKSUM("x_size")
-#define y_size_checksum              CHECKSUM("y_size")
-#define do_home_checksum             CHECKSUM("do_home")
-#define m_attach_checksum            CHECKSUM("m_attach")
-#define mount_position_checksum      CHECKSUM("mount_position")
-#define only_by_two_corners_checksum CHECKSUM("only_by_two_corners")
-#define human_readable_checksum      CHECKSUM("human_readable")
-#define height_limit_checksum        CHECKSUM("height_limit")
-#define dampening_start_checksum     CHECKSUM("dampening_start")
+CONFIG_KEYS(cartgrid_config_keys, CartGridConfigT, CART_GRID_CONFIG);
+// No change hook: ZProbe creates the strategy at boot, so changes require a restart.
+CONFIG_GROUPS(cart_grid_strategy_config_groups,
+    CFG_GROUP("leveling-strategy.rectangular-grid", cartgrid_config_keys, CartGridConfigT,
+              nullptr));
+
 
 #define GRIDFILE "/sd/cartesian.grid"
 #define GRIDFILE_NM "/sd/cartesian_nm.grid"
@@ -135,34 +124,35 @@ CartGridStrategy::~CartGridStrategy()
 
 bool CartGridStrategy::handleConfig()
 {
+    const CartGridConfigT &cartgrid_config = cartgrid_cfg();
+    save = cartgrid_config.save;
+    do_home = cartgrid_config.do_home;
+    human_readable = cartgrid_config.human_readable;
+    height_limit = cartgrid_config.height_limit;
+    dampening_start = cartgrid_config.dampening_start;
 
-    uint8_t grid_size = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, grid_size_checksum)->by_default(7)->as_number();
-    this->current_grid_x_size = this->configured_grid_x_size = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, grid_x_size_checksum)->by_default(grid_size)->as_number();
-    this->current_grid_y_size = this->configured_grid_y_size = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, grid_y_size_checksum)->by_default(grid_size)->as_number();
+    uint8_t grid_size = cartgrid_config.grid_size;
+    this->current_grid_x_size = this->configured_grid_x_size =
+        cartgrid_config.grid_x_size >= 0 ? cartgrid_config.grid_x_size : grid_size;
+    this->current_grid_y_size = this->configured_grid_y_size =
+        cartgrid_config.grid_y_size >= 0 ? cartgrid_config.grid_y_size : grid_size;
 
     // we use a different file format depending on whether it is square or not
     this->new_file_format= (configured_grid_x_size != configured_grid_y_size);
 
-    tolerance = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, tolerance_checksum)->by_default(0.03F)->as_number();
-    save = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, save_checksum)->by_default(false)->as_bool();
-    do_home = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, do_home_checksum)->by_default(true)->as_bool();
-    only_by_two_corners = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, only_by_two_corners_checksum)->by_default(false)->as_bool();
-    human_readable = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, human_readable_checksum)->by_default(false)->as_bool();
-    do_manual_attach = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, m_attach_checksum)->by_default(false)->as_bool();
+    only_by_two_corners = cartgrid_config.only_by_two_corners;
+    do_manual_attach = cartgrid_config.do_manual_attach;
 
-    this->height_limit = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, height_limit_checksum)->by_default(NAN)->as_number();
-    this->dampening_start = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, dampening_start_checksum)->by_default(NAN)->as_number();
-
-    if(!isnan(this->height_limit) && !isnan(this->dampening_start)) {
-        this->damping_interval = height_limit - dampening_start;
+    if(!isnan(cartgrid_config.height_limit) && !isnan(cartgrid_config.dampening_start)) {
+        this->damping_interval = cartgrid_config.height_limit - cartgrid_config.dampening_start;
     } else {
         this->damping_interval = NAN;
     }
 
     this->x_start = 0.0F;
     this->y_start = 0.0F;
-    this->x_size = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, x_size_checksum)->by_default(0.0F)->as_number();
-    this->y_size = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, y_size_checksum)->by_default(0.0F)->as_number();
+    this->x_size = cartgrid_config.x_size;
+    this->y_size = cartgrid_config.y_size;
     if (this->x_size == 0.0F || this->y_size == 0.0F) {
         printk("Error: Invalid config, x_size and y_size must be defined\n");
         return false;
@@ -170,14 +160,13 @@ bool CartGridStrategy::handleConfig()
 
     // the initial height above the bed we stop the intial move down after home to find the bed
     // this should be a height that is enough that the probe will not hit the bed and is an offset from max_z (can be set to 0 if max_z takes into account the probe offset)
-    this->initial_height = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, initial_height_checksum)->by_default(NAN)->as_number();
+    this->initial_height = cartgrid_config.initial_height;
     if(initial_height <= 0) initial_height= NAN;
 
     // Probe offsets xxx,yyy,zzz
     {
-        std::string po = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, probe_offsets_checksum)->by_default("0,0,0")->as_string();
-        std::vector<float> v = parse_number_list(po.c_str());
-        if(v.size() >= 3) {
+        const float *v = cartgrid_config.probe_offsets;
+        if(!isnan(v[2])) {
             this->probe_offsets = std::make_tuple(v[0], v[1], v[2]);
         }
     }
@@ -185,9 +174,8 @@ bool CartGridStrategy::handleConfig()
     //  manual attachment point xxx,yyy,zzz
     if (do_manual_attach)
     {
-        std::string ap = THEKERNEL->config->value(leveling_strategy_checksum, cart_grid_leveling_strategy_checksum, mount_position_checksum)->by_default("0,0,50")->as_string();
-        std::vector<float> w = parse_number_list(ap.c_str());
-        if(w.size() >= 3) {
+        const float *w = cartgrid_config.mount_position;
+        if(!isnan(w[2])) {
             m_attach = new float[3];
             m_attach[0]= w[0];
             m_attach[1]= w[1];
@@ -693,10 +681,10 @@ void CartGridStrategy::doCompensation(float *target, bool inverse, bool debug)
     float scale = 1.0;
     if (!isnan(this->damping_interval)) {
         // if the height is below our compensation limit:
-        if(target[Z_AXIS] <= this->height_limit) {
+        if(target[Z_AXIS] <= height_limit) {
             // scale the offset as necessary:
-            if(target[Z_AXIS] >= this->dampening_start) {
-                scale = (1.0 - ((target[Z_AXIS] - this->dampening_start) / this->damping_interval));
+            if(target[Z_AXIS] >= dampening_start) {
+                scale = (1.0 - ((target[Z_AXIS] - dampening_start) / this->damping_interval));
             } // else leave scale at 1.0;
         } else {
             return; // if Z is higher than max, no compensation

@@ -17,69 +17,72 @@
 #include "libs/StepperMotor.h"
 #include "wait_api.h" // mbed.h lib
 #include "Robot.h"
-#include "Config.h"
 #include "checksumm.h"
 #include "utils.h"
-#include "ConfigValue.h"
 #include "libs/StreamOutput.h"
 #include "Scripts.h"
 #include "Logging.h"
 #include "ZProbe.h"
 #include "BaseSolution.h"
 #include "SerialMessage.h"
+#include "EndstopsConfig.h"
 
 #include <ctype.h>
 #include <algorithm>
 #include "modules/robot/MachineTask.h"
 
-// OLD deprecated syntax
-#define endstops_module_enable_checksum         CHECKSUM("endstops_enable")
+// All axes home to max. Z has no min endstop.
+#define AXIS(min_pin, max_pin, travel, fast, alarm) \
+    CFG_SET(EndstopAxisConfigT, min_endstop, min_pin), \
+    CFG_SET(EndstopAxisConfigT, max_endstop, max_pin), \
+    CFG_SET(EndstopAxisConfigT, max_travel, travel), \
+    CFG_SET(EndstopAxisConfigT, fast_homing_rate, fast), \
+    CFG_SET(EndstopAxisConfigT, motor_alarm_pin, alarm)
+static const ConfigTable::Override alpha_ov[] = { AXIS("0.24^", "0.25^", 500.0f, 15.0f, "0.1!^") };
+static const ConfigTable::Override beta_ov[] = { AXIS("1.1^", "1.4^", 380.0f, 15.0f, "0.0!^") };
+static const ConfigTable::Override gamma_ov[] = { AXIS("nc", "1.8^", 150.0f, 10.0f, "3.25!^") };
+#undef AXIS
 
-#define ENDSTOP_CHECKSUMS(X) {            \
-    CHECKSUM(X "_min_endstop"),           \
-    CHECKSUM(X "_max_endstop"),           \
-    CHECKSUM(X "_max_travel"),            \
-    CHECKSUM(X "_fast_homing_rate_mm_s"), \
-    CHECKSUM(X "_slow_homing_rate_mm_s"), \
-    CHECKSUM(X "_homing_retract_mm"),     \
-    CHECKSUM(X "_homing_direction"),      \
-    CHECKSUM(X "_min"),                   \
-    CHECKSUM(X "_max"),                   \
-    CHECKSUM(X "_limit_enable"),          \
-	CHECKSUM(X "_motor_alarm_pin"),       \
+static void endstops_config_changed(const ConfigTable::Group *, const void *)
+{
+    endstops.configure();
+}
+CONFIG_GROUPS(endstops_config_groups,
+    CFG_GROUP_OV("alpha_", endstop_axis_config_keys, EndstopAxisConfigT, alpha_ov,
+                 endstops_config_changed),
+    CFG_GROUP_OV("beta_", endstop_axis_config_keys, EndstopAxisConfigT, beta_ov,
+                 endstops_config_changed),
+    CFG_GROUP_OV("gamma_", endstop_axis_config_keys, EndstopAxisConfigT, gamma_ov,
+                 endstops_config_changed),
+    CFG_GROUP("", endstops_global_config_keys, EndstopsGlobalConfigT, endstops_config_changed));
+
+static const EndstopAxisConfigT &axis_config(int i)
+{
+    return ConfigTable::config<EndstopAxisConfigT>(&endstops_config_groups[i]);
+}
+static const EndstopsGlobalConfigT &global_config()
+{
+    return ConfigTable::config<EndstopsGlobalConfigT>(&endstops_config_groups[3]);
 }
 
-// checksum defns
-enum DEFNS { MIN_PIN, MAX_PIN, MAX_TRAVEL, FAST_RATE, SLOW_RATE, RETRACT, DIRECTION, MIN, MAX, LIMIT, ALARM_PIN, NDEFNS };
+// Pins and homing direction are set once in load_old_config().
+void Endstops::configure()
+{
+    const EndstopsGlobalConfigT &g = global_config();
+    hysteresis_mm = g.hysteresis_mm;
+    home_z_first = g.home_z_first;
+    for (homing_info_t &h : homing_axis) {
+        if (h.axis_index > Z_AXIS) continue;
+        const EndstopAxisConfigT &ac = axis_config(h.axis_index);
+        h.fast_rate = ac.fast_homing_rate;
+        h.slow_rate = ac.slow_homing_rate;
+        h.retract = ac.homing_retract_mm;
+        h.homing_position = h.home_direction ? ac.min_pos : ac.max_pos;
+        h.max_travel = ac.max_travel;
+    }
+}
 
-// global config settings
-
-#define endstop_hysteresis_mm_checksum   CHECKSUM("endstop_hysteresis_mm")
-
-#define home_z_first_checksum            CHECKSUM("home_z_first")
-#define homing_order_checksum            CHECKSUM("homing_order")
-
-
-// new config syntax
-// endstop.xmin.enable true
-// endstop.xmin.pin 1.29
-// endstop.xmin.axis X
-// endstop.xmin.homing_direction home_to_min
-
-#define endstop_checksum                   CHECKSUM("endstop")
-#define enable_checksum                    CHECKSUM("enable")
-#define pin_checksum                       CHECKSUM("pin")
-#define axis_checksum                      CHECKSUM("axis")
-#define direction_checksum                 CHECKSUM("homing_direction")
-#define position_checksum                  CHECKSUM("homing_position")
-#define fast_rate_checksum                 CHECKSUM("fast_rate")
-#define slow_rate_checksum                 CHECKSUM("slow_rate")
-#define max_travel_checksum                CHECKSUM("max_travel")
-#define retract_checksum                   CHECKSUM("retract")
-#define limit_checksum                     CHECKSUM("limit_enable")
-#define motor_alarm_checksum               CHECKSUM("limit_enable")
-
-#define cover_endstop_checksum              CHECKSUM("cover_endstop")
+enum { MIN_PIN, MAX_PIN };
 
 #define STEPS_PER_MM(a) (THEROBOT.motor_steps_per_mm(a))
 
@@ -90,17 +93,7 @@ void Endstops::on_module_loaded()
     this->status = NOT_HOMING;
 
     // Do not do anything if not enabled or if no pins are defined
-    if (THEKERNEL->config->value( endstops_module_enable_checksum )->by_default(true)->as_bool()) {
-        if(!load_old_config()) {
-            return;
-        }
-
-    }else{
-        // check for new config syntax
-        if(!load_config()) {
-            return;
-        }
-    }
+    if (!global_config().module_enable || !load_old_config()) return;
 
     GcodeDispatch::add_handler(this);
     Settings::add(settings_slot, &Endstops::report_settings, this);
@@ -114,13 +107,8 @@ void Endstops::on_module_loaded()
 // Get config using old deprecated syntax Does not support ABC
 bool Endstops::load_old_config()
 {
-    uint16_t const checksums[][NDEFNS] = {
-        ENDSTOP_CHECKSUMS("alpha"),   // X
-        ENDSTOP_CHECKSUMS("beta"),    // Y
-        ENDSTOP_CHECKSUMS("gamma")    // Z
-    };
-
     for (int i = X_AXIS; i <= Z_AXIS; ++i) { // X_AXIS to Z_AXIS
+        const EndstopAxisConfigT &ac = axis_config(i);
         homing_info_t hinfo;
 
         // init homing struct
@@ -131,37 +119,24 @@ bool Endstops::load_old_config()
         hinfo.axis_index = i;
         hinfo.pin_info = nullptr;
 
-        // rates in mm/sec
-        hinfo.fast_rate = THEKERNEL->config->value(checksums[i][FAST_RATE])->by_default(100)->as_number();
-        hinfo.slow_rate = THEKERNEL->config->value(checksums[i][SLOW_RATE])->by_default(10)->as_number();
-
-        // retract in mm
-        hinfo.retract = THEKERNEL->config->value(checksums[i][RETRACT])->by_default(5)->as_number();
-
-        // get homing direction and convert to boolean where true is home to min, and false is home to max
-        hinfo.home_direction = THEKERNEL->config->value(checksums[i][DIRECTION])->by_default("home_to_min")->as_string() != "home_to_max";
-
-        // homing cartesian position
-        hinfo.homing_position = hinfo.home_direction ? THEKERNEL->config->value(checksums[i][MIN])->by_default(0)->as_number() : THEKERNEL->config->value(checksums[i][MAX])->by_default(200)->as_number();
-
-        // used to set maximum movement on homing, set by alpha_max_travel if defined
-        hinfo.max_travel = THEKERNEL->config->value(checksums[i][MAX_TRAVEL])->by_default(500)->as_number();
+        // True homes to min.
+        hinfo.home_direction = ac.homing_direction != 1;
 
         // motor alarm info
-        if (THEKERNEL->config->value(checksums[i][ALARM_PIN])->by_default("nc" )->as_string() != "nc") {
+        if (PinSpec::connected(ac.motor_alarm_pin)) {
         	motor_alarm_info_t *info = new motor_alarm_info_t;
-        	info->pin.from_string(THEKERNEL->config->value(checksums[i][ALARM_PIN])->as_string())->as_input();
+        	info->pin.from_spec(ac.motor_alarm_pin)->as_input();
             info->axis = 'X' + i;
             info->axis_index = i;
             motor_alarms.push_back(info);
         }
 
-        hinfo.motor_alarm_pin.from_string(THEKERNEL->config->value(checksums[i][ALARM_PIN])->by_default("nc" )->as_string())->as_input();
+        hinfo.motor_alarm_pin.from_spec(ac.motor_alarm_pin)->as_input();
 
-        // pin definitions for endstop pins
+        const uint16_t pins[2] = { ac.min_endstop, ac.max_endstop };
         for (int j = MIN_PIN; j <= MAX_PIN; ++j) {
             endstop_info_t *info = new endstop_info_t;
-            info->pin.from_string(THEKERNEL->config->value(checksums[i][j])->by_default("nc" )->as_string())->as_input();
+            info->pin.from_spec(pins[j])->as_input();
             if (!info->pin.connected()){
                 // no pin defined try next
                 delete info;
@@ -181,7 +156,7 @@ bool Endstops::load_old_config()
             info->at_max = (j == MAX_PIN);
 
             // limits enabled
-            info->limit_enable = THEKERNEL->config->value(checksums[i][LIMIT])->by_default(false)->as_bool();
+            info->limit_enable = ac.limit_enable;
         }
 
         homing_axis.push_back(hinfo);
@@ -194,159 +169,7 @@ bool Endstops::load_old_config()
     endstops.shrink_to_fit();
 
     get_global_configs();
-    for(auto& a : motor_alarms) alarm_pins.add(a->pin);
-    arm_limits();
-
-    return true;
-}
-
-// Get config using new syntax supports ABC
-bool Endstops::load_config()
-{
-    size_t max_index= 0;
-
-    std::array<homing_info_t, k_max_actuators> temp_axis_array; // needs to be at least XYZ, but allow for ABC
-    {
-        homing_info_t t;
-        t.axis= 0;
-        t.axis_index= 0;
-        t.pin_info= nullptr;
-
-        temp_axis_array.fill(t);
-    }
-
-    // iterate over all endstop.*.*
-    std::vector<uint16_t> modules;
-    THEKERNEL->config->get_module_list(&modules, endstop_checksum);
-    for(auto cs : modules ) {
-        if(!THEKERNEL->config->value(endstop_checksum, cs, enable_checksum )->as_bool()) continue;
-
-        endstop_info_t *pin_info= new endstop_info_t;
-        pin_info->pin.from_string(THEKERNEL->config->value(endstop_checksum, cs, pin_checksum)->by_default("nc" )->as_string())->as_input();
-        if(!pin_info->pin.connected()){
-            // no pin defined try next
-            delete pin_info;
-            continue;
-        }
-
-        string axis= THEKERNEL->config->value(endstop_checksum, cs, axis_checksum)->by_default("")->as_string();
-        if(axis.empty()){
-            // axis is required
-            delete pin_info;
-            continue;
-        }
-
-        size_t i;
-        switch(toupper(axis[0])) {
-            case 'X': i= X_AXIS; break;
-            case 'Y': i= Y_AXIS; break;
-            case 'Z': i= Z_AXIS; break;
-            case 'A': i= A_AXIS; break;
-            case 'B': i= B_AXIS; break;
-            case 'C': i= C_AXIS; break;
-            default: // not a recognized axis
-                delete pin_info;
-                continue;
-        }
-
-        // check we are not going above the number of defined actuators/axis
-        if(i >= THEROBOT.get_number_registered_motors()) {
-            // too many axis we only have configured n_motors
-            printk("ERROR: endstop %d is greater than number of defined motors. Endstops disabled\n", i);
-            delete pin_info;
-            return false;
-        }
-
-        // keep track of the maximum index that has been defined
-        if(i > max_index) max_index= i;
-
-        // init pin struct
-        pin_info->axis= toupper(axis[0]);
-        pin_info->axis_index= i;
-
-        // are limits enabled
-        pin_info->limit_enable= THEKERNEL->config->value(endstop_checksum, cs, limit_checksum)->by_default(false)->as_bool();
-
-        // a limit with no homing direction sits somewhere in the middle, and is reached from either side
-        string dir= THEKERNEL->config->value(endstop_checksum, cs, direction_checksum)->by_default("none")->as_string();
-        pin_info->at_end= (dir != "none");
-        pin_info->at_max= (dir == "home_to_max");
-
-        // enter into endstop array
-        endstops.push_back(pin_info);
-
-        // if set to none it means not used for homing (maybe limit only) so do not add to the homing array
-        string direction= THEKERNEL->config->value(endstop_checksum, cs, direction_checksum)->by_default("none")->as_string();
-        if(direction == "none") {
-            continue;
-        }
-
-        // setup the homing array
-        homing_info_t hinfo;
-
-        // init homing struct
-        hinfo.home_offset= 0;
-        hinfo.past_edge= 0;
-        hinfo.homed= false;
-        hinfo.axis= toupper(axis[0]);
-        hinfo.axis_index= i;
-        hinfo.pin_info= pin_info;
-
-        // rates in mm/sec
-        hinfo.fast_rate= THEKERNEL->config->value(endstop_checksum, cs, fast_rate_checksum)->by_default(100)->as_number();
-        hinfo.slow_rate= THEKERNEL->config->value(endstop_checksum, cs, slow_rate_checksum)->by_default(10)->as_number();
-
-        // retract in mm
-        hinfo.retract= THEKERNEL->config->value(endstop_checksum, cs, retract_checksum)->by_default(5)->as_number();
-
-        // homing direction and convert to boolean where true is home to min, and false is home to max
-        hinfo.home_direction=  direction == "home_to_min";
-
-        // homing cartesian position
-        hinfo.homing_position= THEKERNEL->config->value(endstop_checksum, cs, position_checksum)->by_default(hinfo.home_direction ? 0 : 200)->as_number();
-
-        // used to set maximum movement on homing, set by max_travel if defined
-        hinfo.max_travel= THEKERNEL->config->value(endstop_checksum, cs, max_travel_checksum)->by_default(500)->as_number();
-
-        // stick into array in correct place
-        temp_axis_array[hinfo.axis_index]= hinfo;
-    }
-
-    // if no pins defined then disable the module
-    if(endstops.empty()) return false;
-
-    // copy to the homing_axis array, make sure that undefined entries are filled in as well
-    // as the order is important and all slots must be filled upto the max_index
-    for (size_t i = 0; i < temp_axis_array.size(); ++i) {
-        if(temp_axis_array[i].axis == 0) {
-            // was not configured above, if it is XYZ then we need to force a dummy entry
-            if(i <= Z_AXIS) {
-                homing_info_t t;
-                t.axis= 'X' + i;
-                t.axis_index= i;
-                t.pin_info= nullptr; // this tells it that it cannot be used for homing
-                homing_axis.push_back(t);
-
-            }else if(i <= max_index) {
-                // for instance case where we defined C without A or B
-                homing_info_t t;
-                t.axis= 'A' + i;
-                t.axis_index= i;
-                t.pin_info= nullptr; // this tells it that it cannot be used for homing
-                homing_axis.push_back(t);
-            }
-
-        }else{
-            homing_axis.push_back(temp_axis_array[i]);
-        }
-    }
-
-    // saves some memory
-    homing_axis.shrink_to_fit();
-    endstops.shrink_to_fit();
-
-    // sets some endstop global configs applicable to all endstops
-    get_global_configs();
+    configure();
     for(auto& a : motor_alarms) alarm_pins.add(a->pin);
     arm_limits();
 
@@ -355,16 +178,12 @@ bool Endstops::load_config()
 
 void Endstops::get_global_configs()
 {
-    this->hysteresis_mm= THEKERNEL->config->value(endstop_hysteresis_mm_checksum)->by_default(0.1f)->as_number();
-
-
-    this->home_z_first= THEKERNEL->config->value(home_z_first_checksum)->by_default(true)->as_bool();
-
-
-	this->cover_endstop_pin.from_string( THEKERNEL->config->value(cover_endstop_checksum)->by_default("1.9^" )->as_string())->as_input();
+    const EndstopsGlobalConfigT &g = global_config();
+	this->cover_endstop_pin.from_spec(g.cover_endstop)->as_input();
 
     // see if an order has been specified, must be three or more characters, XYZABC or ABYXZ etc
-    string order = THEKERNEL->config->value(homing_order_checksum)->by_default("")->as_string();
+    string order = g.homing_order;
+
     this->homing_order = 0;
     if(order.size() >= 3 && order.size() <= homing_axis.size()) {
         int shift = 0;

@@ -9,31 +9,36 @@
 #include "libs/Kernel.h"
 #include "libs/Pin.h"
 #include "AnalogSpindleControl.h"
-#include "Config.h"
-#include "checksumm.h"
-#include "ConfigValue.h"
+#include "SpindleConfig.h"
 #include "Logging.h"
 #include "PwmOut.h"
 
-#define spindle_checksum                    CHECKSUM("spindle")
-#define spindle_max_rpm_checksum            CHECKSUM("max_rpm")
-#define spindle_min_rpm_checksum            CHECKSUM("min_rpm")
-#define spindle_pwm_pin_checksum            CHECKSUM("pwm_pin")
-#define spindle_pwm_period_checksum         CHECKSUM("pwm_period")
-#define spindle_switch_on_pin_checksum      CHECKSUM("switch_on_pin")
+AnalogSpindleControl *AnalogSpindleControl::active = nullptr;
+
+void AnalogSpindleControl::configure(const void *c)
+{
+    const SpindleConfigT &s = *(const SpindleConfigT *)c;
+    cfg.max_rpm = s.max_rpm;
+    cfg.min_rpm = s.min_rpm;
+}
+
+void AnalogSpindleControl::configure_active(const void *c)
+{
+    if (active) active->configure(c);
+}
 
 void AnalogSpindleControl::on_module_loaded()
 {
+    const SpindleConfigT &spindle_config = spindle_cfg();
+    configure(&spindle_config);
 
     spindle_on = false;
     target_rpm = 0;
-    min_rpm = THEKERNEL->config->value(spindle_checksum, spindle_min_rpm_checksum)->by_default(100)->as_int();
-    max_rpm = THEKERNEL->config->value(spindle_checksum, spindle_max_rpm_checksum)->by_default(5000)->as_int();
 
     // Get the pin for hardware pwm
     {
         Pin *smoothie_pin = new Pin();
-        smoothie_pin->from_string(THEKERNEL->config->value(spindle_checksum, spindle_pwm_pin_checksum)->by_default("nc")->as_string());
+        smoothie_pin->from_spec(spindle_config.pwm_pin);
         pwm_pin = smoothie_pin->as_output()->hardware_pwm();
         output_inverted = smoothie_pin->is_inverting();
         delete smoothie_pin;
@@ -45,20 +50,20 @@ void AnalogSpindleControl::on_module_loaded()
         delete this;
         return;
     }
-    
+
     // set pwm frequency
-    int period = THEKERNEL->config->value(spindle_checksum, spindle_pwm_period_checksum)->by_default(1000)->as_int();
+    int period = spindle_config.pwm_period;
     pwm_pin->period_us(period);
     // invert pwm signal if necessary
     pwm_pin->write(output_inverted ? 1 : 0);
 
     // Get digital out pin for switching the VFD on and off (wired to a digital input on the VFD via an optocoupler)
-    std::string switch_on_pin = THEKERNEL->config->value(spindle_checksum, spindle_switch_on_pin_checksum)->by_default("nc")->as_string();
     switch_on = NULL;
-    if(switch_on_pin.compare("nc") != 0) {
+    if(PinSpec::connected(spindle_config.switch_on_pin)) {
         switch_on = new Pin();
-        switch_on->from_string(switch_on_pin)->as_output()->set(false);
+        switch_on->from_spec(spindle_config.switch_on_pin)->as_output()->set(false);
     }
+    active = this;
 }
 
 void AnalogSpindleControl::turn_on() 
@@ -95,25 +100,25 @@ void AnalogSpindleControl::set_speed(int rpm)
     // limit the requested RPM value
     if(rpm < 0) {
         target_rpm = 0;
-    } else if (rpm > max_rpm) {
-        target_rpm = max_rpm;
-    } else if (rpm > 0 && rpm < min_rpm){
-        target_rpm = min_rpm;
+    } else if (rpm > cfg.max_rpm) {
+        target_rpm = cfg.max_rpm;
+    } else if (rpm > 0 && rpm < cfg.min_rpm){
+        target_rpm = cfg.min_rpm;
     } else {
         target_rpm = rpm;
     }
     // calculate the duty cycle and update the PWM
-    update_pwm(1.0f / max_rpm * target_rpm);
+    update_pwm(1.0f / cfg.max_rpm * target_rpm);
 
 }
 
 
-void AnalogSpindleControl::report_speed() 
+void AnalogSpindleControl::report_speed()
 {
     // report the current PWM value, calculate the current RPM value and report it as well
     float current_pwm = pwm_pin->read();
     printk("Current RPM: %.0f Analog value: %5.3f Target RPM: %d\n",
-                               max_rpm * current_pwm, current_pwm, target_rpm);
+                               cfg.max_rpm * current_pwm, current_pwm, target_rpm);
 
 }
 

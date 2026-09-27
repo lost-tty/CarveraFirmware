@@ -24,6 +24,7 @@ class TemperatureControlPool {
         static TemperatureControl *find(uint16_t name);
         static bool get_temperature(uint16_t name, struct pad_temperature *t);
         static void poll(std::vector<struct pad_temperature> &v);
+        static void configure_all();
 
     private:
         void report_temperature(Gcode *gcode);

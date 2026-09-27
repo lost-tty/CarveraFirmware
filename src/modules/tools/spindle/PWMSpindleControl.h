@@ -21,6 +21,8 @@ namespace mbed {
 // This module implements closed loop PID control for spindle RPM.
 class PWMSpindleControl: public SpindleControl {
     public:
+        void configure(const void *c);
+        static void configure_active(const void *c);
         PWMSpindleControl()
         : spindle_speed_timer("SpindleSpeed", 1, true, this, &PWMSpindleControl::on_update_speed)
         {}
@@ -30,6 +32,13 @@ class PWMSpindleControl: public SpindleControl {
         void get_status(struct spindle_status *t) override;
 
     private:
+        struct {
+            float acc_ratio;
+            float max_pwm;
+            float delay_s;
+            int32_t stall_count_rpm, stall_alarm_rpm, stall_s;
+        } cfg;
+        static PWMSpindleControl *active;
         
         void on_pin_rise();
         void on_update_speed();
@@ -57,13 +66,7 @@ class PWMSpindleControl: public SpindleControl {
         float control_I_term;
         float control_D_term;
         float smoothing_decay;
-        float max_pwm;
-        int  delay_s;
-        int  stall_s;
-        int  stall_count_rpm;
-        int  stall_alarm_rpm;
         uint32_t stall_timer;
-        float acc_ratio;
         Pin alarm_pin;
 
         // These fields are updated by the interrupt

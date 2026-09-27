@@ -1,36 +1,71 @@
 #include "libs/Kernel.h"
 #include "MainButton.h"
-#include "Config.h"
-#include "ConfigValue.h"
+#include "ConfigTable.h"
 #include "Logging.h"
 #include "Endstops.h"
 #include "Player.h"
 #include "SwitchPublicAccess.h"
 #include "SwitchPool.h"
+#include "SwitchConfig.h"
 #include "modules/robot/MachineTask.h"
 
 using namespace std;
 
-#define main_button_enable_checksum         CHECKSUM("main_button_enable")
-#define main_button_pin_checksum            CHECKSUM("main_button_pin")
-#define main_button_LED_R_pin_checksum      CHECKSUM("main_button_LED_R_pin")
-#define main_button_LED_G_pin_checksum      CHECKSUM("main_button_LED_G_pin")
-#define main_button_LED_B_pin_checksum      CHECKSUM("main_button_LED_B_pin")
-#define main_button_poll_frequency_checksum CHECKSUM("main_button_poll_frequency")
-#define main_long_press_time_ms_checksum    CHECKSUM("main_button_long_press_time")
-#define main_button_long_press_checksum     CHECKSUM("main_button_long_press_enable")
+static const char *const long_press_actions[] = { "None", "Sleep", "Repeat", nullptr };
+enum : uint8_t { LONG_PRESS_NONE, LONG_PRESS_SLEEP, LONG_PRESS_REPEAT };
 
-#define e_stop_pin_checksum                 CHECKSUM("e_stop_pin")
-#define ps12_pin_checksum                   CHECKSUM("ps12_pin")
-#define ps24_pin_checksum                   CHECKSUM("ps24_pin")
-#define power_fan_delay_s_checksum          CHECKSUM("power_fan_delay_s")
+#define MAIN_BUTTON_CONFIG(X) \
+    X(bool,  enable,             "main_button_enable",              true) \
+    X(pin,   pin,                "main_button_pin",                 "1.16^") \
+    X(pin,   led_r_pin,          "main_button_LED_R_pin",           "1.10") \
+    X(pin,   led_g_pin,          "main_button_LED_G_pin",           "1.15") \
+    X(pin,   led_b_pin,          "main_button_LED_B_pin",           "1.14") \
+    X(int,   poll_frequency,     "main_button_poll_frequency",      20) \
+    X(int,   long_press_time_ms, "main_button_long_press_time",     3000) \
+    X(enum,  long_press_enable,  "main_button_long_press_enable",   "None", long_press_actions) \
+    X(pin,   e_stop_pin,         "e_stop_pin",                      "0.26!^") \
+    X(pin,   ps12_pin,           "ps12_pin",                        "0.22") \
+    X(pin,   ps24_pin,           "ps24_pin",                        "0.10") \
+    X(int,   power_fan_delay_s,  "power_fan_delay_s",               30) \
+    X(bool,  stop_on_cover_open, "stop_on_cover_open",              false)
+CONFIG_STRUCT(MainButtonConfig, MAIN_BUTTON_CONFIG);
+CONFIG_KEYS(main_button_config_keys, MainButtonConfig, MAIN_BUTTON_CONFIG);
 
-#define power_checksum                      CHECKSUM("power")
-#define auto_sleep_checksum                 CHECKSUM("auto_sleep")
-#define auto_sleep_min_checksum             CHECKSUM("auto_sleep_min")
-#define turn_off_min_checksum               CHECKSUM("turn_off_min")
-#define stop_on_cover_open_checksum         CHECKSUM("stop_on_cover_open")
+#define POWER_CONFIG(X) \
+    X(bool,  auto_sleep,     "auto_sleep",     false) \
+    X(int,   auto_sleep_min, "auto_sleep_min", 5)
+CONFIG_STRUCT(PowerConfig, POWER_CONFIG);
+CONFIG_KEYS(power_config_keys, PowerConfig, POWER_CONFIG);
 
+#define LIGHT_CONFIG(X) \
+    X(int,   turn_off_min, "turn_off_min", 0)
+CONFIG_STRUCT(LightConfig, LIGHT_CONFIG);
+CONFIG_KEYS(light_config_keys, LightConfig, LIGHT_CONFIG);
+extern MainButton mainbutton;
+static void main_button_config_changed(const ConfigTable::Group *, const void *)
+{
+    mainbutton.configure();
+}
+CONFIG_GROUPS(main_button_config_groups,
+    CFG_GROUP("", main_button_config_keys, MainButtonConfig, main_button_config_changed),
+    CFG_GROUP("power", power_config_keys, PowerConfig, main_button_config_changed),
+    CFG_GROUP("light", light_config_keys, LightConfig, main_button_config_changed));
+
+// All three groups are built together, so the hook rereads each of them.
+void MainButton::configure()
+{
+    const MainButtonConfig &b = ConfigTable::config<MainButtonConfig>(main_button_config_groups);
+    const PowerConfig &p = ConfigTable::config<PowerConfig>(&main_button_config_groups[1]);
+    const LightConfig &l = ConfigTable::config<LightConfig>(&main_button_config_groups[2]);
+    cfg.poll_frequency = b.poll_frequency;
+    cfg.long_press_time_ms = b.long_press_time_ms;
+    cfg.long_press_enable = b.long_press_enable;
+    cfg.power_fan_delay_s = b.power_fan_delay_s;
+    cfg.stop_on_cover_open = b.stop_on_cover_open;
+    cfg.auto_sleep = p.auto_sleep;
+    cfg.auto_sleep_min = p.auto_sleep_min;
+    cfg.turn_off_min = l.turn_off_min;
+}
 
 
 void MainButton::on_module_loaded()
@@ -41,38 +76,27 @@ void MainButton::on_module_loaded()
     this->hold_toggle = 0;
     this->button_state = NONE;
     this->button_pressed = false;
-    this->stop_on_cover_open = false;
     this->sleep_countdown_us = us_ticker_read();
     this->light_countdown_us = us_ticker_read();
     this->power_fan_countdown_us = us_ticker_read();
 
-    bool main_button_enable = THEKERNEL->config->value( main_button_enable_checksum )->by_default(true)->as_bool(); // @deprecated
-    if (!main_button_enable) {
+    const MainButtonConfig &main_button_config =
+        ConfigTable::config<MainButtonConfig>(main_button_config_groups);
+    configure();
+    // SwitchPool's config exists only at boot, so a change requires a restart.
+    cfg.light_startup = switch_light_config().startup_state;
+    if (!main_button_config.enable) { // @deprecated
         return;
     }
 
-    this->main_button.from_string( THEKERNEL->config->value( main_button_pin_checksum )->by_default("1.16^")->as_string())->as_input();
-    this->main_button_LED_R.from_string( THEKERNEL->config->value( main_button_LED_R_pin_checksum )->by_default("1.10")->as_string())->as_output();
-    this->main_button_LED_G.from_string( THEKERNEL->config->value( main_button_LED_G_pin_checksum )->by_default("1.15")->as_string())->as_output();
-    this->main_button_LED_B.from_string( THEKERNEL->config->value( main_button_LED_B_pin_checksum )->by_default("1.14")->as_string())->as_output();
-    this->poll_frequency = THEKERNEL->config->value( main_button_poll_frequency_checksum )->by_default(20)->as_number();
-    this->long_press_time_ms = THEKERNEL->config->value( main_long_press_time_ms_checksum )->by_default(3000)->as_number();
-    this->long_press_enable = THEKERNEL->config->value( main_button_long_press_checksum )->by_default(false)->as_string();
+    this->main_button.from_spec(main_button_config.pin)->as_input();
+    this->main_button_LED_R.from_spec(main_button_config.led_r_pin)->as_output();
+    this->main_button_LED_G.from_spec(main_button_config.led_g_pin)->as_output();
+    this->main_button_LED_B.from_spec(main_button_config.led_b_pin)->as_output();
 
-    this->e_stop.from_string( THEKERNEL->config->value( e_stop_pin_checksum )->by_default("0.26^")->as_string())->as_input();
-    this->PS12.from_string( THEKERNEL->config->value( ps12_pin_checksum )->by_default("0.22")->as_string())->as_output();
-    this->PS24.from_string( THEKERNEL->config->value( ps24_pin_checksum )->by_default("0.10")->as_string())->as_output();
-    this->power_fan_delay_s = THEKERNEL->config->value( power_fan_delay_s_checksum )->by_default(30)->as_int();
-
-    this->auto_sleep = THEKERNEL->config->value(power_checksum, auto_sleep_checksum )->by_default(true)->as_bool();
-    this->auto_sleep_min = THEKERNEL->config->value(power_checksum, auto_sleep_min_checksum )->by_default(30)->as_number();
-
-
-    this->enable_light = THEKERNEL->config->value(get_checksum("switch"), get_checksum("light"), get_checksum("startup_state"))->by_default(false)->as_bool();
-    this->turn_off_light_min = THEKERNEL->config->value(light_checksum, turn_off_min_checksum )->by_default(10)->as_number();
-
-    this->stop_on_cover_open = THEKERNEL->config->value( stop_on_cover_open_checksum )->by_default(false)->as_bool(); // @deprecated
-
+    this->e_stop.from_spec(main_button_config.e_stop_pin)->as_input();
+    this->PS12.from_spec(main_button_config.ps12_pin)->as_output();
+    this->PS24.from_spec(main_button_config.ps24_pin)->as_output();
 
     this->switch_power_12(1);
     this->switch_power_24(1);
@@ -81,7 +105,7 @@ void MainButton::on_module_loaded()
     this->main_button_LED_G.set(0);
     this->main_button_LED_B.set(0);
 
-    timer.setFrequency(this->poll_frequency);
+    timer.setFrequency(cfg.poll_frequency);
     timer.start();
 
     mbed::InterruptIn *e_stop_interrupt_in = this->e_stop.interrupt_pin();
@@ -119,7 +143,7 @@ void MainButton::e_stop_irq() {
 void MainButton::update_power(uint8_t state)
 {
     if((state == IDLE || state == SLEEP) && !using_12v) {
-        if(us_ticker_read() - power_fan_countdown_us > (uint32_t)power_fan_delay_s * 1000000) switch_power_12(0);
+        if(us_ticker_read() - power_fan_countdown_us > (uint32_t)cfg.power_fan_delay_s * 1000000) switch_power_12(0);
     } else if(state != ALARM) {
         switch_power_12(1);
         power_fan_countdown_us = us_ticker_read();
@@ -129,16 +153,16 @@ void MainButton::update_power(uint8_t state)
 // idle for long enough and the machine puts itself to sleep, or at least turns the light off
 void MainButton::update_timeouts(uint8_t state)
 {
-    if(auto_sleep && auto_sleep_min > 0) {
+    if(cfg.auto_sleep && cfg.auto_sleep_min > 0) {
         if(state != IDLE) sleep_countdown_us = us_ticker_read();
-        else if(us_ticker_read() - sleep_countdown_us > (uint32_t)auto_sleep_min * 60 * 1000000) go_to_sleep();
+        else if(us_ticker_read() - sleep_countdown_us > (uint32_t)cfg.auto_sleep_min * 60 * 1000000) go_to_sleep();
     }
 
-    if(enable_light && turn_off_light_min > 0) {
+    if(cfg.light_startup && cfg.turn_off_min > 0) {
         if(state != IDLE) {
             light_countdown_us = us_ticker_read();
             SwitchPool::set_state(light_checksum, true);
-        } else if(us_ticker_read() - light_countdown_us > (uint32_t)turn_off_light_min * 60 * 1000000) {
+        } else if(us_ticker_read() - light_countdown_us > (uint32_t)cfg.turn_off_min * 60 * 1000000) {
             SwitchPool::set_state(light_checksum, false);
         }
     }
@@ -166,7 +190,7 @@ void MainButton::long_press(uint8_t state)
 {
     switch(state) {
         case IDLE:
-            if(long_press_enable == "Sleep") go_to_sleep();
+            if(cfg.long_press_enable == LONG_PRESS_SLEEP) go_to_sleep();
             break;
         case RUN: case HOME: machine_task.halt(MANUAL, "stopped by button"); break;
         case HOLD:  machine_task.hold(false); break;
@@ -210,7 +234,7 @@ void MainButton::handle_button()
 
     uint8_t state = THEKERNEL->get_state();
 
-    if(stop_on_cover_open && !machine_task.is_halted() && player.is_playing() && !endstops.cover_closed())
+    if(cfg.stop_on_cover_open && !machine_task.is_halted() && player.is_playing() && !endstops.cover_closed())
         machine_task.halt(COVER_OPEN, "cover open");
 
     update_power(state);
@@ -227,7 +251,7 @@ void MainButton::handle_button()
 // does not wait for the main loop to get round to it.
 void MainButton::button_tick()
 {
-    if(++second_counter >= poll_frequency) {
+    if(++second_counter >= (uint32_t)cfg.poll_frequency) {
         second_counter = 0;
         check_12v();
     }
@@ -242,14 +266,14 @@ void MainButton::button_tick()
         }
     } else {
         if (this->button_pressed) {
-            if (us_ticker_read() - this->button_press_time > this->long_press_time_ms * 1000) {
+            if (us_ticker_read() - this->button_press_time > (uint32_t)cfg.long_press_time_ms * 1000) {
                 button_state = BUTTON_LONG_PRESSED;
             } else {
                 button_state = BUTTON_SHORT_PRESSED;
             }
             this->button_pressed = false;
         } else {
-            if(++led_update_timer > this->poll_frequency * 0.2) {
+            if(++led_update_timer > cfg.poll_frequency * 0.2) {
                 button_state = BUTTON_LED_UPDATE;
                 led_update_timer = 0;
             }

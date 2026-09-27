@@ -6,8 +6,6 @@
 #include <tuple>
 #include <cstdint>
 
-#define cart_grid_leveling_strategy_checksum CHECKSUM("rectangular-grid")
-
 class StreamOutput;
 class Gcode;
 
@@ -43,11 +41,9 @@ private:
     bool load_grid(StreamOutput *stream);
 
     float initial_height;
-    float tolerance;
 
-    float height_limit;
-    float dampening_start;
     float damping_interval;
+    float height_limit, dampening_start;
 
     float *grid;
     std::tuple<float, float, float> probe_offsets;
@@ -63,11 +59,11 @@ private:
     };
 
     struct {
-        bool save:1;
-        bool do_home:1;
         bool do_manual_attach:1;
         bool only_by_two_corners:1;
-        bool human_readable:1;
         bool new_file_format:1;
+        bool save:1;
+        bool do_home:1;
+        bool human_readable:1;
     };
 };

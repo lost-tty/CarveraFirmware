@@ -7,6 +7,7 @@
 
 #include "libs/LPC17xx/sLPC17xx.h" // smoothed mbed.h lib
 #include "PinNames.h"
+#include "PinSpec.h"
 
 namespace mbed {
     class PwmOut;
@@ -18,6 +19,7 @@ class Pin {
         Pin();
 
         Pin* from_string(std::string value);
+        Pin* from_spec(uint16_t spec);
 
         inline bool connected() const {
             return this->valid;

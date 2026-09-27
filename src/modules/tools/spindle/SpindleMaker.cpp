@@ -13,37 +13,39 @@
 #include "PWMSpindleControl.h"
 #include "AnalogSpindleControl.h"
 #include "HuanyangSpindleControl.h"
-#include "Config.h"
-#include "checksumm.h"
-#include "ConfigValue.h"
+#include "SpindleConfig.h"
 #include "Logging.h"
 
-#define spindle_checksum                   CHECKSUM("spindle")
-#define enable_checksum                    CHECKSUM("enable")
-#define spindle_type_checksum              CHECKSUM("type")
-#define spindle_vfd_type_checksum          CHECKSUM("vfd_type")
+CONFIG_KEYS(spindle_config_keys, SpindleConfigT, SPINDLE_CONFIG);
+static void spindle_config_changed(const ConfigTable::Group *, const void *c)
+{
+    PWMSpindleControl::configure_active(c);
+    AnalogSpindleControl::configure_active(c);
+}
+CONFIG_GROUPS(spindle_maker_config_groups,
+    CFG_GROUP("spindle", spindle_config_keys, SpindleConfigT, spindle_config_changed));
+
 
 void SpindleMaker::load_spindle(){
 
-    // If the spindle module is disabled load no Spindle 
-    if( !THEKERNEL->config->value( spindle_checksum, enable_checksum  )->by_default(true)->as_bool() ) {
+    const SpindleConfigT &spindle_config = spindle_cfg();
+    // If the spindle module is disabled load no Spindle
+    if( !spindle_config.enable ) {
         printk("NOTE: Spindle Module is disabled\n");
-        return;    
+        return;
     }
-    
+
     spindle = NULL;
 
     // get the two config options that make us able to determine which spindle module we need to load
-    std::string spindle_type = THEKERNEL->config->value( spindle_checksum, spindle_type_checksum )->by_default("pwm")->as_string();
-    std::string vfd_type = THEKERNEL->config->value( spindle_checksum, spindle_vfd_type_checksum )->by_default("none")->as_string(); 
 
     // check config which spindle type we need
-    if( spindle_type.compare("pwm") == 0 ) {
+    if( spindle_config.type == SPINDLE_PWM ) {
         spindle = new PWMSpindleControl();
-    } else if ( spindle_type.compare("analog") == 0 ) {
+    } else if ( spindle_config.type == SPINDLE_ANALOG ) {
         spindle = new AnalogSpindleControl();
-    } else if ( spindle_type.compare("modbus") == 0 ) {
-        if(vfd_type.compare("huanyang") == 0) { 
+    } else if ( spindle_config.type == SPINDLE_MODBUS ) {
+        if(spindle_config.vfd_type == VFD_HUANYANG) {
             spindle = new HuanyangSpindleControl();
         } else {
             delete spindle;

@@ -32,7 +32,7 @@
 #include "GcodeDispatch.h"
 #include "BaseSolution.h"
 #include "StepperMotor.h"
-#include "Configurator.h"
+#include "ConfigTable.h"
 #include "Block.h"
 #include "TemperatureControlPublicAccess.h"
 #include "TemperatureControlPool.h"
@@ -252,15 +252,14 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
         //new_message.stream->printf("Received %s\r\n", possible_command.c_str());
         string cmd = shift_parameter(possible_command);
 
-        // Configurator commands
         if (cmd == "config-get"){
-            configurator.config_get_command(  possible_command, new_message.stream );
+            config_get_command(  possible_command, new_message.stream );
 
         } else if (cmd == "config-set"){
-            configurator.config_set_command(  possible_command, new_message.stream );
+            config_set_command(  possible_command, new_message.stream );
 
-        } else if (cmd == "config-load"){
-            configurator.config_load_command(  possible_command, new_message.stream );
+        } else if (cmd == "config"){
+            config_command(  possible_command, new_message.stream );
 
         } else if (cmd == "config-get-all"){
             config_get_all_command(  possible_command, new_message.stream );
@@ -1382,6 +1381,215 @@ void SimpleShell::help_command(string parameters, StreamOutput *stream)
         stream->printf("%s\r\n", cmd->help);
     }
     for (const Registered *r = registered; r != nullptr; r = r->next) stream->printf("%s\r\n", r->help);
+}
+
+static const char *const config_path = "/sd/config.txt";
+
+// Skips the rest of a line longer than the read buffer, so its tail is not read as a line.
+static void skip_long_line(FILE *fp, const char *line)
+{
+    size_t n = strlen(line);
+    if (n == 0 || line[n - 1] == '\n') return;
+    int c;
+    while ((c = fgetc(fp)) != '\n' && c != EOF) { }
+}
+
+// Reads key's value from path, tokenized as the loader does. The last line wins.
+static bool file_value(const char *path, const string &key, string &value)
+{
+    FILE *fp = fopen(path, "r");
+    if (fp == nullptr) return false;
+    char line[132];
+    bool found = false;
+    while (fgets(line, sizeof(line), fp) != nullptr) {
+        skip_long_line(fp, line);
+        size_t bk = strspn(line, " \t");
+        if (line[bk] == '#') continue;
+        size_t ek = bk + strcspn(line + bk, " \t\r\n");
+        if (key.compare(0, string::npos, line + bk, ek - bk) != 0) continue;
+        size_t bv = ek + strspn(line + ek, " \t");
+        size_t ev = bv + strcspn(line + bv, " \t\r\n#");
+        if (ev == bv) continue;
+        value.assign(line + bv, ev - bv);
+        found = true;
+    }
+    fclose(fp);
+    return found;
+}
+
+// MakeraStudio's config-get and config-set. MakeraStudio parses these replies verbatim.
+void SimpleShell::config_get_command(string parameters, StreamOutput *stream)
+{
+    string source = shift_parameter(parameters);
+    string setting = shift_parameter(parameters);
+    if (setting.empty()) {
+        char buf[64];
+        string value;
+        if (ConfigTable::get(source.c_str(), buf, sizeof(buf))) {
+            stream->printf("cached: %s is set to %s\r\n", source.c_str(), buf);
+        } else if (file_value(config_path, source, value)) {
+            stream->printf("cached: %s is set to %s\r\n", source.c_str(), value.c_str());
+        } else {
+            stream->printf("cached: %s is not in config\r\n", source.c_str());
+        }
+        return;
+    }
+    if (source != "sd") {
+        stream->printf("%s source does not exist\r\n", source.c_str());
+        return;
+    }
+    string value;
+    if (file_value(config_path, setting, value)) {
+        stream->printf("sd: %s is set to %s\r\n", setting.c_str(), value.c_str());
+    } else {
+        stream->printf("sd: %s is not in config\r\n", setting.c_str());
+    }
+}
+
+// Any key is accepted: config.txt also holds MakeraStudio's own settings.
+void SimpleShell::config_set_command(string parameters, StreamOutput *stream)
+{
+    string source = shift_parameter(parameters);
+    string setting = shift_parameter(parameters);
+    string value = shift_parameter(parameters);
+    if (source.empty() || setting.empty() || value.empty()) {
+        stream->printf("Usage: config-set source setting value # where source is sd, "
+                       "setting is the key and value is the new value\r\n");
+        return;
+    }
+    if (source != "sd") {
+        stream->printf("%s source does not exist\r\n", source.c_str());
+        return;
+    }
+    if (!ConfigTable::set(config_path, setting.c_str(), value.c_str())) {
+        stream->printf("sd: %s could not be written\r\n", setting.c_str());
+        return;
+    }
+    stream->printf("sd: %s has been set to %s\r\n", setting.c_str(), value.c_str());
+}
+
+// Calls fn(key, value) for each key line of path, tokenized as the loader does.
+template<class Fn> static void each_file_line(const char *path, Fn fn)
+{
+    FILE *fp = fopen(path, "r");
+    if (fp == nullptr) return;
+    char line[132];
+    while (fgets(line, sizeof(line), fp) != nullptr) {
+        skip_long_line(fp, line);
+        size_t bk = strspn(line, " \t");
+        if (line[bk] == '#' || line[bk] == '\0') continue;
+        size_t ek = bk + strcspn(line + bk, " \t\r\n");
+        size_t bv = ek + strspn(line + ek, " \t");
+        size_t ev = bv + strcspn(line + bv, " \t\r\n#");
+        if (ek == bk || ev == bv) continue;
+        line[ek] = '\0';
+        line[ev] = '\0';
+        fn(line + bk, line + bv);
+    }
+    fclose(fp);
+}
+
+// Prints "key = value", adding " (default: x)" when the value differs from the default.
+static void print_key(StreamOutput *stream, const char *name, const ConfigTable::Group *g,
+    const ConfigTable::Key *k)
+{
+    char value[64], dflt[64];
+    ConfigTable::format(g, k, value, sizeof(value));
+    ConfigTable::format_default(g, k, dflt, sizeof(dflt));
+    if (strcmp(value, dflt) != 0) {
+        stream->printf("%s = %s (default: %s)\n", name, value, dflt);
+    } else {
+        stream->printf("%s = %s\n", name, value);
+    }
+}
+
+static void list_key(const char *name, const ConfigTable::Group *g, const ConfigTable::Key *k,
+    void *user)
+{
+    print_key((StreamOutput *)user, name, g, k);
+    THEKERNEL->call_event(ON_IDLE);
+}
+
+static void config_get(const string &key, StreamOutput *stream)
+{
+    string value;
+    const ConfigTable::Group *g; const ConfigTable::Key *k;
+    if (ConfigTable::find(key.c_str(), &g, &k)) {
+        if (!ConfigTable::build(config_path)) {
+            stream->printf("error:out of memory\n");
+            return;
+        }
+        print_key(stream, key.c_str(), g, k);
+        ConfigTable::release();
+    } else if (file_value(config_path, key, value)) {
+        stream->printf("%s = %s\n", key.c_str(), value.c_str());
+    } else {
+        stream->printf("%s is not in config\n", key.c_str());
+    }
+}
+
+static void config_set(const string &key, const string &value, StreamOutput *stream)
+{
+    if (!ConfigTable::set(config_path, key.c_str(), value.c_str())) {
+        stream->printf("%s could not be written\n", key.c_str());
+        return;
+    }
+    config_get(key, stream);
+}
+
+static void config_reset(const string &key, StreamOutput *stream)
+{
+    string value;
+    bool in_file = file_value(config_path, key, value);
+    if (in_file && !ConfigTable::unset(config_path, key.c_str())) {
+        stream->printf("%s could not be removed\n", key.c_str());
+        return;
+    }
+    const ConfigTable::Group *g; const ConfigTable::Key *k;
+    if (ConfigTable::find(key.c_str(), &g, &k)) {
+        config_get(key, stream);
+    } else if (in_file) {
+        stream->printf("%s removed from config.txt\n", key.c_str());
+    } else {
+        stream->printf("%s is not in config\n", key.c_str());
+    }
+}
+
+// config list | get <key> | set <key> <value> | reset <key>
+void SimpleShell::config_command(string parameters, StreamOutput *stream)
+{
+    string sub = shift_parameter(parameters);
+    string key = shift_parameter(parameters);
+    string value = shift_parameter(parameters);
+    if (sub == "get" && !key.empty()) {
+        config_get(key, stream);
+        return;
+    }
+    if (sub == "set" && !key.empty() && !value.empty()) {
+        config_set(key, value, stream);
+        return;
+    }
+    if (sub == "reset" && !key.empty()) {
+        config_reset(key, stream);
+        return;
+    }
+    if (sub != "list") {
+        stream->printf("Usage: config list | config get <key> | config set <key> <value> | "
+                       "config reset <key>\r\n");
+        return;
+    }
+    if (!ConfigTable::build(config_path)) {
+        stream->printf("error:out of memory\n");
+        return;
+    }
+    ConfigTable::for_each(list_key, stream);
+    ConfigTable::release();
+    each_file_line(config_path, [&](const char *key, const char *value) {
+        const ConfigTable::Group *g; const ConfigTable::Key *k;
+        if (ConfigTable::find(key, &g, &k)) return;
+        stream->printf("%s = %s\n", key, value);
+        THEKERNEL->call_event(ON_IDLE);
+    });
 }
 
 // output all configs

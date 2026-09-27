@@ -8,9 +8,7 @@
 #include "libs/Module.h"
 #include "libs/Kernel.h"
 #include "PWMSpindleControl.h"
-#include "Config.h"
-#include "checksumm.h"
-#include "ConfigValue.h"
+#include "SpindleConfig.h"
 #include "Logging.h"
 #include "Conveyor.h"
 #include "system_LPC17xx.h"
@@ -26,29 +24,31 @@
 #include "us_ticker_api.h"
 #include "modules/robot/MachineTask.h"
 
-#define spindle_checksum                    CHECKSUM("spindle")
-#define spindle_pwm_pin_checksum            CHECKSUM("pwm_pin")
-#define spindle_pwm_period_checksum         CHECKSUM("pwm_period")
-#define spindle_max_pwm_checksum            CHECKSUM("max_pwm")
-#define spindle_feedback_pin_checksum       CHECKSUM("feedback_pin")
-#define spindle_pulses_per_rev_checksum     CHECKSUM("pulses_per_rev")
-#define spindle_default_rpm_checksum        CHECKSUM("default_rpm")
-#define spindle_control_P_checksum          CHECKSUM("control_P")
-#define spindle_control_I_checksum          CHECKSUM("control_I")
-#define spindle_control_D_checksum          CHECKSUM("control_D")
-#define spindle_control_smoothing_checksum  CHECKSUM("control_smoothing")
-#define spindle_delay_s_checksum			CHECKSUM("delay_s")
-#define spindle_acc_ratio_checksum			CHECKSUM("acc_ratio")
-#define spindle_alarm_pin_checksum			CHECKSUM("alarm_pin")
-#define spindle_stall_s_checksum			CHECKSUM("stall_s")
-#define spindle_stall_count_rpm_checksum	CHECKSUM("stall_count_rpm")
-#define spindle_stall_alarm_rpm_checksum	CHECKSUM("stall_alarm_rpm")
-
 #define UPDATE_FREQ 100
 
 
+PWMSpindleControl *PWMSpindleControl::active = nullptr;
+
+void PWMSpindleControl::configure(const void *c)
+{
+    const SpindleConfigT &s = *(const SpindleConfigT *)c;
+    cfg.acc_ratio = s.acc_ratio;
+    cfg.max_pwm = s.max_pwm;
+    cfg.delay_s = s.delay_s;
+    cfg.stall_count_rpm = s.stall_count_rpm;
+    cfg.stall_alarm_rpm = s.stall_alarm_rpm;
+    cfg.stall_s = s.stall_s;
+}
+
+void PWMSpindleControl::configure_active(const void *c)
+{
+    if (active) active->configure(c);
+}
+
 void PWMSpindleControl::on_module_loaded()
 {
+    const SpindleConfigT &spindle_config = spindle_cfg();
+    configure(&spindle_config);
     last_time = 0;
     last_edge = 0;
     current_rpm = 0;
@@ -56,26 +56,21 @@ void PWMSpindleControl::on_module_loaded()
     current_pwm_value = 0;
     time_since_update = 0;
     stall_timer = 0;
-    
+
     spindle_on = false;
-    
+
     factor = 100;
 
-    pulses_per_rev = THEKERNEL->config->value(spindle_checksum, spindle_pulses_per_rev_checksum)->by_default(1.0f)->as_number();
-    target_rpm = THEKERNEL->config->value(spindle_checksum, spindle_default_rpm_checksum)->by_default(10000.0f)->as_number();
-    control_P_term = THEKERNEL->config->value(spindle_checksum, spindle_control_P_checksum)->by_default(0.0001f)->as_number();
-    control_I_term = THEKERNEL->config->value(spindle_checksum, spindle_control_I_checksum)->by_default(0.0001f)->as_number();
-    control_D_term = THEKERNEL->config->value(spindle_checksum, spindle_control_D_checksum)->by_default(0.0001f)->as_number();
+    pulses_per_rev = spindle_config.pulses_per_rev;
+    target_rpm = spindle_config.default_rpm;
+    control_P_term = spindle_config.control_p;
+    control_I_term = spindle_config.control_i;
+    control_D_term = spindle_config.control_d;
 
-    delay_s        = THEKERNEL->config->value(spindle_checksum, spindle_delay_s_checksum)->by_default(3)->as_number();
-    stall_s        = THEKERNEL->config->value(spindle_checksum, spindle_stall_s_checksum)->by_default(100)->as_number();
-    stall_count_rpm = THEKERNEL->config->value(spindle_checksum, spindle_stall_count_rpm_checksum)->by_default(8000)->as_number();
-    stall_alarm_rpm = THEKERNEL->config->value(spindle_checksum, spindle_stall_alarm_rpm_checksum)->by_default(5000)->as_number();
-    acc_ratio      = THEKERNEL->config->value(spindle_checksum, spindle_acc_ratio_checksum)->by_default(1.0f)->as_number();
-    alarm_pin.from_string(THEKERNEL->config->value(spindle_checksum, spindle_alarm_pin_checksum)->by_default("nc")->as_string())->as_input();
+    alarm_pin.from_spec(spindle_config.alarm_pin)->as_input();
 
     // Smoothing value is low pass filter time constant in seconds.
-    float smoothing_time = THEKERNEL->config->value(spindle_checksum, spindle_control_smoothing_checksum)->by_default(0.1f)->as_number();
+    float smoothing_time = spindle_config.control_smoothing;
     if (smoothing_time * UPDATE_FREQ < 1.0f)
         smoothing_decay = 1.0f;
     else
@@ -84,12 +79,12 @@ void PWMSpindleControl::on_module_loaded()
     // Get the pin for hardware pwm
     {
         Pin *smoothie_pin = new Pin();
-        smoothie_pin->from_string(THEKERNEL->config->value(spindle_checksum, spindle_pwm_pin_checksum)->by_default("nc")->as_string());
+        smoothie_pin->from_spec(spindle_config.pwm_pin);
         pwm_pin = smoothie_pin->as_output()->hardware_pwm();
         output_inverted = smoothie_pin->is_inverting();
         delete smoothie_pin;
     }
-    
+
     if (pwm_pin == NULL)
     {
         printk("Error: Spindle PWM pin must be P2.0-2.5 or other PWM pin\n");
@@ -97,16 +92,14 @@ void PWMSpindleControl::on_module_loaded()
         return;
     }
 
-    max_pwm = THEKERNEL->config->value(spindle_checksum, spindle_max_pwm_checksum)->by_default(1.0f)->as_number();
-    
-    int period = THEKERNEL->config->value(spindle_checksum, spindle_pwm_period_checksum)->by_default(1000)->as_int();
+    int period = spindle_config.pwm_period;
     pwm_pin->period_us(period);
     pwm_pin->write(output_inverted ? 1 : 0);
 
     // Get the pin for interrupt
     {
         Pin *smoothie_pin = new Pin();
-        smoothie_pin->from_string(THEKERNEL->config->value(spindle_checksum, spindle_feedback_pin_checksum)->by_default("nc")->as_string());
+        smoothie_pin->from_spec(spindle_config.feedback_pin);
         smoothie_pin->as_input();
         if (smoothie_pin->port_number == 0 || smoothie_pin->port_number == 2) {
             PinName pinname = port_pin((PortName)smoothie_pin->port_number, smoothie_pin->pin);
@@ -123,6 +116,7 @@ void PWMSpindleControl::on_module_loaded()
 
     spindle_speed_timer.setFrequency(UPDATE_FREQ);
 	spindle_speed_timer.start();
+    active = this;
 }
 
 void PWMSpindleControl::on_pin_rise()
@@ -154,9 +148,9 @@ void PWMSpindleControl::on_update_speed()
     else{    // Calculate current RPM
 
 	    uint32_t t = rev_time;
-	    if (t > 2000 * acc_ratio ) //RPM < 30000
+	    if (t > 2000 * cfg.acc_ratio ) //RPM < 30000
 	    {	
-	        float new_rpm = 1000000 * acc_ratio * 60.0f / t;
+	        float new_rpm = 1000000 * cfg.acc_ratio * 60.0f / t;
 	        current_rpm = smoothing_decay * new_rpm + (1.0f - smoothing_decay) * current_rpm;
 	    }
 	}
@@ -171,7 +165,7 @@ void PWMSpindleControl::on_update_speed()
 //            acc_pwm += current_I_value;
 //            acc_pwm += control_D_term * UPDATE_FREQ * (error - prev_error);
             float new_pwm = current_pwm_value + acc_pwm;
-            new_pwm = confine(new_pwm, 0.0f, max_pwm);
+            new_pwm = confine(new_pwm, 0.0f, cfg.max_pwm);
 
             prev_error = error;
             current_pwm_value = new_pwm;
@@ -194,8 +188,8 @@ void PWMSpindleControl::on_update_speed()
 
         */
 
-		if (current_pwm_value > max_pwm) {
-			current_pwm_value = max_pwm;
+		if (current_pwm_value > cfg.max_pwm) {
+			current_pwm_value = cfg.max_pwm;
 		}
     } else {
         current_I_value = 0;
@@ -211,7 +205,7 @@ void PWMSpindleControl::on_update_speed()
 // the wait is the spindle reaching speed, so it is a sleep and not a dwell in the path
 void PWMSpindleControl::turn_on() {
     spindle_on = true;
-    if (delay_s > 0) safe_delay_ms(delay_s * 1000);
+    if (cfg.delay_s > 0) safe_delay_ms(cfg.delay_s * 1000);
 }
 
 void PWMSpindleControl::kill() {
@@ -222,7 +216,7 @@ void PWMSpindleControl::kill() {
 
 void PWMSpindleControl::turn_off() {
     spindle_on = false;
-    if (delay_s > 0) safe_delay_ms(delay_s * 1000);
+    if (cfg.delay_s > 0) safe_delay_ms(cfg.delay_s * 1000);
 }
 
 
@@ -277,10 +271,10 @@ void PWMSpindleControl::get_status(struct spindle_status *t)
 // get stall status
 bool PWMSpindleControl::get_stall(void)
 {
-	if (this->spindle_on && this->target_rpm > stall_count_rpm && this->current_rpm < stall_alarm_rpm) {
+	if (this->spindle_on && this->target_rpm > cfg.stall_count_rpm && this->current_rpm < cfg.stall_alarm_rpm) {
 		if (stall_timer == 0) {
 			stall_timer = us_ticker_read();
-		} else if (us_ticker_read() - stall_timer > (uint32_t)stall_s * 1000000) {
+		} else if (us_ticker_read() - stall_timer > (uint32_t)cfg.stall_s * 1000000) {
 			return true;
 		}
 	} else {

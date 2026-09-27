@@ -10,6 +10,8 @@
 #include "SwitchPool.h"
 #include "libs/Kernel.h"
 
+#include "ConfigTable.h"
+#include "RobotConfig.h"
 #include "Robot.h"
 #include "libs/Profile.h"
 #include "Conveyor.h"
@@ -24,7 +26,6 @@
 #include "arm_solutions/CartesianSolution.h"
 #include "checksumm.h"
 #include "utils.h"
-#include "ConfigValue.h"
 #include "libs/StreamOutput.h"
 #include "Logging.h"
 #include "GcodeDispatch.h"
@@ -39,68 +40,74 @@
 #include <string>
 #include <algorithm>
 
-#define  default_seek_rate_checksum          CHECKSUM("default_seek_rate")
-#define  home_on_boot_checksum               CHECKSUM("home_on_boot")
-#define  default_feed_rate_checksum          CHECKSUM("default_feed_rate")
-#define  mm_per_line_segment_checksum        CHECKSUM("mm_per_line_segment")
-#define  delta_segments_per_second_checksum  CHECKSUM("delta_segments_per_second")
-#define  mm_per_arc_segment_checksum         CHECKSUM("mm_per_arc_segment")
-#define  mm_max_arc_error_checksum           CHECKSUM("mm_max_arc_error")
-#define  arc_correction_checksum             CHECKSUM("arc_correction")
-#define  x_axis_max_speed_checksum           CHECKSUM("x_axis_max_speed")
-#define  y_axis_max_speed_checksum           CHECKSUM("y_axis_max_speed")
-#define  z_axis_max_speed_checksum           CHECKSUM("z_axis_max_speed")
-#define  segment_z_moves_checksum            CHECKSUM("segment_z_moves")
-#define  save_g92_checksum                   CHECKSUM("save_g92")
-#define  save_g54_checksum                   CHECKSUM("save_g54")
-#define  set_g92_checksum                    CHECKSUM("set_g92")
-
-// arm solutions
-
-// new-style actuator stuff
-#define  actuator_checksum                   CHEKCSUM("actuator")
-
-#define  step_pin_checksum                   CHECKSUM("step_pin")
-#define  dir_pin_checksum                    CHEKCSUM("dir_pin")
-#define  en_pin_checksum                     CHECKSUM("en_pin")
-
-#define  max_speed_checksum                  CHECKSUM("max_speed")
-#define  acceleration_checksum               CHECKSUM("acceleration")
-#define  z_acceleration_checksum             CHECKSUM("z_acceleration")
-
-#define  alpha_checksum                      CHECKSUM("alpha")
-#define  beta_checksum                       CHECKSUM("beta")
-#define  gamma_checksum                      CHECKSUM("gamma")
-
-#define laser_module_default_power_checksum     CHECKSUM("laser_module_default_power")
-#define laser_module_maximum_s_value_checksum   CHECKSUM("laser_module_maximum_s_value")
-
-#define laser_module_offset_x_checksum   CHECKSUM("laser_module_offset_x")
-#define laser_module_offset_y_checksum   CHECKSUM("laser_module_offset_y")
-#define laser_module_offset_z_checksum   CHECKSUM("laser_module_offset_z")
-
-
-#define enable_checksum                    CHECKSUM("enable")
-#define halt_checksum                      CHECKSUM("halt")
-#define tool_z_checksum                    CHECKSUM("tool_z")
-#define keepout_checksum                   CHECKSUM("keepout")
-#define xmax_checksum                      CHECKSUM("x_max")
-#define ymax_checksum                      CHECKSUM("y_max")
-#define zmax_checksum                      CHECKSUM("z_max")
-#define coordinate_checksum				   CHECKSUM("coordinate")
-#define anchor1_x_checksum		           CHECKSUM("anchor1_x")
-#define anchor1_y_checksum			       CHECKSUM("anchor1_y")
-
-#define soft_endstop_checksum              CHECKSUM("soft_endstop")
-#define xmin_checksum                      CHECKSUM("x_min")
-#define ymin_checksum                      CHECKSUM("y_min")
-#define zmin_checksum                      CHECKSUM("z_min")
-
-#define switch_checksum              CHECKSUM("switch")
-#define state_checksum               CHECKSUM("state")
-#define state_value_checksum         CHECKSUM("state_value")
-#define spindlefan_checksum          CHECKSUM("spindlefan")
 #define vacuum_checksum              CHECKSUM("vacuum")
+
+// Zones 1 and 2 guard the tool rack, relative to keepout.tool_z.
+static const ConfigTable::Override keepout_1_ov[] = {
+    CFG_SET(RobotKeepoutConfigT, x_min, -35.0f),
+    CFG_SET(RobotKeepoutConfigT, x_max, 0.0f),
+    CFG_SET(RobotKeepoutConfigT, z_max, -40.0f),
+};
+static const ConfigTable::Override keepout_2_ov[] = {
+    CFG_SET(RobotKeepoutConfigT, z_max, -117.0f),
+};
+
+// X, Y and Z have no acceleration of their own and follow the global one (M204 S).
+#define ACTUATOR(step, dir, en, spm, rate) \
+    CFG_SET(RobotActuatorConfigT, step_pin, step), \
+    CFG_SET(RobotActuatorConfigT, dir_pin, dir), \
+    CFG_SET(RobotActuatorConfigT, en_pin, en), \
+    CFG_SET(RobotActuatorConfigT, steps_per_mm, spm), \
+    CFG_SET(RobotActuatorConfigT, max_rate, rate)
+static const ConfigTable::Override alpha_ov[] = { ACTUATOR("1.28", "1.29", "nc", 200.0f, 3000.0f) };
+static const ConfigTable::Override beta_ov[] = { ACTUATOR("1.26", "1.27", "nc", 200.0f, 3000.0f) };
+static const ConfigTable::Override gamma_ov[] = { ACTUATOR("1.24", "1.25", "nc", 200.0f, 2000.0f) };
+static const ConfigTable::Override delta_ov[] = {
+    ACTUATOR("1.18", "1.20!", "3.26", 26.666667f, 10800.0f),
+    CFG_SET(RobotActuatorConfigT, acceleration, 360.0f),
+};
+static const ConfigTable::Override epsilon_ov[] = {
+    ACTUATOR("1.21", "1.23", "1.30", 43200.0f, 100.0f),
+    CFG_SET(RobotActuatorConfigT, acceleration, 10.0f),
+};
+#undef ACTUATOR
+
+static void robot_config_changed(const ConfigTable::Group *g, const void *c);
+enum {
+    ROOT_GROUP, SOFT_ENDSTOP_GROUP, KEEPOUT_GROUP, TOOLZ_GROUP = KEEPOUT_GROUP + 4, ACTUATOR_GROUP
+};
+CONFIG_GROUPS(robot_config_groups,
+    CFG_GROUP("", robot_root_config_keys, RobotRootConfigT, robot_config_changed),
+    CFG_GROUP("soft_endstop", robot_soft_endstop_config_keys, RobotSoftEndstopConfigT,
+              robot_config_changed),
+    CFG_GROUP_OV("keepout.1", robot_keepout_config_keys, RobotKeepoutConfigT, keepout_1_ov,
+                 robot_config_changed),
+    CFG_GROUP_OV("keepout.2", robot_keepout_config_keys, RobotKeepoutConfigT, keepout_2_ov,
+                 robot_config_changed),
+    CFG_GROUP("keepout.3", robot_keepout_config_keys, RobotKeepoutConfigT, robot_config_changed),
+    CFG_GROUP("keepout.4", robot_keepout_config_keys, RobotKeepoutConfigT, robot_config_changed),
+    CFG_GROUP("keepout", robot_keepout_toolz_config_keys, RobotKeepoutToolzConfigT,
+              robot_config_changed),
+    CFG_GROUP_OV("alpha_", robot_actuator_config_keys, RobotActuatorConfigT, alpha_ov,
+                 robot_config_changed),
+    CFG_GROUP_OV("beta_", robot_actuator_config_keys, RobotActuatorConfigT, beta_ov,
+                 robot_config_changed),
+    CFG_GROUP_OV("gamma_", robot_actuator_config_keys, RobotActuatorConfigT, gamma_ov,
+                 robot_config_changed),
+    CFG_GROUP_OV("delta_", robot_actuator_config_keys, RobotActuatorConfigT, delta_ov,
+                 robot_config_changed),
+    CFG_GROUP_OV("epsilon_", robot_actuator_config_keys, RobotActuatorConfigT, epsilon_ov,
+                 robot_config_changed));
+
+template<class T> static const T &robot_config(int group)
+{
+    return ConfigTable::config<T>(&robot_config_groups[group]);
+}
+
+static void robot_config_changed(const ConfigTable::Group *g, const void *c)
+{
+    THEROBOT.configure(g - robot_config_groups, c);
+}
 
 #define PI 3.14159265358979323846F // force to be float, do not use M_PI
 
@@ -170,91 +177,33 @@ void Robot::on_module_loaded()
     }
 }
 
-#define ACTUATOR_CHECKSUMS(X) {     \
-    CHECKSUM(X "_step_pin"),        \
-    CHECKSUM(X "_dir_pin"),         \
-    CHECKSUM(X "_en_pin"),          \
-    CHECKSUM(X "_steps_per_mm"),    \
-    CHECKSUM(X "_max_rate"),        \
-    CHECKSUM(X "_acceleration")     \
-}
-
 void Robot::load_config()
 {
     // Arm solutions are used to convert positions in millimeters into position in steps for each stepper motor.
     // While for a cartesian arm solution, this is a simple multiplication, in other, less simple cases, there is some serious math to be done.
     // To make adding those solution easier, they have their own, separate object.
     if (this->arm_solution) delete this->arm_solution;
-    this->arm_solution = new CartesianSolution(THEKERNEL->config);
+    this->arm_solution = new CartesianSolution();
 
-    this->feed_rate           = THEKERNEL->config->value(default_feed_rate_checksum   )->by_default(  100.0F)->as_number();
-    this->seek_rate           = THEKERNEL->config->value(default_seek_rate_checksum   )->by_default(  100.0F)->as_number();
-    this->mm_per_line_segment = THEKERNEL->config->value(mm_per_line_segment_checksum )->by_default(    5.0F)->as_number();
-    this->delta_segments_per_second = THEKERNEL->config->value(delta_segments_per_second_checksum )->by_default(0.0f   )->as_number();
-    this->mm_per_arc_segment  = THEKERNEL->config->value(mm_per_arc_segment_checksum  )->by_default(    0.0f)->as_number();
-    this->mm_max_arc_error    = THEKERNEL->config->value(mm_max_arc_error_checksum    )->by_default(   0.002f)->as_number();
-    this->arc_correction      = THEKERNEL->config->value(arc_correction_checksum      )->by_default(    5   )->as_number();
+    const RobotRootConfigT &rc= robot_config<RobotRootConfigT>(ROOT_GROUP);
+    this->feed_rate           = rc.feed_rate;
+    this->seek_rate           = rc.seek_rate;
+    configure(ROOT_GROUP, &rc);
 
-    // in mm/sec but specified in config as mm/min
-    this->max_speeds[X_AXIS]  = THEKERNEL->config->value(x_axis_max_speed_checksum    )->by_default(4000.0F)->as_number() / 60.0F;
-    this->max_speeds[Y_AXIS]  = THEKERNEL->config->value(y_axis_max_speed_checksum    )->by_default(4000.0F)->as_number() / 60.0F;
-    this->max_speeds[Z_AXIS]  = THEKERNEL->config->value(z_axis_max_speed_checksum    )->by_default(3000.0F)->as_number() / 60.0F;
-    this->max_speed           = THEKERNEL->config->value(max_speed_checksum           )->by_default(  -60.0F)->as_number() / 60.0F;
-
-    this->segment_z_moves     = THEKERNEL->config->value(segment_z_moves_checksum     )->by_default(true)->as_bool();
-    this->save_g92            = THEKERNEL->config->value(save_g92_checksum            )->by_default(false)->as_bool();
-    this->save_g54            = THEKERNEL->config->value(save_g54_checksum            )->by_default(true)->as_bool();
-    string g92                = THEKERNEL->config->value(set_g92_checksum             )->by_default("")->as_string();
-    if(!g92.empty()) {
-        // optional setting for a fixed G92 offset
-        std::vector<float> t= parse_number_list(g92.c_str());
-        if(t.size() == 3) {
-            g92_offset = wcs_t(t[0], t[1], t[2]);
-        }
-    }
+    // set_g92 applies only when all three values are given.
+    const float *t= rc.set_g92;
+    if(!isnan(t[0]) && !isnan(t[1]) && !isnan(t[2])) g92_offset = wcs_t(t[0], t[1], t[2]);
 
     // default s value for laser
-    this->max_s_value = THEKERNEL->config->value(laser_module_maximum_s_value_checksum)->by_default(1.0f)->as_number();
-    if(this->max_s_value <= 0.0F) this->max_s_value = 1.0F;
-    this->s_value = THEKERNEL->config->value(laser_module_default_power_checksum)->by_default(0.8F)->as_number()
-    					* this->max_s_value;
-
-    // 2024
-    /*
-	this->s_values[0] = this->s_value;
-	this->s_count = 1;
-	*/
-
-	this->laser_module_offset_x = THEKERNEL->config->value(laser_module_offset_x_checksum)->by_default(-38.0f)->as_number() ;
-	this->laser_module_offset_y = THEKERNEL->config->value(laser_module_offset_y_checksum)->by_default(5.0f)->as_number() ;
-	this->laser_module_offset_z = THEKERNEL->config->value(laser_module_offset_z_checksum)->by_default(-40.0f)->as_number() ;
-
-
-    // Make our Primary XYZ StepperMotors, and potentially A B C
-    uint16_t const motor_checksums[][6] = {
-        ACTUATOR_CHECKSUMS("alpha"), // X
-        ACTUATOR_CHECKSUMS("beta"),  // Y
-        ACTUATOR_CHECKSUMS("gamma"), // Z
-        #if MAX_ROBOT_ACTUATORS > 3
-        ACTUATOR_CHECKSUMS("delta"),   // A
-        #if MAX_ROBOT_ACTUATORS > 4
-        ACTUATOR_CHECKSUMS("epsilon"), // B
-        #if MAX_ROBOT_ACTUATORS > 5
-        ACTUATOR_CHECKSUMS("zeta")     // C
-        #endif
-        #endif
-        #endif
-    };
-
-    // default acceleration setting, can be overriden with newer per axis settings
-    this->default_acceleration= THEKERNEL->config->value(acceleration_checksum)->by_default(100.0F )->as_number(); // Acceleration is in mm/s^2
+    this->s_value = rc.laser_module_default_power * this->max_s_value;
 
     // make each motor
     for (size_t a = 0; a < MAX_ROBOT_ACTUATORS; a++) {
+        const RobotActuatorConfigT &ac= robot_config<RobotActuatorConfigT>(ACTUATOR_GROUP + a);
         Pin pins[3]; //step, dir, enable
-        for (size_t i = 0; i < 3; i++) {
-            pins[i].from_string(THEKERNEL->config->value(motor_checksums[a][i])->by_default("nc")->as_string())->as_output();
-        }
+        pins[0].from_spec(ac.step_pin)->as_output();
+        pins[1].from_spec(ac.dir_pin)->as_output();
+        pins[2].from_spec(ac.en_pin)->as_output();
 
         if(!pins[0].connected() || !pins[1].connected()) { // step and dir must be defined, but enable is optional
             if(a <= Z_AXIS) {
@@ -274,20 +223,12 @@ void Robot::load_config()
             return;
         }
 
-        actuators[a]->change_steps_per_mm(THEKERNEL->config->value(motor_checksums[a][3])->by_default(a == 2 ? 2560.0F : 80.0F)->as_number());
-        actuators[a]->set_max_rate(THEKERNEL->config->value(motor_checksums[a][4])->by_default(30000.0F)->as_number()/60.0F); // it is in mm/min and converted to mm/sec
-        actuators[a]->set_acceleration(THEKERNEL->config->value(motor_checksums[a][5])->by_default(NAN)->as_number()); // mm/secs²
+        actuators[a]->change_steps_per_mm(ac.steps_per_mm);
+        actuators[a]->set_max_rate(ac.max_rate / 60.0F); // it is in mm/min and converted to mm/sec
+        actuators[a]->set_acceleration(configured_acceleration(a)); // mm/secs²
     }
 
     check_max_actuator_speeds(); // check the configs are sane
-
-    // if we have not specified a z acceleration see if the legacy config was set
-    if(isnan(actuators[Z_AXIS]->get_acceleration())) {
-        float acc= THEKERNEL->config->value(z_acceleration_checksum)->by_default(NAN)->as_number(); // disabled by default
-        if(!isnan(acc)) {
-            actuators[Z_AXIS]->set_acceleration(acc);
-        }
-    }
 
     // initialise actuator positions to current cartesian position (X0 Y0 Z0)
     // so the first move can be correct if homing is not performed
@@ -306,34 +247,72 @@ void Robot::load_config()
 
     //this->clearToolOffset();
 
-    soft_endstop_enabled= THEKERNEL->config->value(soft_endstop_checksum, enable_checksum)->by_default(true)->as_bool();
-    home_on_boot= THEKERNEL->config->value(home_on_boot_checksum)->by_default(true)->as_bool();
-    soft_endstop_halt = THEKERNEL->config->value(soft_endstop_checksum, halt_checksum)->by_default(true)->as_bool();
-
     soft_endstop_max[X_AXIS]= -1;
     soft_endstop_max[Y_AXIS]= -1;
     soft_endstop_max[Z_AXIS]= -1;
-    soft_endstop_min[X_AXIS] = THEKERNEL->config->value(soft_endstop_checksum, xmin_checksum)->by_default(-371.0F)->as_number();
-    soft_endstop_min[Y_AXIS] = THEKERNEL->config->value(soft_endstop_checksum, ymin_checksum)->by_default(-250.0F)->as_number();
-    soft_endstop_min[Z_AXIS] = THEKERNEL->config->value(soft_endstop_checksum, zmin_checksum)->by_default(-135.0F)->as_number();
-    load_keepout_config();
+    for (int g = SOFT_ENDSTOP_GROUP; g <= TOOLZ_GROUP; g++)
+        configure(g, ConfigTable::block(&robot_config_groups[g]));
 }
 
-// keepout.<n>.x_min .. z_max define zone n like G22 would; a missing key leaves that side open
-void Robot::load_keepout_config()
+// Z without an acceleration of its own falls back to the legacy z_acceleration key.
+float Robot::configured_acceleration(size_t a) const
 {
-    const uint16_t lo[3]{xmin_checksum, ymin_checksum, zmin_checksum};
-    const uint16_t hi[3]{xmax_checksum, ymax_checksum, zmax_checksum};
-    for (uint8_t n = 0; n < k_keepout_zones; n++) {
-        char name[2]{char('1' + n), 0};
-        uint16_t zone= get_checksum(name);
-        for (int i = 0; i < 3; i++) {
-            keepout[n].min[i]= THEKERNEL->config->value(keepout_checksum, zone, lo[i])->by_default(NAN)->as_number();
-            keepout[n].max[i]= THEKERNEL->config->value(keepout_checksum, zone, hi[i])->by_default(NAN)->as_number();
-        }
-    }
+    float acc= robot_config<RobotActuatorConfigT>(ACTUATOR_GROUP + a).acceleration;
+    if (a == Z_AXIS && isnan(acc))
+        acc= robot_config<RobotRootConfigT>(ROOT_GROUP).z_acceleration;
+    return acc;
+}
 
-    keepout_tool_z= THEKERNEL->config->value(keepout_checksum, tool_z_checksum)->by_default(NAN)->as_number();
+// Pins and steps per mm are not updated here; changing them requires a restart.
+void Robot::configure(int group, const void *c)
+{
+    if (group == ROOT_GROUP) {
+        const RobotRootConfigT &rc= *(const RobotRootConfigT *)c;
+        this->mm_per_line_segment = rc.mm_per_line_segment;
+        this->delta_segments_per_second = rc.delta_segments_per_second;
+        // in mm/sec but specified in config as mm/min
+        this->max_speeds[X_AXIS]  = rc.x_axis_max_speed / 60.0F;
+        this->max_speeds[Y_AXIS]  = rc.y_axis_max_speed / 60.0F;
+        this->max_speeds[Z_AXIS]  = rc.z_axis_max_speed / 60.0F;
+        this->max_speed           = rc.max_speed / 60.0F;
+        this->max_s_value = rc.laser_module_maximum_s_value;
+        if(this->max_s_value <= 0.0F) this->max_s_value = 1.0F;
+        this->default_acceleration= rc.acceleration; // mm/s²; per-axis settings override it.
+        cfg.mm_per_arc_segment = rc.mm_per_arc_segment;
+        cfg.mm_max_arc_error = rc.mm_max_arc_error;
+        cfg.arc_correction = rc.arc_correction;
+        cfg.laser_offset[0] = rc.laser_module_offset_x;
+        cfg.laser_offset[1] = rc.laser_module_offset_y;
+        cfg.laser_offset[2] = rc.laser_module_offset_z;
+        cfg.segment_z_moves = rc.segment_z_moves;
+        cfg.save_g92 = rc.save_g92;
+        cfg.save_g54 = rc.save_g54;
+        cfg.home_on_boot = rc.home_on_boot;
+        if (actuators.size() > Z_AXIS)
+            actuators[Z_AXIS]->set_acceleration(configured_acceleration(Z_AXIS));
+    } else if (group == SOFT_ENDSTOP_GROUP) {
+        const RobotSoftEndstopConfigT &sc= *(const RobotSoftEndstopConfigT *)c;
+        soft_endstop_enabled= sc.enable;
+        cfg.soft_endstop_halt= sc.halt;
+        soft_endstop_min[X_AXIS] = sc.x_min;
+        soft_endstop_min[Y_AXIS] = sc.y_min;
+        soft_endstop_min[Z_AXIS] = sc.z_min;
+    } else if (group < TOOLZ_GROUP) {
+        // A side left NAN is open.
+        const RobotKeepoutConfigT &kc= *(const RobotKeepoutConfigT *)c;
+        KeepOut &k= keepout[group - KEEPOUT_GROUP];
+        k.min[0]= kc.x_min; k.max[0]= kc.x_max;
+        k.min[1]= kc.y_min; k.max[1]= kc.y_max;
+        k.min[2]= kc.z_min; k.max[2]= kc.z_max;
+    } else if (group == TOOLZ_GROUP) {
+        cfg.keepout_tool_z= ((const RobotKeepoutToolzConfigT *)c)->tool_z;
+    } else if ((size_t)(group - ACTUATOR_GROUP) < actuators.size()) {
+        const RobotActuatorConfigT &ac= *(const RobotActuatorConfigT *)c;
+        size_t a= group - ACTUATOR_GROUP;
+        actuators[a]->set_max_rate(ac.max_rate / 60.0F);
+        actuators[a]->set_acceleration(configured_acceleration(a));
+        check_max_actuator_speeds();
+    }
 }
 
 uint8_t Robot::register_motor(StepperMotor *motor)
@@ -352,7 +331,7 @@ uint8_t Robot::register_motor(StepperMotor *motor)
 
 void Robot::home_on_startup()
 {
-    if(home_on_boot) endstops.home_all();
+    if(cfg.home_on_boot) endstops.home_all();
 }
 
 bool Robot::jog(const float delta[], float scale)
@@ -624,7 +603,7 @@ void Robot::report_settings(StreamOutput *stream)
 
                 // save wcs_offsets and current_wcs
                 // TODO this may need to be done whenever they change to be compliant
-                if(save_g54) {
+                if(cfg.save_g54) {
                     stream->printf(";WCS settings\n");
                     stream->printf("%s\n", wcs2gcode(current_wcs).c_str());
                     int n = 1;
@@ -637,7 +616,7 @@ void Robot::report_settings(StreamOutput *stream)
                         ++n;
                     }
                 }
-                if(save_g92) {
+                if(cfg.save_g92) {
                     // linuxcnc saves G92, so we do too if configured, default is to not save to maintain backward compatibility
                     // also it needs to be used to set Z0 on rotary deltas as M206/306 can't be used, so saving it is necessary in that case
                     if(g92_offset != wcs_t(0, 0, 0)) {
@@ -1687,7 +1666,7 @@ bool Robot::within_soft_limits(const float transformed_target[], Gcode *gcode)
         if(!is_homed(i)) continue;
         if(!(!isnan(soft_endstop_min[i]) && transformed_target[i] < soft_endstop_min[i]) &&
            !(!isnan(soft_endstop_max[i]) && transformed_target[i] > soft_endstop_max[i])) continue;
-        if(!soft_endstop_halt) {
+        if(!cfg.soft_endstop_halt) {
             printk("error:soft limit %c exceeded, move ignored\n", i+'X');
         } else if(gcode == nullptr) {
             printk("error:soft limit %c exceeded\n", i+'X');
@@ -1706,7 +1685,7 @@ bool Robot::clear_of_keepout(const float from[], const float to[], Gcode *gcode)
 
     // the position is the spindle nose, so the zones shift with how far the tool reaches past it
     float tz= persist.tool_z();
-    float reach= isnan(keepout_tool_z) || tz == 0 ? 0 : tz - keepout_tool_z;
+    float reach= isnan(cfg.keepout_tool_z) || tz == 0 ? 0 : tz - cfg.keepout_tool_z;
     float tip_from[3]{from[X_AXIS], from[Y_AXIS], from[Z_AXIS] - reach};
     float tip_to[3]{to[X_AXIS], to[Y_AXIS], to[Z_AXIS] - reach};
     bool not_lower= tip_to[X_AXIS] == tip_from[X_AXIS] && tip_to[Y_AXIS] == tip_from[Y_AXIS] && tip_to[Z_AXIS] >= tip_from[Z_AXIS];
@@ -1767,7 +1746,7 @@ bool Robot::append_line(Gcode *gcode, const float target[], float rate_mm_s, boo
     // The latter is more efficient and avoids splitting fast long lines into very small segments, like initial z move to 0, it is what Johanns Marlin delta port does
     uint16_t segments;
 
-    if(this->disable_segmentation || (!segment_z_moves && !gcode->has_letter('X') && !gcode->has_letter('Y'))) {
+    if(this->disable_segmentation || (!cfg.segment_z_moves && !gcode->has_letter('X') && !gcode->has_letter('Y'))) {
         segments= 1;
 
     } else if(this->delta_segments_per_second > 1.0F) {
@@ -1870,10 +1849,10 @@ bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[]
     }
 
     // limit segments by maximum arc error
-    float arc_segment = this->mm_per_arc_segment;
-    if ((this->mm_max_arc_error > 0) && (2 * radius > this->mm_max_arc_error)) {
-        float min_err_segment = 2 * sqrtf((this->mm_max_arc_error * (2 * radius - this->mm_max_arc_error)));
-        if (this->mm_per_arc_segment < min_err_segment) {
+    float arc_segment = cfg.mm_per_arc_segment;
+    if ((cfg.mm_max_arc_error > 0) && (2 * radius > cfg.mm_max_arc_error)) {
+        float min_err_segment = 2 * sqrtf((cfg.mm_max_arc_error * (2 * radius - cfg.mm_max_arc_error)));
+        if (cfg.mm_per_arc_segment < min_err_segment) {
             arc_segment = min_err_segment;
         }
     }
@@ -1936,7 +1915,7 @@ bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[]
         for (i = 1; i < segments; i++) { // Increment (segments-1)
             if(machine_task.is_halted()) return false; // don't queue any more segments
 
-            if (count < this->arc_correction ) {
+            if (count < cfg.arc_correction ) {
                 // Apply vector rotation matrix
                 r_axisi = r_axis0 * sin_T + r_axis1 * cos_T;
                 r_axis0 = r_axis0 * cos_T - r_axis1 * sin_T;
@@ -2033,9 +2012,9 @@ void Robot::saveToolOffset(const float offset[N_PRIMARY_AXIS], const float cur_t
 void Robot::setLaserOffset()
 {
 	if (THEKERNEL->get_laser_mode()) {
-		g92_offset = wcs_t(laser_module_offset_x, laser_module_offset_y, laser_module_offset_z);
-		printk("Laser offset set to: %1.3f, %1.3f, %1.3f\n", laser_module_offset_x, laser_module_offset_y, laser_module_offset_z);
-		// g92_offset = wcs_t(laser_module_offset_x, laser_module_offset_y, laser_module_offset_z + std::get<Z_AXIS>(tool_offset));
+		const float *o= cfg.laser_offset;
+		g92_offset = wcs_t(o[0], o[1], o[2]);
+		printk("Laser offset set to: %1.3f, %1.3f, %1.3f\n", o[0], o[1], o[2]);
 	}
 }
 

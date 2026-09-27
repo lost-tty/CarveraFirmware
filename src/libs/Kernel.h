@@ -24,7 +24,6 @@
 // 9 WCS offsets
 #define MAX_WCS 9UL
 //Module manager
-class Config;
 class Module;
 class Conveyor;
 class SerialConsole;
@@ -65,11 +64,13 @@ class Kernel {
         void unregister_for_event(_EVENT_ENUM id_event, Module *module);
 
         bool is_using_leds() const { return use_leds; }
+        void configure(const void *cfg);
         // safe from an interrupt
         void serve_main();
 
         void set_feed_hold(bool f) { feed_hold= f; }
         bool get_feed_hold() const { return feed_hold; }
+        // Volatile: MachineTask and the pendant read it.
         bool is_feed_hold_enabled() const { return enable_feed_hold; }
         void set_bad_mcu(bool b) { bad_mcu= b; }
         bool is_bad_mcu() const { return bad_mcu; }
@@ -90,7 +91,6 @@ class Kernel {
         SerialConsole*    serial;
         StreamOutputPool  streams;
         Planner           planner;
-        Config*           config;
         StepTicker        step_ticker;
         Adc               adc;
         uint32_t          base_stepping_frequency;
@@ -103,9 +103,9 @@ class Kernel {
         std::array<std::vector<Module*>, NUMBER_OF_DEFINED_EVENTS> hooks;
 
         struct {
-            bool use_leds:1;
             bool feed_hold:1;
             volatile bool enable_feed_hold:1;
+            bool use_leds:1;
             bool bad_mcu:1;
             bool laser_mode:1;
             bool vacuum_mode:1;

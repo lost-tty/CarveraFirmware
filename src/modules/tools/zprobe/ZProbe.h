@@ -16,9 +16,7 @@
 
 #include <vector>
 
-// defined here as they are used in multiple files
-#define zprobe_checksum            CHECKSUM("zprobe")
-#define leveling_strategy_checksum CHECKSUM("leveling-strategy")
+struct ZProbeConfigT;
 
 class StepperMotor;
 class Gcode;
@@ -49,6 +47,7 @@ public:
     float getFastFeedrate() const { return fast_feedrate; }
     float getProbeHeight() const { return probe_height; }
     float getMaxZ() const { return max_z; }
+    void configure(const ZProbeConfigT &cfg);
 
 private:
     void config_load();

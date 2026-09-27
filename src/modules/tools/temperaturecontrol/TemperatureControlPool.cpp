@@ -12,15 +12,31 @@ using namespace std;
 #include <vector>
 #include "TemperatureControlPool.h"
 #include "TemperatureControl.h"
-#include "Config.h"
-#include "checksumm.h"
-#include "ConfigValue.h"
+#include "SpindleTempConfig.h"
 #include "TemperatureControlPublicAccess.h"
 #include "Gcode.h"
+#include "utils.h"
 
-#define enable_checksum              CHECKSUM("enable")
+CONFIG_KEYS(spindle_temp_config_keys, SpindleTempConfigT, TEMP_CONTROL_CONFIG);
+
+CONFIG_KEYS(temp_switch_config_keys, TempSwitchConfigT, TEMP_SWITCH_CONFIG);
+static void temperature_config_changed(const ConfigTable::Group *, const void *)
+{
+    TemperatureControlPool::configure_all();
+}
+CONFIG_GROUPS(temperature_control_pool_config_groups,
+    CFG_GROUP("temperature_control.spindle", spindle_temp_config_keys, SpindleTempConfigT,
+              temperature_config_changed),
+    CFG_GROUP("temperatureswitch.spindle", temp_switch_config_keys, TempSwitchConfigT,
+              temperature_config_changed));
+
 
 std::vector<TemperatureControl *> TemperatureControlPool::controls;
+
+void TemperatureControlPool::configure_all()
+{
+    for (TemperatureControl *c : controls) c->configure();
+}
 
 TemperatureControl *TemperatureControlPool::find(uint16_t name)
 {
@@ -75,16 +91,10 @@ void TemperatureControlPool::claim(uint16_t code)
 
 void TemperatureControlPool::load_tools()
 {
-    vector<uint16_t> modules;
-    THEKERNEL->config->get_module_list( &modules, temperature_control_checksum );
-    int cnt = 0;
-    for( auto cs : modules ) {
-        // If module is enabled
-        if( THEKERNEL->config->value(temperature_control_checksum, cs, enable_checksum )->as_bool() ) {
-            TemperatureControl *controller = new TemperatureControl(cs, cnt++);
-            controls.push_back(controller);
-            THEKERNEL->add_module(controller);
-        }
+    if(spindle_temp_cfg().enable) {
+        TemperatureControl *controller = new TemperatureControl(get_checksum("spindle"), 0);
+        controls.push_back(controller);
+        THEKERNEL->add_module(controller);
     }
 
     if(controls.empty()) return;

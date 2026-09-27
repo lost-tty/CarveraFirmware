@@ -25,6 +25,8 @@ public:
     void init();
     void start(uint8_t n_actuators);
 
+    float brake_limit;
+
     void on_module_loaded(void);
     void kill() override {}
     void cleanup() override;
@@ -97,7 +99,6 @@ private:
     uint32_t fed_steps{0};
 
 
-    float brake_limit;
     bool initialized{false};
     float current_feedrate{0}; // actual nominal feedrate that current block is running at in mm/sec
 

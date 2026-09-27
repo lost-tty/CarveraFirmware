@@ -28,9 +28,8 @@
 #include "modules/communication/Source.h"
 #include "modules/communication/WirelessProbe.h"
 #include "modules/communication/usb/UsbHost.h"
-#include "Config.h"
 #include "checksumm.h"
-#include "ConfigValue.h"
+#include "ConfigTable.h"
 #include "Robot.h"
 
 // FreeRTOS
@@ -61,7 +60,14 @@
 // disable MSD
 #define DISABLEMSD
 #define second_usb_serial_enable_checksum  CHECKSUM("second_usb_serial_enable")
-#define watchdog_timeout_checksum  CHECKSUM("watchdog_timeout")
+
+#define MAIN_CONFIG(X) \
+    X(float, watchdog_timeout, "watchdog_timeout", 10.0f)
+CONFIG_STRUCT(MainConfig, MAIN_CONFIG);
+CONFIG_KEYS(main_config_keys, MainConfig, MAIN_CONFIG);
+CONFIG_GROUPS(main_config_groups,
+    CFG_GROUP("", main_config_keys, MainConfig, nullptr));
+
 
 extern "C" void vPortSVCHandler(void);
 extern "C" void xPortPendSVHandler(void);
@@ -212,7 +218,7 @@ void init() {
     #endif
 
     // 10 second watchdog timeout (or config as seconds)
-    float t= THEKERNEL->config->value( watchdog_timeout_checksum )->by_default(10.0F)->as_number();
+    float t= ConfigTable::config<MainConfig>(main_config_groups).watchdog_timeout;
     if (t > 0.1F) {
         watchdog.configure(t * 1000000, WDT_RESET);
         watchdog.arm();
@@ -223,8 +229,8 @@ void init() {
         printk("WARNING Watchdog is disabled\n");
     }
 
-    // clear up the config cache to save some memory
-    THEKERNEL->config->config_cache_clear();
+    // Every module has copied its runtime settings, so the config structs can be freed.
+    ConfigTable::release();
 
     if(THEKERNEL->is_using_leds()) {
         // set some leds to indicate status... led0 init done, led1 mainloop running, led2 idle loop running, led3 sdcard ok

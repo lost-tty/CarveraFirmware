@@ -12,10 +12,10 @@
 #include <math.h>
 #include "libs/Kernel.h"
 #include "GcodeDispatch.h"
-#include "Config.h"
+#include "ConfigTable.h"
+#include "ATCConfig.h"
 #include "StepperMotor.h"
 #include "Robot.h"
-#include "ConfigValue.h"
 #include "Conveyor.h"
 #include "ZProbe.h"
 #include "WirelessProbe.h"
@@ -31,48 +31,18 @@
 
 #define ATC_AXIS 4
 
-#define atc_checksum            	CHECKSUM("atc")
-#define probe_checksum            	CHECKSUM("probe")
-#define endstop_pin_checksum      	CHECKSUM("homing_endstop_pin")
-#define debounce_ms_checksum      	CHECKSUM("homing_debounce_ms")
-#define max_travel_mm_checksum    	CHECKSUM("homing_max_travel_mm")
-#define homing_retract_mm_checksum  CHECKSUM("homing_retract_mm")
-#define homing_rate_mm_s_checksum   CHECKSUM("homing_rate_mm_s")
-#define action_mm_checksum      	CHECKSUM("action_mm")
-#define action_rate_mm_s_checksum   CHECKSUM("action_rate_mm_s")
-
 #define detector_switch_checksum    CHECKSUM("toolsensor")
-#define detector_checksum           CHECKSUM("detector")
-#define detect_pin_checksum			CHECKSUM("detect_pin")
-#define detect_rate_mm_s_checksum	CHECKSUM("detect_rate_mm_s")
-#define detect_travel_mm_checksum 	CHECKSUM("detect_travel_mm")
 
-#define safe_z_checksum				CHECKSUM("safe_z_mm")
-#define safe_z_empty_checksum		CHECKSUM("safe_z_empty_mm")
-#define safe_z_offset_checksum		CHECKSUM("safe_z_offset_mm")
-#define fast_z_rate_checksum		CHECKSUM("fast_z_rate_mm_m")
-#define slow_z_rate_checksum		CHECKSUM("slow_z_rate_mm_m")
-#define margin_rate_checksum		CHECKSUM("margin_rate_mm_m")
-
-#define fast_rate_mm_m_checksum		CHECKSUM("fast_rate_mm_m")
-#define slow_rate_mm_m_checksum		CHECKSUM("slow_rate_mm_m")
-#define retract_mm_checksum			CHECKSUM("retract_mm")
-#define probe_height_mm_checksum	CHECKSUM("probe_height_mm")
-
-#define coordinate_checksum			CHECKSUM("coordinate")
-#define anchor1_x_checksum			CHECKSUM("anchor1_x")
-#define anchor1_y_checksum			CHECKSUM("anchor1_y")
-#define anchor2_offset_x_checksum	CHECKSUM("anchor2_offset_x")
-#define anchor2_offset_y_checksum	CHECKSUM("anchor2_offset_y")
-#define rotation_offset_x_checksum	CHECKSUM("rotation_offset_x")
-#define rotation_offset_y_checksum	CHECKSUM("rotation_offset_y")
-#define rotation_offset_z_checksum	CHECKSUM("rotation_offset_z")
-#define toolrack_offset_x_checksum	CHECKSUM("toolrack_offset_x")
-#define toolrack_offset_y_checksum	CHECKSUM("toolrack_offset_y")
-#define toolrack_z_checksum			CHECKSUM("toolrack_z")
-#define clearance_x_checksum		CHECKSUM("clearance_x")
-#define clearance_y_checksum		CHECKSUM("clearance_y")
-#define clearance_z_checksum		CHECKSUM("clearance_z")
+static ATCConfigT atc_config;
+static void atc_config_changed(const ConfigTable::Group *, const void *cfg)
+{
+    atc_config = *(const ATCConfigT *)cfg;
+}
+CONFIG_GROUPS(atc_config_groups,
+    CFG_GROUP("atc", atc_root_config_keys, ATCConfigT, atc_config_changed),
+    CFG_GROUP_MORE("atc.detector", atc_detector_config_keys, atc_config_changed),
+    CFG_GROUP_MORE("atc.probe", atc_probe_config_keys, atc_config_changed),
+    CFG_GROUP_MORE("coordinate", atc_coordinate_config_keys, atc_config_changed));
 
 void ATCHandler::on_module_loaded()
 {
@@ -95,51 +65,14 @@ void ATCHandler::on_module_loaded()
 
 void ATCHandler::on_config_reload(void *argument)
 {
-	atc_home_info.pin.from_string( THEKERNEL->config->value(atc_checksum, endstop_pin_checksum)->by_default("1.0^" )->as_string())->as_input();
-	atc_home_info.debounce_ms    = THEKERNEL->config->value(atc_checksum, debounce_ms_checksum)->by_default(1  )->as_number();
-	atc_home_info.max_travel    = THEKERNEL->config->value(atc_checksum, max_travel_mm_checksum)->by_default(8  )->as_number();
-	atc_home_info.retract    = THEKERNEL->config->value(atc_checksum, homing_retract_mm_checksum)->by_default(3  )->as_number();
-	atc_home_info.action_dist    = THEKERNEL->config->value(atc_checksum, action_mm_checksum)->by_default(1  )->as_number();
-	atc_home_info.homing_rate    = THEKERNEL->config->value(atc_checksum, homing_rate_mm_s_checksum)->by_default(1  )->as_number();
-	atc_home_info.action_rate    = THEKERNEL->config->value(atc_checksum, action_rate_mm_s_checksum)->by_default(1  )->as_number();
-
-	detector_info.detect_pin.from_string( THEKERNEL->config->value(atc_checksum, detector_checksum, detect_pin_checksum)->by_default("0.20^" )->as_string())->as_input();
-	detector_info.detect_rate = THEKERNEL->config->value(atc_checksum, detector_checksum, detect_rate_mm_s_checksum)->by_default(1  )->as_number();
-	detector_info.detect_travel = THEKERNEL->config->value(atc_checksum, detector_checksum, detect_travel_mm_checksum)->by_default(1  )->as_number();
-
-	this->safe_z_mm = THEKERNEL->config->value(atc_checksum, safe_z_checksum)->by_default(-10)->as_number();
-	this->safe_z_empty_mm = THEKERNEL->config->value(atc_checksum, safe_z_empty_checksum)->by_default(-20)->as_number();
-	this->safe_z_offset_mm = THEKERNEL->config->value(atc_checksum, safe_z_offset_checksum)->by_default(10)->as_number();
-	this->fast_z_rate = THEKERNEL->config->value(atc_checksum, fast_z_rate_checksum)->by_default(500)->as_number();
-	this->slow_z_rate = THEKERNEL->config->value(atc_checksum, slow_z_rate_checksum)->by_default(60)->as_number();
-	this->margin_rate = THEKERNEL->config->value(atc_checksum, margin_rate_checksum)->by_default(1000)->as_number();
-
-	this->probe_fast_rate = THEKERNEL->config->value(atc_checksum, probe_checksum, fast_rate_mm_m_checksum)->by_default(300  )->as_number();
-	this->probe_slow_rate = THEKERNEL->config->value(atc_checksum, probe_checksum, slow_rate_mm_m_checksum)->by_default(60   )->as_number();
-	this->probe_retract_mm = THEKERNEL->config->value(atc_checksum, probe_checksum, retract_mm_checksum)->by_default(2   )->as_number();
-	this->probe_height_mm = THEKERNEL->config->value(atc_checksum, probe_checksum, probe_height_mm_checksum)->by_default(0   )->as_number();
-
-	this->anchor1_x = THEKERNEL->config->value(coordinate_checksum, anchor1_x_checksum)->by_default(-359  )->as_number();
-	this->anchor1_y = THEKERNEL->config->value(coordinate_checksum, anchor1_y_checksum)->by_default(-234  )->as_number();
-	this->anchor2_offset_x = THEKERNEL->config->value(coordinate_checksum, anchor2_offset_x_checksum)->by_default(90  )->as_number();
-	this->anchor2_offset_y = THEKERNEL->config->value(coordinate_checksum, anchor2_offset_y_checksum)->by_default(45.65F  )->as_number();
-
-	this->toolrack_z = THEKERNEL->config->value(coordinate_checksum, toolrack_z_checksum)->by_default(-105  )->as_number();
-	this->toolrack_offset_x = THEKERNEL->config->value(coordinate_checksum, toolrack_offset_x_checksum)->by_default(356  )->as_number();
-	this->toolrack_offset_y = THEKERNEL->config->value(coordinate_checksum, toolrack_offset_y_checksum)->by_default(0  )->as_number();
-
-	probe_mx_mm = this->anchor1_x + this->toolrack_offset_x;
-	probe_my_mm = this->anchor1_y + this->toolrack_offset_y + 180;
-	probe_mz_mm = this->toolrack_z - 40;
-
-	this->rotation_offset_x = THEKERNEL->config->value(coordinate_checksum, rotation_offset_x_checksum)->by_default(-8  )->as_number();
-	this->rotation_offset_y = THEKERNEL->config->value(coordinate_checksum, rotation_offset_y_checksum)->by_default(37.5F  )->as_number();
-	this->rotation_offset_z = THEKERNEL->config->value(coordinate_checksum, rotation_offset_z_checksum)->by_default(22.5F  )->as_number();
-
-	this->clearance_x = THEKERNEL->config->value(coordinate_checksum, clearance_x_checksum)->by_default(-75  )->as_number();
-	this->clearance_y = THEKERNEL->config->value(coordinate_checksum, clearance_y_checksum)->by_default(-3  )->as_number();
-	this->clearance_z = THEKERNEL->config->value(coordinate_checksum, clearance_z_checksum)->by_default(-3  )->as_number();
+    atc_config = ConfigTable::config<ATCConfigT>(atc_config_groups);
+	atc_home_info.pin.from_spec(atc_config.homing_endstop_pin)->as_input();
+	detector_info.detect_pin.from_spec(atc_config.detect_pin)->as_input();
 }
+
+float ATCHandler::probe_mx() { return atc_config.anchor1_x + atc_config.toolrack_offset_x; }
+float ATCHandler::probe_my() { return atc_config.anchor1_y + atc_config.toolrack_offset_y + 180; }
+float ATCHandler::probe_mz() { return atc_config.toolrack_z - 40; }
 
 void ATCHandler::cleanup()
 {
@@ -178,16 +111,17 @@ bool ATCHandler::laser_detect() {
     atc_watch.observe= true;
 
 	float delta[Y_AXIS + 1] = {0};
-	float half = detector_info.detect_travel / 2;
+	float half = atc_config.detect_travel_mm / 2;
+
 	bool detected = false;
 	delta[Y_AXIS] = half;
-	if(!THEROBOT.delta_move_watch(delta, detector_info.detect_rate, Y_AXIS + 1, atc_watch)) return false;
+	if(!THEROBOT.delta_move_watch(delta, atc_config.detect_rate_mm_s, Y_AXIS + 1, atc_watch)) return false;
 	detected |= atc_watch.hit;
-	delta[Y_AXIS] = -detector_info.detect_travel;
-	if(!THEROBOT.delta_move_watch(delta, detector_info.detect_rate, Y_AXIS + 1, atc_watch)) return false;
+	delta[Y_AXIS] = -atc_config.detect_travel_mm;
+	if(!THEROBOT.delta_move_watch(delta, atc_config.detect_rate_mm_s, Y_AXIS + 1, atc_watch)) return false;
 	detected |= atc_watch.hit;
 	delta[Y_AXIS] = half;
-	if(!THEROBOT.delta_move_watch(delta, detector_info.detect_rate, Y_AXIS + 1, atc_watch)) return false;
+	if(!THEROBOT.delta_move_watch(delta, atc_config.detect_rate_mm_s, Y_AXIS + 1, atc_watch)) return false;
 	detected |= atc_watch.hit;
 
 	// switch off detector
@@ -226,13 +160,13 @@ void ATCHandler::home_clamp()
     atc_watch.motors= 1 << ATC_AXIS;
     float steps_per_mm = THEROBOT.motor_steps_per_mm(ATC_AXIS);
     // the switch has to hold for debounce_ms at the homing rate, at least one step
-    atc_watch.hysteresis= (uint16_t)ceilf(atc_home_info.debounce_ms / 1000.0F * atc_home_info.homing_rate
+    atc_watch.hysteresis= (uint16_t)ceilf(atc_config.homing_debounce_ms / 1000.0F * atc_config.homing_rate_mm_s
                                           * steps_per_mm);
     atc_watch.observe= false;
 
 	float delta[ATC_AXIS + 1] = {0};
-	delta[ATC_AXIS] = atc_home_info.max_travel; // we go the max
-	bool moved = THEROBOT.delta_move_watch(delta, atc_home_info.homing_rate, ATC_AXIS + 1, atc_watch);
+	delta[ATC_AXIS] = atc_config.homing_max_travel_mm; // we go the max
+	bool moved = THEROBOT.delta_move_watch(delta, atc_config.homing_rate_mm_s, ATC_AXIS + 1, atc_watch);
 	atc_home_info.triggered = atc_watch.hit;
 	if(!moved) return;
 
@@ -246,8 +180,8 @@ void ATCHandler::home_clamp()
 
     // the retract is measured from the switch edge, not from where the braking ended
 	float past_edge = (THEROBOT.motor_step(ATC_AXIS) - atc_watch.at_steps[ATC_AXIS]) / steps_per_mm;
-	delta[ATC_AXIS] = -atc_home_info.retract - past_edge;
-	if(!THEROBOT.delta_move_sync(delta, atc_home_info.homing_rate, ATC_AXIS + 1)) return;
+	delta[ATC_AXIS] = -atc_config.homing_retract_mm - past_edge;
+	if(!THEROBOT.delta_move_sync(delta, atc_config.homing_rate_mm_s, ATC_AXIS + 1)) return;
 
 	atc_home_info.clamp_status = CLAMPED;
 	printk("ATC homed!\r\n");
@@ -268,8 +202,8 @@ void ATCHandler::clamp_tool()
 	THECONVEYOR.wait_for_idle(); // the spindle must have stopped moving before the clamp acts
 
 	float delta[ATC_AXIS + 1] = {0};
-	delta[ATC_AXIS] = atc_home_info.action_dist;
-	if(!THEROBOT.delta_move_sync(delta, atc_home_info.homing_rate, ATC_AXIS + 1)) return;
+	delta[ATC_AXIS] = atc_config.action_mm;
+	if(!THEROBOT.delta_move_sync(delta, atc_config.homing_rate_mm_s, ATC_AXIS + 1)) return;
 
 	// change clamp status
 	atc_home_info.clamp_status = CLAMPED;
@@ -289,8 +223,8 @@ void ATCHandler::loose_tool()
 	THECONVEYOR.wait_for_idle(); // the spindle must have stopped moving before the clamp acts
 
 	float delta[ATC_AXIS + 1] = {0};
-	delta[ATC_AXIS] = -atc_home_info.action_dist;
-	if(!THEROBOT.delta_move_sync(delta, atc_home_info.action_rate, ATC_AXIS + 1)) return;
+	delta[ATC_AXIS] = -atc_config.action_mm;
+	if(!THEROBOT.delta_move_sync(delta, atc_config.action_rate_mm_s, ATC_AXIS + 1)) return;
 
 	// change clamp status
 	atc_home_info.clamp_status = LOOSED;
@@ -389,6 +323,9 @@ float ATCHandler::param_clamp_state(void *c)
 float ATCHandler::param_tool_detected(void *c) { return (float)((ATCHandler *)c)->tool_detected; }
 float ATCHandler::param_active_tool(void *) { return (float)persist.tool(); }
 
+template<float ATCConfigT::*M> static float config_param(void *) { return atc_config.*M; }
+template<float (*F)()> static float derived_param(void *) { return F(); }
+
 const SimpleShell::Sub<ATCHandler> ATCHandler::SUBS[] = {
     {"",      &ATCHandler::sub_state, "tool, offsets and clamp state"},
     {"rack",  &ATCHandler::sub_rack,  "where each slot and the probe sit"},
@@ -412,10 +349,13 @@ void ATCHandler::sub_state(std::string, StreamOutput *stream)
 void ATCHandler::sub_rack(std::string, StreamOutput *stream)
 {
     for (int i = 0; i <= 6; i++) {
-        stream->printf("tool%d  x %1.1f  y %1.1f  z %1.1f\r\n", i, anchor1_x + toolrack_offset_x,
-                       anchor1_y + toolrack_offset_y + (i == 0 ? 210 : (6 - i) * 30), toolrack_z);
+        stream->printf("tool%d  x %1.1f  y %1.1f  z %1.1f\r\n", i,
+                       atc_config.anchor1_x + atc_config.toolrack_offset_x,
+                       atc_config.anchor1_y + atc_config.toolrack_offset_y
+                           + (i == 0 ? 210 : (6 - i) * 30),
+                       atc_config.toolrack_z);
     }
-    stream->printf("probe  x %1.1f  y %1.1f  z %1.1f\r\n", probe_mx_mm, probe_my_mm, probe_mz_mm);
+    stream->printf("probe  x %1.1f  y %1.1f  z %1.1f\r\n", probe_mx(), probe_my(), probe_mz());
 }
 
 void ATCHandler::register_params()
@@ -424,32 +364,32 @@ void ATCHandler::register_params()
         {"_clamp_state", &ATCHandler::param_clamp_state},
         {"_tool_detected", &ATCHandler::param_tool_detected},
         {"_active_tool", &ATCHandler::param_active_tool},
-        {"_anchor1_x", &ATCHandler::param<&ATCHandler::anchor1_x>},
-        {"_anchor1_y", &ATCHandler::param<&ATCHandler::anchor1_y>},
-        {"_anchor2_offset_x", &ATCHandler::param<&ATCHandler::anchor2_offset_x>},
-        {"_anchor2_offset_y", &ATCHandler::param<&ATCHandler::anchor2_offset_y>},
-        {"_toolrack_offset_x", &ATCHandler::param<&ATCHandler::toolrack_offset_x>},
-        {"_toolrack_offset_y", &ATCHandler::param<&ATCHandler::toolrack_offset_y>},
-        {"_toolrack_z", &ATCHandler::param<&ATCHandler::toolrack_z>},
-        {"_rotation_offset_x", &ATCHandler::param<&ATCHandler::rotation_offset_x>},
-        {"_rotation_offset_y", &ATCHandler::param<&ATCHandler::rotation_offset_y>},
-        {"_rotation_offset_z", &ATCHandler::param<&ATCHandler::rotation_offset_z>},
-        {"_clearance_x", &ATCHandler::param<&ATCHandler::clearance_x>},
-        {"_clearance_y", &ATCHandler::param<&ATCHandler::clearance_y>},
-        {"_clearance_z", &ATCHandler::param<&ATCHandler::clearance_z>},
-        {"_atc_safe_z", &ATCHandler::param<&ATCHandler::safe_z_mm>},
-        {"_atc_safe_z_empty", &ATCHandler::param<&ATCHandler::safe_z_empty_mm>},
-        {"_atc_safe_z_offset", &ATCHandler::param<&ATCHandler::safe_z_offset_mm>},
-        {"_atc_fast_z_rate", &ATCHandler::param<&ATCHandler::fast_z_rate>},
-        {"_atc_slow_z_rate", &ATCHandler::param<&ATCHandler::slow_z_rate>},
-        {"_atc_margin_rate", &ATCHandler::param<&ATCHandler::margin_rate>},
-        {"_atc_probe_fast_rate", &ATCHandler::param<&ATCHandler::probe_fast_rate>},
-        {"_atc_probe_slow_rate", &ATCHandler::param<&ATCHandler::probe_slow_rate>},
-        {"_atc_probe_retract", &ATCHandler::param<&ATCHandler::probe_retract_mm>},
-        {"_atc_probe_height", &ATCHandler::param<&ATCHandler::probe_height_mm>},
-        {"_probe_mx", &ATCHandler::param<&ATCHandler::probe_mx_mm>},
-        {"_probe_my", &ATCHandler::param<&ATCHandler::probe_my_mm>},
-        {"_probe_mz", &ATCHandler::param<&ATCHandler::probe_mz_mm>},
+        {"_anchor1_x", &config_param<&ATCConfigT::anchor1_x>},
+        {"_anchor1_y", &config_param<&ATCConfigT::anchor1_y>},
+        {"_anchor2_offset_x", &config_param<&ATCConfigT::anchor2_offset_x>},
+        {"_anchor2_offset_y", &config_param<&ATCConfigT::anchor2_offset_y>},
+        {"_toolrack_offset_x", &config_param<&ATCConfigT::toolrack_offset_x>},
+        {"_toolrack_offset_y", &config_param<&ATCConfigT::toolrack_offset_y>},
+        {"_toolrack_z", &config_param<&ATCConfigT::toolrack_z>},
+        {"_rotation_offset_x", &config_param<&ATCConfigT::rotation_offset_x>},
+        {"_rotation_offset_y", &config_param<&ATCConfigT::rotation_offset_y>},
+        {"_rotation_offset_z", &config_param<&ATCConfigT::rotation_offset_z>},
+        {"_clearance_x", &config_param<&ATCConfigT::clearance_x>},
+        {"_clearance_y", &config_param<&ATCConfigT::clearance_y>},
+        {"_clearance_z", &config_param<&ATCConfigT::clearance_z>},
+        {"_atc_safe_z", &config_param<&ATCConfigT::safe_z_mm>},
+        {"_atc_safe_z_empty", &config_param<&ATCConfigT::safe_z_empty_mm>},
+        {"_atc_safe_z_offset", &config_param<&ATCConfigT::safe_z_offset_mm>},
+        {"_atc_fast_z_rate", &config_param<&ATCConfigT::fast_z_rate_mm_m>},
+        {"_atc_slow_z_rate", &config_param<&ATCConfigT::slow_z_rate_mm_m>},
+        {"_atc_margin_rate", &config_param<&ATCConfigT::margin_rate_mm_m>},
+        {"_atc_probe_fast_rate", &config_param<&ATCConfigT::probe_fast_rate_mm_m>},
+        {"_atc_probe_slow_rate", &config_param<&ATCConfigT::probe_slow_rate_mm_m>},
+        {"_atc_probe_retract", &config_param<&ATCConfigT::probe_retract_mm>},
+        {"_atc_probe_height", &config_param<&ATCConfigT::probe_height_mm>},
+        {"_probe_mx", &derived_param<&ATCHandler::probe_mx>},
+        {"_probe_my", &derived_param<&ATCHandler::probe_my>},
+        {"_probe_mz", &derived_param<&ATCHandler::probe_mz>},
     };
     Parameters::add(params_slot, rows, this);
 }

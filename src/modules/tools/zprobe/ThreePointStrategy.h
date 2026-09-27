@@ -6,8 +6,6 @@
 #include <string.h>
 #include <tuple>
 
-#define three_point_leveling_strategy_checksum CHECKSUM("three-point-leveling")
-
 class StreamOutput;
 class Plane3D;
 
@@ -41,11 +39,9 @@ private:
     std::tuple<float, float, float> probe_offsets;
     std::tuple<float, float> probe_points[3];
     Plane3D *plane;
-    struct {
-        bool home:1;
-        bool save:1;
-    };
     float tolerance;
+    bool home_first;
+    bool save_plane;
 };
 
 #endif

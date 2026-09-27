@@ -20,19 +20,23 @@ class Pin;
 // to be converted to 0-10V by an external circuit
 class AnalogSpindleControl: public SpindleControl {
     public:
+        void configure(const void *c);
+        static void configure_active(const void *c);
         AnalogSpindleControl() {};
         virtual ~AnalogSpindleControl() {};
         void on_module_loaded();
         
     private:
+        struct {
+            int32_t max_rpm, min_rpm;
+        } cfg;
+        static AnalogSpindleControl *active;
        
         Pin *switch_on= nullptr;
         mbed::PwmOut *pwm_pin; // PWM output for spindle speed control
         bool output_inverted;
         
         int target_rpm;
-        int min_rpm;
-        int max_rpm;
 
         void turn_on(void);
         void turn_off(void);

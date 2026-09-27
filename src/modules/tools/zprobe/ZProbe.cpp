@@ -10,7 +10,6 @@
 #include "SimpleShell.h"
 
 #include "Kernel.h"
-#include "Config.h"
 #include "Robot.h"
 #include "StepperMotor.h"
 #include "Logging.h"
@@ -18,7 +17,6 @@
 #include "GcodeDispatch.h"
 #include "Conveyor.h"
 #include "checksumm.h"
-#include "ConfigValue.h"
 #include "SerialMessage.h"
 #include "ZProbePublicAccess.h"
 #include "LevelingStrategy.h"
@@ -30,18 +28,17 @@
 #include "ThreePointStrategy.h"
 #include "CartGridStrategy.h"
 #include "modules/robot/MachineTask.h"
+#include "ZProbeConfig.h"
 
-#define enable_checksum          CHECKSUM("enable")
-#define probe_pin_checksum       CHECKSUM("probe_pin")
-#define calibrate_pin_checksum   CHECKSUM("calibrate_pin")
-#define slow_feedrate_checksum   CHECKSUM("slow_feedrate")
-#define fast_feedrate_checksum   CHECKSUM("fast_feedrate")
-#define return_feedrate_checksum CHECKSUM("return_feedrate")
-#define probe_height_checksum    CHECKSUM("probe_height")
-#define gamma_max_checksum       CHECKSUM("gamma_max")
-#define max_z_checksum           CHECKSUM("max_z")
-#define reverse_z_direction_checksum CHECKSUM("reverse_z")
-#define dwell_before_probing_checksum CHECKSUM("dwell_before_probing")
+
+CONFIG_KEYS(zprobe_config_keys, ZProbeConfigT, ZPROBE_CONFIG);
+static void zprobe_config_changed(const ConfigTable::Group *, const void *c)
+{
+    zprobe.configure(*(const ZProbeConfigT *)c);
+}
+CONFIG_GROUPS(zprobe_config_groups,
+    CFG_GROUP("zprobe", zprobe_config_keys, ZProbeConfigT, zprobe_config_changed));
+
 
 // from endstop section
 
@@ -56,9 +53,9 @@ void ZProbe::on_module_loaded()
 {
     invert_override = false;
     invert_probe = false;
-    
+
     // if the module is disabled -> do nothing
-    if(!THEKERNEL->config->value( zprobe_checksum, enable_checksum )->by_default(true)->as_bool()) {
+    if(!ConfigTable::config<ZProbeConfigT>(zprobe_config_groups).enable) {
         return;
     }
 
@@ -77,53 +74,42 @@ void ZProbe::on_module_loaded()
 
 void ZProbe::config_load()
 {
-    this->probe_pin.from_string( THEKERNEL->config->value(zprobe_checksum, probe_pin_checksum)->by_default("2.6v" )->as_string())->as_input();
-    this->calibrate_pin.from_string( THEKERNEL->config->value(zprobe_checksum, calibrate_pin_checksum)->by_default("0.5^" )->as_string())->as_input();
+    const ZProbeConfigT &zprobe_config = ConfigTable::config<ZProbeConfigT>(zprobe_config_groups);
+    this->probe_pin.from_spec(zprobe_config.probe_pin)->as_input();
+    this->calibrate_pin.from_spec(zprobe_config.calibrate_pin)->as_input();
 
-    // get strategies to load
-    vector<uint16_t> modules;
-    THEKERNEL->config->get_module_list( &modules, leveling_strategy_checksum);
-    for( auto cs : modules ){
-        if( THEKERNEL->config->value(leveling_strategy_checksum, cs, enable_checksum )->as_bool() ){
-            bool found= false;
-            LevelingStrategy *ls= nullptr;
-
-            // check with each known strategy and load it if it matches
-            switch(cs) {
-                case three_point_leveling_strategy_checksum:
-                    ls= new ThreePointStrategy(this);
-                    found= true;
-                    break;
-
-                case cart_grid_leveling_strategy_checksum:
-                    ls= new CartGridStrategy(this);
-                    found= true;
-                    break;
-            }
-            if(found) {
-                // both strategies claim M561 and M565, so only one can be loaded
-                if(!this->strategies.empty()) {
-                    printk("WARNING: leveling strategy already loaded, ignoring the rest\n");
-                    delete ls;
-                } else if(ls->handleConfig()) {
-                    this->strategies.push_back(ls);
-                }else{
-                    delete ls;
-                }
-            }
+    // Both strategies claim M561 and M565, so only one can be loaded.
+    if(threepoint_cfg().enable) {
+        LevelingStrategy *ls = new ThreePointStrategy(this);
+        if(ls->handleConfig()) this->strategies.push_back(ls);
+        else delete ls;
+    }
+    if(cartgrid_cfg().enable) {
+        if(!this->strategies.empty()) {
+            printk("WARNING: leveling strategy already loaded, ignoring the rest\n");
+        } else {
+            LevelingStrategy *ls = new CartGridStrategy(this);
+            if(ls->handleConfig()) this->strategies.push_back(ls);
+            else delete ls;
         }
     }
 
-    this->probe_height  = THEKERNEL->config->value(zprobe_checksum, probe_height_checksum)->by_default(5)->as_number();
-    this->slow_feedrate = THEKERNEL->config->value(zprobe_checksum, slow_feedrate_checksum)->by_default(5)->as_number(); // feedrate in mm/sec
-    this->fast_feedrate = THEKERNEL->config->value(zprobe_checksum, fast_feedrate_checksum)->by_default(100)->as_number(); // feedrate in mm/sec
-    this->return_feedrate = THEKERNEL->config->value(zprobe_checksum, return_feedrate_checksum)->by_default(5)->as_number(); // feedrate in mm/sec
-    this->reverse_z     = THEKERNEL->config->value(zprobe_checksum, reverse_z_direction_checksum)->by_default(false)->as_bool(); // Z probe moves in reverse direction
-    this->max_z         = THEKERNEL->config->value(zprobe_checksum, max_z_checksum)->by_default(NAN)->as_number(); // maximum zprobe distance
+    configure(zprobe_config);
+}
+
+void ZProbe::configure(const ZProbeConfigT &zprobe_config)
+{
+    this->probe_height  = zprobe_config.probe_height;
+    this->slow_feedrate = zprobe_config.slow_feedrate; // feedrate in mm/sec
+    this->fast_feedrate = zprobe_config.fast_feedrate; // feedrate in mm/sec
+    this->return_feedrate = zprobe_config.return_feedrate; // feedrate in mm/sec
+    this->reverse_z     = zprobe_config.reverse_z; // Z probe moves in reverse direction
+    this->max_z         = zprobe_config.max_z; // maximum zprobe distance
     if(isnan(this->max_z)){
-        this->max_z = THEKERNEL->config->value(gamma_max_checksum)->by_default(200)->as_number(); // maximum zprobe distance
+        char buf[16];
+        this->max_z = ConfigTable::get("gamma_max", buf, sizeof(buf)) ? strtof(buf, nullptr) : 200;
     }
-    this->dwell_before_probing = THEKERNEL->config->value(zprobe_checksum, dwell_before_probing_checksum)->by_default(0)->as_number(); // dwell time in seconds before probing
+    this->dwell_before_probing = zprobe_config.dwell_before_probing; // dwell time in seconds before probing
 
 }
 

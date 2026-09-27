@@ -28,8 +28,21 @@ class MainButton : public Module, public Killable {
         {}
 
         void on_module_loaded();
+        void configure();
 
     private:
+        struct {
+            uint16_t turn_off_min;
+            uint32_t long_press_time_ms;
+            uint16_t poll_frequency;
+            uint16_t power_fan_delay_s;
+            uint16_t auto_sleep_min;
+            uint8_t long_press_enable;
+            bool stop_on_cover_open:1;
+            bool auto_sleep:1;
+            bool light_startup:1;
+        } cfg;
+
         void button_tick();     // the polling timer, everything below runs from it
         void check_12v();
         void handle_button();
@@ -60,30 +73,19 @@ class MainButton : public Module, public Killable {
         Pin PS12;
         Pin PS24;
 
-        uint16_t power_fan_delay_s;
         uint32_t power_fan_countdown_us;
 
         uint8_t hold_toggle;
         uint8_t led_update_timer;
         uint32_t second_counter;
         uint32_t button_press_time;
-        uint32_t long_press_time_ms;
-        std::string long_press_enable;
 
-        bool auto_sleep;
-        uint8_t auto_sleep_min;
         uint32_t sleep_countdown_us;
 
-        bool enable_light;
-        uint8_t turn_off_light_min;
         uint32_t light_countdown_us;
 
         bool button_pressed;
         volatile BUTTON_STATE button_state;
-
-        bool stop_on_cover_open;
-
-        uint32_t poll_frequency;
 
         bool using_12v;
 };

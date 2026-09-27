@@ -19,7 +19,7 @@ class TemperatureControl : public Module {
 
     public:
         uint16_t get_name() const { return name_checksum; }
-        uint16_t get_report_mcode() const { return get_m_code; }
+        uint16_t get_report_mcode() const;
         int get_pool_index() const { return pool_index; }
         void get_status(struct pad_temperature *t);
         TemperatureControl(uint16_t name, int index)
@@ -35,6 +35,7 @@ class TemperatureControl : public Module {
         void report_temperature(Gcode *);
         void sensor_settings_gcode(Gcode *);
 
+        void configure();
         float get_temperature();
 
     private:
@@ -46,8 +47,6 @@ class TemperatureControl : public Module {
 
         int pool_index;
 
-        float max_temp, min_temp;
-
         TempSensor *sensor;
         float last_reading;
         bool has_reading;
@@ -55,16 +54,17 @@ class TemperatureControl : public Module {
         static const uint8_t k_settle_ticks= 4;   // ticks a missing reading is tolerated at startup
         uint8_t bad_readings;
 
-        // the fan follows a curve rather than a setpoint: this is a limit, not a temperature
-        // the spindle is meant to hold
-        float fan_threshold, fan_power_init, fan_power_step, fan_power_laser;
-        uint16_t fan_cooldown_delay, cooling_since;
+        uint16_t cooling_since;
+        struct {
+            float min_temp, max_temp;
+            float threshold_temp, power_init, power_step, power_laser;
+            uint16_t cooldown_delay;
+            uint16_t report_mcode;
+            char designator[4];
+        } cfg;
         uint16_t fan_switch_cs;
 
-        std::string designator;
-
         uint16_t name_checksum;
-        uint16_t get_m_code;
 };
 
 #endif

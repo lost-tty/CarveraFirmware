@@ -46,10 +46,10 @@ class Endstops : public Module{
 
         void on_module_loaded();
         void on_gcode_received(Gcode *argument);
+        void configure();
 
     private:
         bool load_old_config();
-        bool load_config();
         void get_global_configs();
         void home(axis_bitmap_t a);
         void back_off_home(axis_bitmap_t axis);
@@ -66,8 +66,9 @@ class Endstops : public Module{
 
         // global settings
         float g28_position[3]{0}; // save G28 (in grbl mode)
-        float     hysteresis_mm;
         uint32_t  limit_clear_ms{0};
+        float hysteresis_mm{0};
+        bool home_z_first{true};
         static const uint32_t LIMIT_RELEASE_MS = 100;
         axis_bitmap_t axis_to_home;
 
@@ -135,7 +136,6 @@ class Endstops : public Module{
         // Global state
         struct {
             uint32_t homing_order:18;
-            bool home_z_first:1;
         };
 };
 

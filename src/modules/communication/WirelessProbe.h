@@ -27,6 +27,7 @@ using std::string;
 class WirelessProbe : public Module {
 
     public:
+        void configure(const void *cfg);
         void on_module_loaded();
         void on_serial_char_received();
         void on_main_loop(void * argument);
@@ -43,8 +44,7 @@ class WirelessProbe : public Module {
         void fire_laser() { putc('L'); }
 
         float wp_voltage;
-        float min_voltage;
-        float max_voltage;
+        float min_voltage, max_voltage;
 
         bool has_char(char letter);
 

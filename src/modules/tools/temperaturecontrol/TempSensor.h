@@ -17,7 +17,7 @@ public:
     virtual ~TempSensor() {}
 
     // Load config parameters using provided "base" names.
-    virtual void UpdateConfig(uint16_t module_checksum, uint16_t name_checksum) {}
+    virtual void UpdateConfig() {}
 
     // Return temperature in degrees Celsius.
     virtual float get_temperature() { return -1.0F; }

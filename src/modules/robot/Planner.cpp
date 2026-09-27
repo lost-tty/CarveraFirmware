@@ -18,17 +18,26 @@ using namespace std;
 #include "libs/Profile.h"
 #include "Conveyor.h"
 #include "StepperMotor.h"
-#include "Config.h"
 #include "checksumm.h"
 #include "Robot.h"
-#include "ConfigValue.h"
+#include "ConfigTable.h"
 
 #include <math.h>
 #include <algorithm>
 
-#define junction_deviation_checksum    CHECKSUM("junction_deviation")
-#define z_junction_deviation_checksum  CHECKSUM("z_junction_deviation")
-#define minimum_planner_speed_checksum CHECKSUM("minimum_planner_speed")
+#define PLANNER_CONFIG(X) \
+    X(float, junction_deviation,   "junction_deviation",   0.01f) \
+    X(float, z_junction_deviation, "z_junction_deviation", NAN) \
+    X(float, minimum_planner_speed,"minimum_planner_speed",0.0f)
+CONFIG_STRUCT(PlannerConfig, PLANNER_CONFIG);
+CONFIG_KEYS(planner_config_keys, PlannerConfig, PLANNER_CONFIG);
+static void planner_config_changed(const ConfigTable::Group *, const void *c)
+{
+    THEKERNEL->planner.config_load(c);
+}
+CONFIG_GROUPS(planner_config_groups,
+    CFG_GROUP("", planner_config_keys, PlannerConfig, planner_config_changed));
+
 
 // The Planner does the acceleration math for the queue of Blocks ( movements ).
 // It makes sure the speed stays within the configured constraints ( acceleration, junction_deviation, etc )
@@ -37,15 +46,15 @@ using namespace std;
 void Planner::init()
 {
     memset(this->previous_unit_vec, 0, sizeof this->previous_unit_vec);
-    config_load();
+    config_load(&ConfigTable::config<PlannerConfig>(planner_config_groups));
 }
 
-// Configure acceleration
-void Planner::config_load()
+void Planner::config_load(const void *cfg)
 {
-    this->junction_deviation = THEKERNEL->config->value(junction_deviation_checksum)->by_default(0.05F)->as_number();
-    this->z_junction_deviation = THEKERNEL->config->value(z_junction_deviation_checksum)->by_default(NAN)->as_number(); // disabled by default
-    this->minimum_planner_speed = THEKERNEL->config->value(minimum_planner_speed_checksum)->by_default(0.0f)->as_number();
+    const PlannerConfig &c = *(const PlannerConfig *)cfg;
+    this->junction_deviation = c.junction_deviation;
+    this->z_junction_deviation = c.z_junction_deviation; // NAN disables it.
+    this->minimum_planner_speed = c.minimum_planner_speed;
 }
 
 

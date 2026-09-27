@@ -16,9 +16,8 @@
 #include "Conveyor.h"
 #include "mri.h"
 #include "checksumm.h"
-#include "Config.h"
 #include "Logging.h"
-#include "ConfigValue.h"
+#include "ConfigTable.h"
 #include "Robot.h"
 #include "MachineTask.h"
 #include "StepperMotor.h"
@@ -29,7 +28,18 @@
 
 #include "mbed.h"
 
-#define brake_limit_checksum         CHECKSUM("brake_limit")
+#define CONVEYOR_CONFIG(X) \
+    X(float, brake_limit, "brake_limit", 8.0f)
+CONFIG_STRUCT(ConveyorConfig, CONVEYOR_CONFIG);
+CONFIG_KEYS(conveyor_config_keys, ConveyorConfig, CONVEYOR_CONFIG);
+static void conveyor_config_changed(const ConfigTable::Group *, const void *c)
+{
+    float b = ((const ConveyorConfig *)c)->brake_limit;
+    if (b >= 1.0F) THECONVEYOR.brake_limit = b;
+}
+CONFIG_GROUPS(conveyor_config_groups,
+    CFG_GROUP("", conveyor_config_keys, ConveyorConfig, conveyor_config_changed));
+
 
 /*
  * The conveyor holds the queue of blocks, takes care of creating them, and starting the executing chain of blocks
@@ -67,7 +77,7 @@ void Conveyor::init()
 
 void Conveyor::on_module_loaded()
 {
-    brake_limit = THEKERNEL->config->value(brake_limit_checksum)->by_default(8.0F)->as_number();
+    brake_limit = ConfigTable::config<ConveyorConfig>(conveyor_config_groups).brake_limit;
     if(brake_limit < 1.0F) {
         printk("FATAL: brake_limit must be >= 1.0, got %f\n", brake_limit);
         return;

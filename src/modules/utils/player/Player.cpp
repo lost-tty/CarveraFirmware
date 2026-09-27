@@ -19,8 +19,6 @@
 #include "GcodeDispatch.h"
 #include "modules/tools/ToolHead.h"
 #include "checksumm.h"
-#include "Config.h"
-#include "ConfigValue.h"
 #include "SDFAT.h"
 
 #include "modules/robot/Conveyor.h"

@@ -11,11 +11,9 @@
 #include "GcodeDispatch.h"
 #include "SimpleShell.h"
 #include "nuts_bolts.h"
-#include "Config.h"
+#include "ConfigTable.h"
 #include "Logging.h"
 #include "SerialMessage.h"
-#include "checksumm.h"
-#include "ConfigValue.h"
 #include "Block.h"
 #include "Robot.h"
 #include "utils.h"
@@ -30,16 +28,34 @@
 
 #include <algorithm>
 
-#define laser_module_enable_checksum            CHECKSUM("laser_module_enable")
-#define laser_module_pin_checksum               CHECKSUM("laser_module_pin")
-#define laser_module_pwm_pin_checksum           CHECKSUM("laser_module_pwm_pin")
-#define laser_module_ttl_pin_checksum           CHECKSUM("laser_module_ttl_pin")
-#define laser_module_pwm_period_checksum        CHECKSUM("laser_module_pwm_period")
-#define laser_module_test_power_checksum        CHECKSUM("laser_module_test_power")
-#define laser_module_maximum_power_checksum     CHECKSUM("laser_module_maximum_power")
-#define laser_module_minimum_power_checksum     CHECKSUM("laser_module_minimum_power")
-#define laser_module_max_power_checksum         CHECKSUM("laser_module_max_power")
-#define laser_module_maximum_s_value_checksum   CHECKSUM("laser_module_maximum_s_value")
+// laser_module_maximum_s_value belongs to Robot, which scales S.
+#define LASER_CONFIG(X) \
+    X(bool,  enable,            "laser_module_enable",          true) \
+    X(pin,   pin,               "laser_module_pin",             "2.12") \
+    X(pin,   pwm_pin,           "laser_module_pwm_pin",         "2.4") \
+    X(pin,   ttl_pin,           "laser_module_ttl_pin",         "nc") \
+    X(int,   pwm_period,        "laser_module_pwm_period",      20) \
+    X(float, test_power,        "laser_module_test_power",      0.01f) \
+    X(float, maximum_power,     "laser_module_maximum_power",   1.0f) \
+    X(float, minimum_power,     "laser_module_minimum_power",   0.0f)
+CONFIG_STRUCT(LaserConfig, LASER_CONFIG);
+CONFIG_KEYS(laser_config_keys, LaserConfig, LASER_CONFIG);
+extern Laser laser;
+static void laser_config_changed(const ConfigTable::Group *, const void *c)
+{
+    laser.configure(c);
+}
+CONFIG_GROUPS(laser_config_groups,
+    CFG_GROUP("", laser_config_keys, LaserConfig, laser_config_changed));
+
+void Laser::configure(const void *cfg)
+{
+    const LaserConfig &c = *(const LaserConfig *)cfg;
+    this->test_power = c.test_power;
+    this->maximum_power = c.maximum_power;
+    this->minimum_power = c.minimum_power;
+}
+
 
 void Laser::on_module_loaded()
 {
@@ -47,11 +63,13 @@ void Laser::on_module_loaded()
     scale = 1;
     testing = false;
 
-    if( !THEKERNEL->config->value( laser_module_enable_checksum )->by_default(true)->as_bool() ) {
+    const LaserConfig &laser_config = ConfigTable::config<LaserConfig>(laser_config_groups);
+    configure(&laser_config);
+    if( !laser_config.enable ) {
         return;
     }
 
-    uint32_t period = THEKERNEL->config->value(laser_module_pwm_period_checksum)->by_default(20)->as_number();
+    uint32_t period = laser_config.pwm_period;
     if(period < 1 || period > 1000000) {
         printk("ERROR: laser_module_pwm_period %lu out of range, laser disabled\n", period);
         return;
@@ -59,7 +77,7 @@ void Laser::on_module_loaded()
 
     // Get smoothie-style pin from config
     this->laser_pin = new Pin();
-    this->laser_pin->from_string(THEKERNEL->config->value(laser_module_pin_checksum)->by_default("2.12")->as_string())->as_output();
+    this->laser_pin->from_spec(laser_config.pin)->as_output();
     if (!this->laser_pin->connected()) {
         delete this->laser_pin;
         this->laser_pin= nullptr;
@@ -67,7 +85,7 @@ void Laser::on_module_loaded()
 	}
 
 	Pin *dummy_pin = new Pin();
-	dummy_pin->from_string(THEKERNEL->config->value(laser_module_pwm_pin_checksum)->by_default("2.4")->as_string())->as_output();
+	dummy_pin->from_spec(laser_config.pwm_pin)->as_output();
     pwm_pin = dummy_pin->hardware_pwm();
     if (pwm_pin == NULL) {
         printk("Error: Laser cannot use P%d.%d (P2.0 - P2.5, P1.18, P1.20, P1.21, P1.23, P1.24, P1.26, P3.25, P3.26 only). Laser module disabled.\n", dummy_pin->port_number, dummy_pin->pin);
@@ -83,7 +101,7 @@ void Laser::on_module_loaded()
 
     // TTL settings
     this->ttl_pin = new Pin();
-    ttl_pin->from_string( THEKERNEL->config->value(laser_module_ttl_pin_checksum)->by_default("nc" )->as_string())->as_output();
+    ttl_pin->from_spec(laser_config.ttl_pin)->as_output();
     this->ttl_used = ttl_pin->connected();
     this->ttl_inverting = ttl_pin->is_inverting();
     if (ttl_used) {
@@ -95,12 +113,6 @@ void Laser::on_module_loaded()
 
     this->pwm_pin->period_us(period);
     this->pwm_pin->write(this->pwm_inverting ? 1 : 0);
-    this->laser_test_power = THEKERNEL->config->value(laser_module_test_power_checksum)->by_default(0.1f)->as_number() ;
-    this->laser_maximum_power = THEKERNEL->config->value(laser_module_maximum_power_checksum)->by_default(1.0f)->as_number() ;
-    this->laser_minimum_power = THEKERNEL->config->value(laser_module_minimum_power_checksum)->by_default(0)->as_number() ;
-
-    // S value that represents maximum (default 1)
-    this->laser_maximum_s_value = THEKERNEL->config->value(laser_module_maximum_s_value_checksum)->by_default(1.0f)->as_number() ;
 
     set_laser_power(0);
 
@@ -293,7 +305,7 @@ void Laser::set_proportional_power()
 		return;
 	}
     if (this->testing) {
-        set_laser_power(this->laser_test_power * scale);
+        set_laser_power(this->test_power * scale);
         return;
     }
 
@@ -301,7 +313,7 @@ void Laser::set_proportional_power()
         float power;
         if(get_laser_power(power)) {
             // adjust power to maximum power and actual velocity
-            float proportional_power = ( (this->laser_maximum_power - this->laser_minimum_power) * power ) + this->laser_minimum_power;
+            float proportional_power = ( (this->maximum_power - this->minimum_power) * power ) + this->minimum_power;
             set_laser_power(proportional_power);
 
         } else {

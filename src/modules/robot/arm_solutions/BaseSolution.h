@@ -5,12 +5,10 @@
 #include <map>
 #include "ActuatorCoordinates.h"
 
-class Config;
 
 class BaseSolution {
     public:
         BaseSolution(){};
-        BaseSolution(Config*){};
         virtual ~BaseSolution() {};
         virtual void cartesian_to_actuator(const float[], ActuatorCoordinates &) const = 0;
         virtual void actuator_to_cartesian(const ActuatorCoordinates &, float[]) const = 0;

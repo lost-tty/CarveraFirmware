@@ -14,10 +14,8 @@
 #include "libs/Pin.h"
 #include "modules/robot/Conveyor.h"
 #include "SwitchPublicAccess.h"
-#include "Config.h"
 #include "Gcode.h"
 #include "checksumm.h"
-#include "ConfigValue.h"
 #include "StreamOutput.h"
 #include "Logging.h"
 #include "utils.h"
@@ -27,27 +25,11 @@
 #include "MRI_Hooks.h"
 
 #include <algorithm>
+#include <cstring>
+#include <cstdlib>
 
-#define    startup_state_checksum       CHECKSUM("startup_state")
-#define    startup_value_checksum       CHECKSUM("startup_value")
-#define    default_on_value_checksum    CHECKSUM("default_on_value")
-#define    input_pin_checksum           CHECKSUM("input_pin")
-#define    input_pin_behavior_checksum  CHECKSUM("input_pin_behavior")
 #define    toggle_checksum              CHECKSUM("toggle")
 #define    momentary_checksum           CHECKSUM("momentary")
-#define    command_subcode_checksum     CHECKSUM("subcode")
-#define    input_on_command_checksum    CHECKSUM("input_on_command")
-#define    input_off_command_checksum   CHECKSUM("input_off_command")
-#define    output_pin_checksum          CHECKSUM("output_pin")
-#define    output_type_checksum         CHECKSUM("output_type")
-#define	   pwm_pin_checksum				CHECKSUM("pwm_pin")
-#define    min_pwm_checksum	            CHECKSUM("min_pwm")
-#define    max_pwm_checksum             CHECKSUM("max_pwm")
-#define    output_on_command_checksum   CHECKSUM("output_on_command")
-#define    output_off_command_checksum  CHECKSUM("output_off_command")
-#define    pwm_period_ms_checksum       CHECKSUM("pwm_period_ms")
-#define    failsafe_checksum            CHECKSUM("failsafe_set_to")
-#define    ignore_onhalt_checksum       CHECKSUM("ignore_on_halt")
 
 #define ROUND2DP(x) (roundf(x * 1e2F) / 1e2F)
 
@@ -64,29 +46,42 @@ void Switch::on_module_loaded()
 
     GcodeDispatch::add_handler(this);
     this->register_for_event(ON_MAIN_LOOP);
-
-    // Settings
-    this->on_config_reload(this);
 }
 
-// Get config
-void Switch::on_config_reload(void *argument)
+static char *dup_or_null(const char *s)
 {
-    this->subcode = THEKERNEL->config->value(switch_checksum, this->name_checksum, command_subcode_checksum )->by_default(0)->as_number();
-    std::string input_on_command = THEKERNEL->config->value(switch_checksum, this->name_checksum, input_on_command_checksum )->by_default("")->as_string();
-    std::string input_off_command = THEKERNEL->config->value(switch_checksum, this->name_checksum, input_off_command_checksum )->by_default("")->as_string();
-    this->output_on_command = THEKERNEL->config->value(switch_checksum, this->name_checksum, output_on_command_checksum )->by_default("")->as_string();
-    this->output_off_command = THEKERNEL->config->value(switch_checksum, this->name_checksum, output_off_command_checksum )->by_default("")->as_string();
-    this->switch_state = THEKERNEL->config->value(switch_checksum, this->name_checksum, startup_state_checksum )->by_default(false)->as_bool();
+    return *s ? strdup(s) : nullptr;
+}
+
+void Switch::configure(const SwitchConfigT &cfg)
+{
+    free(output_on_command);
+    free(output_off_command);
+    output_on_command= dup_or_null(cfg.output_on_command);
+    output_off_command= dup_or_null(cfg.output_off_command);
+    if(output_type == NONE) return;   // Input switches have no output settings.
+    this->failsafe= cfg.failsafe_set_to;
+    this->ignore_on_halt= cfg.ignore_on_halt;
+}
+
+void Switch::load_config(const SwitchConfigT &cfg)
+{
+    on_command= cfg.input_on_command;
+    off_command= cfg.input_off_command;
+    subcode= cfg.subcode;
+    output_on_command= dup_or_null(cfg.output_on_command);
+    output_off_command= dup_or_null(cfg.output_off_command);
+
+    this->switch_state = cfg.startup_state;
 
     this->input_pin = new Pin();
-    this->input_pin->from_string( THEKERNEL->config->value(switch_checksum, this->name_checksum, input_pin_checksum )->by_default("nc")->as_string())->as_input();
+    this->input_pin->from_spec(cfg.input_pin)->as_input();
 
     bool is_input;
 
     if(this->input_pin->connected()) {
-        std::string ipb = THEKERNEL->config->value(switch_checksum, this->name_checksum, input_pin_behavior_checksum )->by_default("momentary")->as_string();
-        this->input_pin_behavior = (ipb == "momentary") ? momentary_checksum : toggle_checksum;
+        this->input_pin_behavior = cfg.input_pin_behavior == SW_IN_MOMENTARY
+            ? momentary_checksum : toggle_checksum;
         is_input= true;
         this->ignore_on_halt= true;
 
@@ -98,14 +93,14 @@ void Switch::on_config_reload(void *argument)
 
 
     if(!is_input) {
-        string type = THEKERNEL->config->value(switch_checksum, this->name_checksum, output_type_checksum )->by_default("digital")->as_string();
-        this->failsafe= THEKERNEL->config->value(switch_checksum, this->name_checksum, failsafe_checksum )->by_default(0)->as_number();
-        this->ignore_on_halt= THEKERNEL->config->value(switch_checksum, this->name_checksum, ignore_onhalt_checksum )->by_default(false)->as_bool();
+        uint8_t type = cfg.output_type;
+        this->failsafe= cfg.failsafe_set_to;
+        this->ignore_on_halt= cfg.ignore_on_halt;
 
-        if(type == "pwm"){
+        if(type == SW_OUT_PWM){
             this->output_type= SIGMADELTA;
             this->sigmadelta_pin= new Pwm();
-            this->sigmadelta_pin->from_string(THEKERNEL->config->value(switch_checksum, this->name_checksum, output_pin_checksum )->by_default("nc")->as_string())->as_output();
+            this->sigmadelta_pin->from_spec(cfg.output_pin)->as_output();
             if(this->sigmadelta_pin->connected()) {
                 if(failsafe == 1) {
                     set_high_on_debug(sigmadelta_pin->port_number, sigmadelta_pin->pin);
@@ -118,10 +113,10 @@ void Switch::on_config_reload(void *argument)
                 this->sigmadelta_pin= nullptr;
             }
 
-        }else if(type == "digital"){
+        }else if(type == SW_OUT_DIGITAL){
             this->output_type= DIGITAL;
             this->digital_pin= new Pin();
-            this->digital_pin->from_string(THEKERNEL->config->value(switch_checksum, this->name_checksum, output_pin_checksum )->by_default("nc")->as_string())->as_output();
+            this->digital_pin->from_spec(cfg.output_pin)->as_output();
             if(this->digital_pin->connected()) {
                 if(failsafe == 1) {
                     set_high_on_debug(digital_pin->port_number, digital_pin->pin);
@@ -134,10 +129,10 @@ void Switch::on_config_reload(void *argument)
                 this->digital_pin= nullptr;
             }
 
-        }else if(type == "hwpwm"){
+        }else if(type == SW_OUT_HWPWM){
             this->output_type= HWPWM;
             Pin *pin= new Pin();
-            pin->from_string(THEKERNEL->config->value(switch_checksum, this->name_checksum, output_pin_checksum )->by_default("nc")->as_string())->as_output();
+            pin->from_spec(cfg.output_pin)->as_output();
             this->pwm_pin= pin->hardware_pwm();
             if(failsafe == 1) {
                 set_high_on_debug(pin->port_number, pin->pin);
@@ -150,10 +145,10 @@ void Switch::on_config_reload(void *argument)
                 this->output_type= NONE;
             }
 
-        }else if(type == "swpwm"){
+        }else if(type == SW_OUT_SWPWM){
             this->output_type= SWPWM;
             Pin *pin= new Pin();
-            pin->from_string(THEKERNEL->config->value(switch_checksum, this->name_checksum, output_pin_checksum )->by_default("nc")->as_string())->as_output();
+            pin->from_spec(cfg.output_pin)->as_output();
             if(pin->connected()) {
                 this->swpwm_pin= new SoftPWM(pin, !pin->is_inverting());
                 if(failsafe == 1) {
@@ -165,12 +160,12 @@ void Switch::on_config_reload(void *argument)
                 this->output_type= NONE;
                 delete pin;
             }
-        } else if (type == "digitalpwm") {
+        } else if (type == SW_OUT_DIGITALPWM) {
             this->output_type= DIGITALPWM;
             this->digital_pin= new Pin();
-            this->digital_pin->from_string(THEKERNEL->config->value(switch_checksum, this->name_checksum, output_pin_checksum )->by_default("nc")->as_string())->as_output();
+            this->digital_pin->from_spec(cfg.output_pin)->as_output();
             Pin *pin= new Pin();
-            pin->from_string(THEKERNEL->config->value(switch_checksum, this->name_checksum, pwm_pin_checksum )->by_default("nc")->as_string())->as_output();
+            pin->from_spec(cfg.pwm_pin)->as_output();
             this->pwm_pin = pin->hardware_pwm();
             if (this->digital_pin->connected() && this->pwm_pin != nullptr)
 			{
@@ -209,8 +204,9 @@ void Switch::on_config_reload(void *argument)
 
     if(!is_input) {
         if(this->output_type == SIGMADELTA) {
-            this->sigmadelta_pin->max_pwm(THEKERNEL->config->value(switch_checksum, this->name_checksum, max_pwm_checksum )->by_default(255)->as_number());
-            this->switch_value = THEKERNEL->config->value(switch_checksum, this->name_checksum, startup_value_checksum )->by_default(this->sigmadelta_pin->max_pwm())->as_number();
+            float max_pwm = isnan(cfg.max_pwm) ? 255 : cfg.max_pwm;
+            this->sigmadelta_pin->max_pwm(max_pwm);
+            this->switch_value = isnan(cfg.startup_value) ? this->sigmadelta_pin->max_pwm() : cfg.startup_value;
             if(this->switch_state) {
                 this->sigmadelta_pin->pwm(this->switch_value); // will be truncated to max_pwm
             } else {
@@ -219,12 +215,12 @@ void Switch::on_config_reload(void *argument)
 
         } else if(this->output_type == HWPWM) {
             // default is 20Hz
-            float p= THEKERNEL->config->value(switch_checksum, this->name_checksum, pwm_period_ms_checksum )->by_default(20)->as_number() * 1000.0F; // ms but fractions are allowed
+            float p= cfg.pwm_period_ms * 1000.0F; // ms but fractions are allowed
             this->pwm_pin->period_us(p);
 
             // default is 0% duty cycle
-            this->switch_value = THEKERNEL->config->value(switch_checksum, this->name_checksum, startup_value_checksum )->by_default(0)->as_number();
-            this->default_on_value = THEKERNEL->config->value(switch_checksum, this->name_checksum, default_on_value_checksum )->by_default(50)->as_number();
+            this->switch_value = isnan(cfg.startup_value) ? 0 : cfg.startup_value;
+            this->default_on_value = isnan(cfg.default_on_value) ? 50 : cfg.default_on_value;
             if(this->switch_state) {
                 this->pwm_pin->write(this->default_on_value / 100.0F);
                 this->switch_value = this->default_on_value;
@@ -234,12 +230,12 @@ void Switch::on_config_reload(void *argument)
 
         } else if(this->output_type == SWPWM) {
             // default is 50Hz
-            float p= THEKERNEL->config->value(switch_checksum, this->name_checksum, pwm_period_ms_checksum )->by_default(20)->as_number(); // ms fractions are not allowed
+            float p= cfg.pwm_period_ms; // ms fractions are not allowed
             this->swpwm_pin->period_ms(p);
 
             // default is 0% duty cycle
-            this->switch_value = THEKERNEL->config->value(switch_checksum, this->name_checksum, startup_value_checksum )->by_default(0)->as_number();
-            this->default_on_value = THEKERNEL->config->value(switch_checksum, this->name_checksum, default_on_value_checksum )->by_default(50)->as_number();
+            this->switch_value = isnan(cfg.startup_value) ? 0 : cfg.startup_value;
+            this->default_on_value = isnan(cfg.default_on_value) ? 50 : cfg.default_on_value;
             if(this->switch_state) {
                 this->swpwm_pin->write(this->default_on_value / 100.0F);
                 this->switch_value = this->default_on_value;
@@ -251,15 +247,15 @@ void Switch::on_config_reload(void *argument)
             this->digital_pin->set(this->switch_state);
 
         } else if (this->output_type == DIGITALPWM) {
-            this->min_pwm = THEKERNEL->config->value(switch_checksum, this->name_checksum, min_pwm_checksum )->by_default(0)->as_number();
-            this->max_pwm = THEKERNEL->config->value(switch_checksum, this->name_checksum, max_pwm_checksum )->by_default(100)->as_number();
+            this->min_pwm = isnan(cfg.min_pwm) ? 0 : cfg.min_pwm;
+            this->max_pwm = isnan(cfg.max_pwm) ? 100 : cfg.max_pwm;
         	this->digital_pin->set(this->switch_state);
             // default is 50Hz
-            float p = THEKERNEL->config->value(switch_checksum, this->name_checksum, pwm_period_ms_checksum )->by_default(20)->as_number() * 1000.0F; // ms but fractions are allowed
+            float p = cfg.pwm_period_ms * 1000.0F; // ms but fractions are allowed
             this->pwm_pin->period_us(p);
             // default is 0% duty cycle
-            this->switch_value = THEKERNEL->config->value(switch_checksum, this->name_checksum, startup_value_checksum )->by_default(0)->as_number();
-            this->default_on_value = THEKERNEL->config->value(switch_checksum, this->name_checksum, default_on_value_checksum )->by_default(100)->as_number();
+            this->switch_value = isnan(cfg.startup_value) ? 0 : cfg.startup_value;
+            this->default_on_value = isnan(cfg.default_on_value) ? 100 : cfg.default_on_value;
             if(this->switch_state) {
                 this->pwm_pin->write(confine(this->default_on_value, this->min_pwm, this->max_pwm) / 100.0F);
                 this->switch_value = this->default_on_value;
@@ -269,55 +265,30 @@ void Switch::on_config_reload(void *argument)
         }
     }
 
-    // Set the on/off command codes, Use GCode to do the parsing
-    input_on_command_letter = 0;
-    input_off_command_letter = 0;
-
-    if(!input_on_command.empty()) {
-        Gcode gc(input_on_command, NULL);
-        if(gc.has_g) {
-            input_on_command_letter = 'G';
-            input_on_command_code = gc.g;
-        } else if(gc.has_m) {
-            input_on_command_letter = 'M';
-            input_on_command_code = gc.m;
-        }
-    }
-    if(!input_off_command.empty()) {
-        Gcode gc(input_off_command, NULL);
-        if(gc.has_g) {
-            input_off_command_letter = 'G';
-            input_off_command_code = gc.g;
-        } else if(gc.has_m) {
-            input_off_command_letter = 'M';
-            input_off_command_code = gc.m;
-        }
-    }
-
-
     if(this->output_type == SIGMADELTA) {
         // SIGMADELTA
 	    pwm_timer.start();
     }
+}
 
-    // for commands we need to replace _ for space
-    std::replace(output_on_command.begin(), output_on_command.end(), '_', ' '); // replace _ with space
-    std::replace(output_off_command.begin(), output_off_command.end(), '_', ' '); // replace _ with space
+static bool gcode_matches(uint16_t code, const Gcode *gcode)
+{
+    if (code == ConfigTable::GCODE_NONE) return false;
+    if (code & ConfigTable::GCODE_G) return gcode->has_g && gcode->g == (code & ~ConfigTable::GCODE_G);
+    return gcode->has_m && gcode->m == code;
 }
 
 bool Switch::match_input_on_gcode(const Gcode *gcode) const
 {
-    bool b= ((input_on_command_letter == 'M' && gcode->has_m && gcode->m == input_on_command_code) ||
-            (input_on_command_letter == 'G' && gcode->has_g && gcode->g == input_on_command_code));
+    bool b= gcode_matches(on_command, gcode);
 
-    return (b && gcode->subcode == this->subcode);
+    return (b && gcode->subcode == subcode);
 }
 
 bool Switch::match_input_off_gcode(const Gcode *gcode) const
 {
-    bool b= ((input_off_command_letter == 'M' && gcode->has_m && gcode->m == input_off_command_code) ||
-            (input_off_command_letter == 'G' && gcode->has_g && gcode->g == input_off_command_code));
-    return (b && gcode->subcode == this->subcode);
+    bool b= gcode_matches(off_command, gcode);
+    return (b && gcode->subcode == subcode);
 }
 
 void Switch::turn_on_switch(float value)
@@ -511,8 +482,13 @@ void Switch::on_main_loop(void *)
 
     this->switch_changed = false;
 
-    const std::string &cmd= this->switch_state ? this->output_on_command : this->output_off_command;
-    if(!cmd.empty()) gcode_dispatch.run_line(cmd, &StreamOutput::NullStream);
+    // Config values encode spaces as '_'.
+    const char *out= this->switch_state ? output_on_command : output_off_command;
+    if(out != nullptr) {
+        std::string cmd= out;
+        std::replace(cmd.begin(), cmd.end(), '_', ' ');
+        gcode_dispatch.run_line(cmd, &StreamOutput::NullStream);
+    }
     drive_output();
 }
 

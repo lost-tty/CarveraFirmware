@@ -9,12 +9,10 @@
 #include <math.h>
 #include "TemperatureControl.h"
 #include "TemperatureControlPool.h"
+#include "SpindleTempConfig.h"
 
 #include "Logging.h"
-#include "Config.h"
-#include "checksumm.h"
 #include "Gcode.h"
-#include "ConfigValue.h"
 #include "utils.h"
 #include "StreamOutput.h"
 
@@ -23,24 +21,28 @@
 #include "SwitchPool.h"
 #include "modules/robot/MachineTask.h"
 
-#define max_temp_checksum                  CHECKSUM("max_temp")
-#define min_temp_checksum                  CHECKSUM("min_temp")
-
-#define get_m_code_checksum                CHECKSUM("get_m_code")
-
-#define designator_checksum                CHECKSUM("designator")
-
-#define temperatureswitch_checksum         CHECKSUM("temperatureswitch")
-#define switch_checksum                    CHECKSUM("switch")
-#define threshold_temp_checksum            CHECKSUM("threshold_temp")
-#define cooldown_power_init_checksum       CHECKSUM("cooldown_power_init")
-#define cooldown_power_step_checksum       CHECKSUM("cooldown_power_step")
-#define cooldown_power_laser_checksum      CHECKSUM("cooldown_power_laser")
-#define cooldown_delay_checksum            CHECKSUM("cooldown_delay")
-
 TemperatureControl::~TemperatureControl()
 {
     delete sensor;
+}
+
+uint16_t TemperatureControl::get_report_mcode() const { return cfg.report_mcode; }
+
+// The sensor is set up once in load_config(); only these settings change at runtime.
+void TemperatureControl::configure()
+{
+    const SpindleTempConfigT &t = spindle_temp_cfg();
+    const TempSwitchConfigT &s = temp_switch_cfg();
+    cfg.min_temp = t.min_temp;
+    cfg.max_temp = t.max_temp;
+    strncpy(cfg.designator, t.designator, sizeof(cfg.designator));
+    cfg.threshold_temp = s.threshold_temp;
+    cfg.power_init = s.cooldown_power_init;
+    cfg.power_step = s.cooldown_power_step;
+    cfg.power_laser = s.cooldown_power_laser;
+    cfg.cooldown_delay = s.cooldown_delay;
+    uint8_t fan= s.fan_switch;
+    fan_switch_cs= fan == ConfigTable::ENUM_INVALID ? 0 : get_checksum(switch_names[fan]);
 }
 
 void TemperatureControl::on_module_loaded()
@@ -56,29 +58,14 @@ void TemperatureControl::on_module_loaded()
 void TemperatureControl::load_config()
 {
 
-    // General config
-    this->get_m_code          = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, get_m_code_checksum)->by_default(105)->as_number();
-
-    this->designator          = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, designator_checksum)->by_default(string("T"))->as_string();
-
-    // Max and min temperatures we are not allowed to get over (Safety)
-    this->max_temp = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, max_temp_checksum)->by_default(300)->as_number();
-    this->min_temp = THEKERNEL->config->value(temperature_control_checksum, this->name_checksum, min_temp_checksum)->by_default(0)->as_number();
-
     delete sensor;
     sensor = new Thermistor();
-    sensor->UpdateConfig(temperature_control_checksum, this->name_checksum);
+    sensor->UpdateConfig();
 
-    // the fan curve; the keys keep their old temperatureswitch.<name>. spelling
-    fan_threshold    = THEKERNEL->config->value(temperatureswitch_checksum, name_checksum, threshold_temp_checksum)->by_default(35.0F)->as_number();
-    fan_power_init   = THEKERNEL->config->value(temperatureswitch_checksum, name_checksum, cooldown_power_init_checksum)->by_default(50.0F)->as_number();
-    fan_power_step   = THEKERNEL->config->value(temperatureswitch_checksum, name_checksum, cooldown_power_step_checksum)->by_default(10.0F)->as_number();
-    fan_power_laser  = THEKERNEL->config->value(temperatureswitch_checksum, name_checksum, cooldown_power_laser_checksum)->by_default(80.0F)->as_number();
-    fan_cooldown_delay = THEKERNEL->config->value(temperatureswitch_checksum, name_checksum, cooldown_delay_checksum)->by_default(180)->as_number();
-
-    std::string fan= THEKERNEL->config->value(temperatureswitch_checksum, name_checksum, switch_checksum)->by_default("")->as_string();
-    fan_switch_cs= fan.empty() ? 0 : get_checksum(fan);
-    cooling_since= fan_cooldown_delay + 1;   // starts off
+    // The pool registers the report M-code once, so it is read only at boot.
+    cfg.report_mcode = spindle_temp_cfg().get_m_code;
+    configure();
+    cooling_since= cfg.cooldown_delay + 1;   // starts off
 
     has_reading= false;
     bad_readings= 0;
@@ -87,7 +74,7 @@ void TemperatureControl::load_config()
 
 void TemperatureControl::report_temperature(Gcode *gcode)
 {
-    gcode->stream->printf("%s:%3.1f /0.0 @0\n", this->designator.c_str(), this->get_temperature());
+    gcode->stream->printf("%s:%3.1f /0.0 @0\n", cfg.designator, this->get_temperature());
 }
 
 // the pool has already checked that S names this controller, or that there is no S at all
@@ -104,7 +91,7 @@ void TemperatureControl::sensor_settings_gcode(Gcode *gcode)
         TempSensor::sensor_options_t options;
         if(sensor->get_optional(options)) {
             for(auto &i : options) {
-                gcode->stream->printf("%s(S%d): %c %1.18f\n", this->designator.c_str(), this->pool_index, i.first, i.second);
+                gcode->stream->printf("%s(S%d): %c %1.18f\n", cfg.designator, this->pool_index, i.first, i.second);
             }
         }
     }
@@ -115,7 +102,7 @@ void TemperatureControl::get_status(struct pad_temperature *t)
     t->current_temperature = this->get_temperature();
     t->target_temperature = 0;
     t->pwm = 0;
-    t->designator = this->designator;
+    t->designator = cfg.designator;
     t->id = this->name_checksum;
 }
 
@@ -135,7 +122,7 @@ void TemperatureControl::read_tick()
     if(!isfinite(t)) {
         if(!machine_task.is_halted() && ++bad_readings > k_settle_ticks) {
             char msg[32];
-            snprintf(msg, sizeof(msg), "%s sensor open", designator.c_str());
+            snprintf(msg, sizeof(msg), "%s sensor open", cfg.designator);
             machine_task.halt(SPINDLE_OVERHEATED, msg);
         }
         return;
@@ -145,9 +132,9 @@ void TemperatureControl::read_tick()
     last_reading= t;
     has_reading= true;
 
-    if(!machine_task.is_halted() && (t < min_temp || t > max_temp)) {
+    if(!machine_task.is_halted() && (t < cfg.min_temp || t > cfg.max_temp)) {
         char msg[32];
-        snprintf(msg, sizeof(msg), "%s at %dC, max %d", designator.c_str(), (int)t, (int)max_temp);
+        snprintf(msg, sizeof(msg), "%s at %dC, max %d", cfg.designator, (int)t, (int)cfg.max_temp);
         machine_task.halt(SPINDLE_OVERHEATED, msg);
         return;
     }
@@ -162,8 +149,11 @@ void TemperatureControl::drive_fan(float temp)
     if(fan_switch_cs == 0) return;
 
     float power= 0;
-    if(THEKERNEL->get_laser_mode()) power= fan_power_laser;
-    else if(temp >= fan_threshold) power= fan_power_init + (temp - fan_threshold) * fan_power_step;
+    if(THEKERNEL->get_laser_mode()) power= cfg.power_laser;
+    else if(temp >= cfg.threshold_temp) {
+        power= cfg.power_init
+            + (temp - cfg.threshold_temp) * cfg.power_step;
+    }
 
     if(power > 0) {
         cooling_since= 0;
@@ -171,6 +161,6 @@ void TemperatureControl::drive_fan(float temp)
         return;
     }
 
-    if(cooling_since > fan_cooldown_delay) return;   // already off
-    if(++cooling_since > fan_cooldown_delay) SwitchPool::set_state(fan_switch_cs, false);
+    if(cooling_since > cfg.cooldown_delay) return;   // already off
+    if(++cooling_since > cfg.cooldown_delay) SwitchPool::set_state(fan_switch_cs, false);
 }

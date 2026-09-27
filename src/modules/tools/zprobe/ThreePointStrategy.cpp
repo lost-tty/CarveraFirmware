@@ -54,15 +54,14 @@
 #include "ThreePointStrategy.h"
 #include "Endstops.h"
 #include "Kernel.h"
-#include "Config.h"
 #include "Robot.h"
 #include "Logging.h"
 #include "Gcode.h"
 #include "GcodeDispatch.h"
 #include "checksumm.h"
-#include "ConfigValue.h"
 #include "Conveyor.h"
 #include "ZProbe.h"
+#include "ZProbeConfig.h"
 #include "Plane3D.h"
 #include "nuts_bolts.h"
 #include "StreamOutput.h"
@@ -72,13 +71,12 @@
 #include <cstdlib>
 #include <cmath>
 
-#define probe_point_1_checksum       CHECKSUM("point1")
-#define probe_point_2_checksum       CHECKSUM("point2")
-#define probe_point_3_checksum       CHECKSUM("point3")
-#define probe_offsets_checksum       CHECKSUM("probe_offsets")
-#define home_checksum                CHECKSUM("home_first")
-#define tolerance_checksum           CHECKSUM("tolerance")
-#define save_plane_checksum          CHECKSUM("save_plane")
+CONFIG_KEYS(threepoint_config_keys, ThreePointConfigT, THREE_POINT_CONFIG);
+// No change hook: ZProbe creates the strategy at boot, so changes require a restart.
+CONFIG_GROUPS(three_point_strategy_config_groups,
+    CFG_GROUP("leveling-strategy.three-point-leveling", threepoint_config_keys, ThreePointConfigT,
+              nullptr));
+
 
 ThreePointStrategy::ThreePointStrategy(ZProbe *zprobe) : LevelingStrategy(zprobe)
 {
@@ -95,21 +93,23 @@ ThreePointStrategy::~ThreePointStrategy()
 
 bool ThreePointStrategy::handleConfig()
 {
+    const ThreePointConfigT &threepoint_config = threepoint_cfg();
+    tolerance = threepoint_config.tolerance;
+    home_first = threepoint_config.home_first;
+    save_plane = threepoint_config.save_plane;
+
     // format is xxx,yyy for the probe points
-    std::string p1 = THEKERNEL->config->value(leveling_strategy_checksum, three_point_leveling_strategy_checksum, probe_point_1_checksum)->by_default("")->as_string();
-    std::string p2 = THEKERNEL->config->value(leveling_strategy_checksum, three_point_leveling_strategy_checksum, probe_point_2_checksum)->by_default("")->as_string();
-    std::string p3 = THEKERNEL->config->value(leveling_strategy_checksum, three_point_leveling_strategy_checksum, probe_point_3_checksum)->by_default("")->as_string();
-    if(!p1.empty()) probe_points[0] = parseXY(p1.c_str());
-    if(!p2.empty()) probe_points[1] = parseXY(p2.c_str());
-    if(!p3.empty()) probe_points[2] = parseXY(p3.c_str());
+    const float *points[3] = { threepoint_config.point1, threepoint_config.point2,
+                               threepoint_config.point3 };
+    for (int i = 0; i < 3; i++) {
+        if(!isnan(points[i][0])) probe_points[i] = std::make_tuple(points[i][0], points[i][1]);
+    }
 
-    // Probe offsets xxx,yyy,zzz
-    std::string po = THEKERNEL->config->value(leveling_strategy_checksum, three_point_leveling_strategy_checksum, probe_offsets_checksum)->by_default("0,0,0")->as_string();
-    this->probe_offsets= parseXYZ(po.c_str());
+    // A missing offset is 0.
+    const float *po = threepoint_config.probe_offsets;
+    this->probe_offsets= std::make_tuple(isnan(po[0]) ? 0 : po[0], isnan(po[1]) ? 0 : po[1],
+                                         isnan(po[2]) ? 0 : po[2]);
 
-    this->home= THEKERNEL->config->value(leveling_strategy_checksum, three_point_leveling_strategy_checksum, home_checksum)->by_default(true)->as_bool();
-    this->tolerance= THEKERNEL->config->value(leveling_strategy_checksum, three_point_leveling_strategy_checksum, tolerance_checksum)->by_default(0.03F)->as_number();
-    this->save= THEKERNEL->config->value(leveling_strategy_checksum, three_point_leveling_strategy_checksum, save_plane_checksum)->by_default(false)->as_bool();
     return true;
 }
 
@@ -125,7 +125,7 @@ void ThreePointStrategy::report_settings(StreamOutput *stream)
     std::tie(x, y, z) = probe_offsets;
     stream->printf("M565 X%1.5f Y%1.5f Z%1.5f\n", x, y, z);
 
-    if(this->save && this->plane != nullptr) {
+    if(save_plane && this->plane != nullptr) {
         uint32_t a, b, c, d;
         this->plane->encode(a, b, c, d);
         stream->printf(";Saved bed plane:\nM561 A%lu B%lu C%lu D%lu \n", a, b, c, d);
@@ -247,7 +247,7 @@ bool ThreePointStrategy::doProbing(StreamOutput *stream)
     }
 
     // optionally home XY axis first, but allow for manual homing
-    if(this->home)
+    if(home_first)
         homeXY();
 
     // move to the first probe point
@@ -286,15 +286,15 @@ bool ThreePointStrategy::doProbing(StreamOutput *stream)
     }
 
     // if first point is not within tolerance report it, it should ideally be 0
-    if(fabsf(v[0][2]) > this->tolerance) {
-        stream->printf("WARNING: probe is not within tolerance: %f > %f\n", fabsf(v[0][2]), this->tolerance);
+    if(fabsf(v[0][2]) > tolerance) {
+        stream->printf("WARNING: probe is not within tolerance: %f > %f\n", fabsf(v[0][2]), tolerance);
     }
 
     // define the plane
     delete this->plane;
     // check tolerance level here default 0.03mm
     auto mmx = std::minmax({v[0][2], v[1][2], v[2][2]});
-    if((mmx.second - mmx.first) <= this->tolerance) {
+    if((mmx.second - mmx.first) <= tolerance) {
         this->plane= nullptr; // plane is flat no need to do anything
         stream->printf("DEBUG: flat plane\n");
         setAdjustFunction(false);

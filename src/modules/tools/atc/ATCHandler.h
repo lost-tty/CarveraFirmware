@@ -42,7 +42,6 @@ public:
     void on_config_reload(void *argument);
 
 private:
-    template<float ATCHandler::*M> static float param(void *c) { return ((ATCHandler *)c)->*M; }
     static float param_clamp_state(void *c);
     static float param_tool_detected(void *c);
     static float param_active_tool(void *);
@@ -101,12 +100,6 @@ private:
 
     using atc_homing_info_t = struct {
         Pin pin;
-        uint16_t debounce_ms;
-        float max_travel;
-        float retract;
-        float homing_rate;
-        float action_rate;
-        float action_dist;
 
         struct {
             bool triggered:1;
@@ -117,45 +110,12 @@ private:
 
     using detector_info_t = struct {
         Pin detect_pin;
-        float detect_rate;
-        float detect_travel;
     };
     detector_info_t detector_info;
 
-    float safe_z_mm;
-    float safe_z_empty_mm;
-    float safe_z_offset_mm;
-    float fast_z_rate;
-    float slow_z_rate;
-    float margin_rate;
-    float probe_mx_mm;
-    float probe_my_mm;
-    float probe_mz_mm;
-    float probe_fast_rate;
-    float probe_slow_rate;
-    float probe_retract_mm;
-    float probe_height_mm;
-
-
-    float anchor1_x;
-    float anchor1_y;
-    float anchor2_offset_x;
-    float anchor2_offset_y;
-
-    float rotation_offset_x;
-    float rotation_offset_y;
-    float rotation_offset_z;
-
-    float toolrack_offset_x;
-    float toolrack_offset_y;
-    float toolrack_z;
-
-    float clearance_x;
-    float clearance_y;
-    float clearance_z;
-
-
-
+    static float probe_mx();
+    static float probe_my();
+    static float probe_mz();
 };
 
 #endif /* _ATCHANDLER_H */

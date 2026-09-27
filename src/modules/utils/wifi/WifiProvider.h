@@ -56,6 +56,9 @@ public:
     int type(); // 0: serial, 1: wifi
 
 
+public:
+    void configure(const void *cfg);
+
 private:
     void on_beacon() { beacon_due= true; }
     SoftTimer beacon{"WifiBeacon", 1000, true, this, &WifiProvider::on_beacon};
@@ -96,15 +99,12 @@ private:
 
     std::map<u8, std::function<void(u8*, u16, u8*, u16)>> data_callbacks;
 
-	int tcp_port;
-	int udp_send_port;
-	int udp_recv_port;
-	int tcp_timeout_s;
 	int connection_fail_count;
-	string machine_name;
 	char ap_address[16];
 	char ap_netmask[16];
 	char sta_address[16];
+	char machine_name[32];
+	uint16_t tcp_port, udp_send_port, udp_recv_port, tcp_timeout_s;
 	char sta_netmask[16];
 
     struct {

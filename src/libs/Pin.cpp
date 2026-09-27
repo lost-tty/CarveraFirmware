@@ -94,6 +94,28 @@ Pin* Pin::from_string(std::string value){
     return this;
 }
 
+Pin* Pin::from_spec(uint16_t s){
+    if (!PinSpec::connected(s)) {
+        this->valid = false;
+        return this;
+    }
+    LPC_GPIO_TypeDef* gpios[5] = {LPC_GPIO0, LPC_GPIO1, LPC_GPIO2, LPC_GPIO3, LPC_GPIO4};
+    this->port_number = PinSpec::port(s);
+    this->port = gpios[(unsigned int) this->port_number];
+    this->pin = PinSpec::pin(s);
+    this->valid = true;
+    this->inverting = s & PinSpec::INVERT;
+    this->port->FIOMASK &= ~(1 << this->pin);
+    if (s & PinSpec::OPEN_DRAIN) as_open_drain();
+    switch (PinSpec::pull(s)) {
+        case 1: pull_up(); break;
+        case 2: pull_down(); break;
+        case 3: pull_none(); break;
+    }
+    if (s & PinSpec::REPEATER) as_repeater();
+    return this;
+}
+
 // Configure this pin as OD
 Pin* Pin::as_open_drain(){
     if (!this->valid) return this;

@@ -10,7 +10,6 @@
 #include "Module.h"
 #include "utils.h"
 #include "FileTransfer.h"
-#include "Configurator.h"
 #include "SoftTimer.h"
 
 #include <functional>
@@ -111,6 +110,9 @@ private:
 
     void time_command( string parameters, StreamOutput *stream);
 
+    void config_command(string parameters, StreamOutput *stream );
+    void config_get_command(string parameters, StreamOutput *stream );
+    void config_set_command(string parameters, StreamOutput *stream );
     void config_get_all_command(string parameters, StreamOutput *stream );
 
     void config_restore_command(string parameters, StreamOutput *stream );
@@ -136,7 +138,6 @@ private:
     static std::string current_path;
 
     FileTransfer transfer;
-    Configurator      configurator;
 
     SoftTimer resetTimer;
 };
