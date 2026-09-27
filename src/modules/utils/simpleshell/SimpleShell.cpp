@@ -472,7 +472,7 @@ void SimpleShell::cat_command( string parameters, StreamOutput *stream )
 
     // we have been asked to delay before cat, probably to allow time to issue upload command
     if (delay > 0) {
-        safe_delay_ms(delay * 1000);
+        delay_ms(delay * 1000);
     }
 
     // Open file
@@ -497,8 +497,6 @@ void SimpleShell::cat_command( string parameters, StreamOutput *stream )
             stream->send(Frame::INFO, buffer, charcnt);
             memset(buffer, 0, sizeof(buffer));
             charcnt = 0;
-            // we need to kick things or they die
-            THEKERNEL->call_event(ON_IDLE);
         }
         if ( newlines == limit ) {
             break;
@@ -1292,7 +1290,6 @@ void SimpleShell::md5sum_command( string parameters, StreamOutput *stream )
 	do {
 		size_t n= fread(buf, 1, sizeof buf, lp);
 		if(n > 0) md5.update(buf, n);
-		THEKERNEL->call_event(ON_IDLE);
 	} while(!feof(lp));
 
 	stream->printf("%s %s\n", md5.finalize().hexdigest().c_str(), filename.c_str());
@@ -1513,7 +1510,6 @@ static void list_key(const char *name, const ConfigTable::Group *g, const Config
     void *user)
 {
     print_key((StreamOutput *)user, name, g, k);
-    THEKERNEL->call_event(ON_IDLE);
 }
 
 static void config_get(const string &key, StreamOutput *stream)
@@ -1594,7 +1590,6 @@ void SimpleShell::config_command(string parameters, StreamOutput *stream)
         const ConfigTable::Group *g; const ConfigTable::Key *k;
         if (ConfigTable::find(key, &g, &k)) return;
         stream->printf("%s = %s\n", key, value);
-        THEKERNEL->call_event(ON_IDLE);
     });
 }
 
@@ -1658,7 +1653,6 @@ void SimpleShell::config_get_all_command( string parameters, StreamOutput *strea
 
 			buffer.clear();
 			// we need to kick things or they die
-			THEKERNEL->call_event(ON_IDLE);
 		}
 	}
 

@@ -6,6 +6,8 @@
 */
 
 #include "libs/Module.h"
+#include "FreeRTOS.h"
+#include "task.h"
 #include "Persist.h"
 #include "SwitchPool.h"
 #include "libs/Kernel.h"
@@ -640,12 +642,12 @@ void Robot::on_gcode_received(Gcode *argument)
             case 2:  motion_mode = CW_ARC;  break;
             case 3:  motion_mode = CCW_ARC; break;
             case 4: { // G4 Dwell
-                uint32_t delay_ms = 0;
+                uint32_t dwell = 0;
                 if (gcode->has_letter('P')) {
                     float f= gcode->get_value('P');
-                    if(f > 0.0F) delay_ms= f * 1000.0F;
+                    if(f > 0.0F) dwell= f * 1000.0F;
                 }
-                if (delay_ms > 0) safe_delay_ms(delay_ms);
+                if (dwell > 0) delay_ms(dwell);
             }
             break;
 

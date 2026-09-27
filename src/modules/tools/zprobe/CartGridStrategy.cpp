@@ -604,7 +604,6 @@ bool CartGridStrategy::doProbe(Gcode *gc)
 
         while( !zprobe->getProbeStatus()) {
             if(machine_task.is_halted()) return(false);
-            THEKERNEL->call_event(ON_IDLE);
         }
     }
 

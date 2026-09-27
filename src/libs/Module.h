@@ -13,7 +13,6 @@
 // Module.cpp:16 in the same order
 enum _EVENT_ENUM {
     ON_MAIN_LOOP,
-    ON_IDLE,
     NUMBER_OF_DEFINED_EVENTS
 };
 
@@ -40,7 +39,6 @@ public:
     // there should be one for each _EVENT_ENUM
     virtual void on_main_loop(void *) {};
     virtual void on_gcode_received(Gcode *) {};
-    virtual void on_idle(void *) {};
 };
 
 #endif

@@ -55,7 +55,7 @@ CONFIG_GROUPS(conveyor_config_groups,
  *
  * also, as in regular ringbuffers, we can 'use' the TAIL block, and increment tail pointer when we're finished with it
  *
- * Both of these are implemented here- see queue_head_block() (where head is pushed) and on_idle() (where tail is consumed)
+ * Both of these are implemented here- see queue_head_block() (where head is pushed) and service() (where tail is consumed)
  *
  * The double ring is implemented by adding a third index pointer that lives in between head and tail. We call it isr_tail_i.
  *

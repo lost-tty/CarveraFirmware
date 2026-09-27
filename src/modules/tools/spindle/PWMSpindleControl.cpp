@@ -6,6 +6,8 @@
 */
 
 #include "libs/Module.h"
+#include "FreeRTOS.h"
+#include "task.h"
 #include "libs/Kernel.h"
 #include "PWMSpindleControl.h"
 #include "SpindleConfig.h"
@@ -205,7 +207,7 @@ void PWMSpindleControl::on_update_speed()
 // the wait is the spindle reaching speed, so it is a sleep and not a dwell in the path
 void PWMSpindleControl::turn_on() {
     spindle_on = true;
-    if (cfg.delay_s > 0) safe_delay_ms(cfg.delay_s * 1000);
+    if (cfg.delay_s > 0) delay_ms(cfg.delay_s * 1000);
 }
 
 void PWMSpindleControl::kill() {
@@ -216,7 +218,7 @@ void PWMSpindleControl::kill() {
 
 void PWMSpindleControl::turn_off() {
     spindle_on = false;
-    if (cfg.delay_s > 0) safe_delay_ms(cfg.delay_s * 1000);
+    if (cfg.delay_s > 0) delay_ms(cfg.delay_s * 1000);
 }
 
 

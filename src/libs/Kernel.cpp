@@ -30,6 +30,8 @@
 #include "modules/tools/endstops/Endstops.h"
 #include "modules/utils/mainbutton/MainButton.h"
 #include "modules/tools/atc/ATCHandler.h"
+#include "modules/utils/wifi/WifiProvider.h"
+#include "modules/communication/usb/UsbHost.h"
 #include "Persist.h"
 #include "modules/robot/Robot.h"
 #include "StepperMotor.h"
@@ -466,12 +468,18 @@ void Kernel::register_for_event(_EVENT_ENUM id_event, Module *mod)
 // Call a specific event with an argument
 
 
-void Kernel::serve_main()
+void Kernel::serve_io()
 {
     watchdog.alive();
+    wifi_provider.service();
+    usb_host.service();
+}
+
+void Kernel::serve_main()
+{
     machine_task.trace();
+    serve_io();
     call_event(ON_MAIN_LOOP);
-    call_event(ON_IDLE);
 }
 
 void Kernel::call_event(_EVENT_ENUM id_event, void * argument)

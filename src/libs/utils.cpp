@@ -360,11 +360,6 @@ string wcs2gcode(int wcs) {
     return str;
 }
 
-void safe_delay_ms(uint32_t delay)
-{
-    vTaskDelay(pdMS_TO_TICKS(delay));
-}
-
 struct tm *get_fftime(unsigned short t_date, unsigned short t_time, struct tm *timeinfo) {
 
 	// uint16_t mask = (1 << (end - begin + 1)) - 1;

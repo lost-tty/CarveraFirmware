@@ -5,13 +5,13 @@
 #include "libs/RingBuffer.h"
 #include "Pendant.h"
 
-// USB host port with TinyUSB, polled from ON_IDLE. HID handlers queue command lines that are
+// USB host port with TinyUSB, serviced from the main loop. HID handlers queue command lines that are
 // dispatched from the main loop like console input.
 class UsbHost : public Module {
     public:
         UsbHost() : pendant(*this) {}
         void on_module_loaded();
-        void on_idle(void* argument);
+        void service();
         void on_main_loop(void* argument);
 
         void queue_line(const char* line);
@@ -29,5 +29,8 @@ class UsbHost : public Module {
         bool running = false;
         bool reenumerated = false;
 };
+
+extern UsbHost usb_host;
+
 
 #endif

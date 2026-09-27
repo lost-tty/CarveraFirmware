@@ -41,7 +41,7 @@ public:
     void on_module_loaded();
     void on_main_loop( void* argument );
     void on_second_tick(void* argument);
-    void on_idle(void* argument);
+    void service();
 
     uint8_t initializeTcpServer(uint16_t local_port, uint8_t max_clients);
     void removeTcpServer(uint8_t link_no);

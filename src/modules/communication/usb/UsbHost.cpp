@@ -60,7 +60,6 @@ void UsbHost::on_module_loaded()
     // interrupt the OHCI driver relies on, so do the initial port scan its hcd_init omits
     if (hcd_port_connect_status(0)) hcd_event_device_attach(0, false);
 
-    register_for_event(ON_IDLE);
     register_for_event(ON_MAIN_LOOP);
 }
 
@@ -85,7 +84,7 @@ bool UsbHost::init_controller()
     return true;
 }
 
-void UsbHost::on_idle(void*)
+void UsbHost::service()
 {
     tuh_task();
     pendant.tick();

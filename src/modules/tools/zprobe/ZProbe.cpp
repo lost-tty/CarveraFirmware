@@ -6,6 +6,8 @@
 */
 
 #include "ZProbe.h"
+#include "FreeRTOS.h"
+#include "task.h"
 #include "Endstops.h"
 #include "SimpleShell.h"
 
@@ -117,7 +119,7 @@ void ZProbe::configure(const ZProbeConfigT &zprobe_config)
 // returns boolean value indicating if probe was triggered
 bool ZProbe::run_probe(float& mm, float feedrate, float max_dist, bool reverse)
 {
-    if(dwell_before_probing > .0001F) safe_delay_ms(dwell_before_probing*1000);
+    if(dwell_before_probing > .0001F) delay_ms(dwell_before_probing*1000);
 
     if(this->probe_pin.get() != invert_probe) {
     	printk("Error: Probe already triggered so aborts\r\n");

@@ -1,6 +1,9 @@
 #pragma once
 
 #include <stdint.h>
+
+#include "FreeRTOS.h"
+#include "task.h"
 #include <string>
 #include <vector>
 #include "time.h"
@@ -39,9 +42,9 @@ void check_and_make_path( std::string origin );
 
 int append_parameters(char *buf, std::vector<std::pair<char,float>> params, size_t bufsize);
 std::string wcs2gcode(int wcs);
-void safe_delay_ms(uint32_t delay);
 
 #define confine(value, min, max) (((value) < (min))?(min):(((value) > (max))?(max):(value)))
+#define delay_ms(ms) vTaskDelay(pdMS_TO_TICKS(ms))
 
 struct tm *get_fftime(unsigned short t_date, unsigned short t_time, struct tm *timeinfo);
 

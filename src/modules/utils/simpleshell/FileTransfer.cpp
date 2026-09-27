@@ -35,8 +35,6 @@ int FileTransfer::in(StreamOutput* stream, uint32_t timeout_ms)
             }
         }
         if (us_ticker_read() - start >= timeout_ms * 1000) return -1;
-        // feeds the watchdog
-        THEKERNEL->call_event(ON_IDLE);
         vTaskDelay(0);
     }
 }
@@ -343,7 +341,6 @@ bool FileTransfer::download(const std::string& filename, StreamOutput* stream)
         do {
             size_t n = fread(xbuff, 1, sizeof(xbuff), fd);
             if (n > 0) md5.update(xbuff, n);
-            THEKERNEL->call_event(ON_IDLE);
         } while (!feof(fd));
         strcpy(md5_str, md5.finalize().hexdigest().c_str());
         fclose(fd);
@@ -488,7 +485,6 @@ bool FileTransfer::decompress(const std::string& sfilename, const std::string& d
         u32BlockNum += 1;
         if (++k > 10) {
             k = 0;
-            THEKERNEL->call_event(ON_IDLE);
         }
         stream->printf("#Info: decompart = %lu\r\n", u32BlockNum);
     }

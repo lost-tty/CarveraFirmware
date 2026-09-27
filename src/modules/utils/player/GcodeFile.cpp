@@ -59,9 +59,7 @@ void GcodeFile::seek_line(unsigned long n)
     char buf[130];
     fseek(fd, 0, SEEK_SET);
     line_count = byte_count = pos = 0;
-    while (line_count + 1 < n && next_line(buf, sizeof(buf))) {
-        if (line_count % 100 == 0) THEKERNEL->call_event(ON_IDLE);
-    }
+    while (line_count + 1 < n && next_line(buf, sizeof(buf))) { }
 }
 
 void GcodeFile::list(StreamOutput* stream, unsigned long current, unsigned around)

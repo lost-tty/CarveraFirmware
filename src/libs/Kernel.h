@@ -67,6 +67,7 @@ class Kernel {
         void configure(const void *cfg);
         // safe from an interrupt
         void serve_main();
+        void serve_io();
 
         void set_feed_hold(bool f) { feed_hold= f; }
         bool get_feed_hold() const { return feed_hold; }
