@@ -382,37 +382,12 @@ void ATCHandler::state_gcode(Gcode *gcode)
     atc_state= gcode->subcode;
 }
 
-const ATCHandler::Param ATCHandler::PARAMS[] = {
-    {"_clamp_state", [](void *c) { return (float)((ATCHandler *)c)->atc_home_info.clamp_status; }},
-    {"_tool_detected", [](void *c) { return (float)((ATCHandler *)c)->tool_detected; }},
-    {"_active_tool", [](void *) { return (float)persist.tool(); }},
-    {"_anchor1_x", [](void *c) { return (float)((ATCHandler *)c)->anchor1_x; }},
-    {"_anchor1_y", [](void *c) { return (float)((ATCHandler *)c)->anchor1_y; }},
-    {"_anchor2_offset_x", [](void *c) { return (float)((ATCHandler *)c)->anchor2_offset_x; }},
-    {"_anchor2_offset_y", [](void *c) { return (float)((ATCHandler *)c)->anchor2_offset_y; }},
-    {"_toolrack_offset_x", [](void *c) { return (float)((ATCHandler *)c)->toolrack_offset_x; }},
-    {"_toolrack_offset_y", [](void *c) { return (float)((ATCHandler *)c)->toolrack_offset_y; }},
-    {"_toolrack_z", [](void *c) { return (float)((ATCHandler *)c)->toolrack_z; }},
-    {"_rotation_offset_x", [](void *c) { return (float)((ATCHandler *)c)->rotation_offset_x; }},
-    {"_rotation_offset_y", [](void *c) { return (float)((ATCHandler *)c)->rotation_offset_y; }},
-    {"_rotation_offset_z", [](void *c) { return (float)((ATCHandler *)c)->rotation_offset_z; }},
-    {"_clearance_x", [](void *c) { return (float)((ATCHandler *)c)->clearance_x; }},
-    {"_clearance_y", [](void *c) { return (float)((ATCHandler *)c)->clearance_y; }},
-    {"_clearance_z", [](void *c) { return (float)((ATCHandler *)c)->clearance_z; }},
-    {"_atc_safe_z", [](void *c) { return (float)((ATCHandler *)c)->safe_z_mm; }},
-    {"_atc_safe_z_empty", [](void *c) { return (float)((ATCHandler *)c)->safe_z_empty_mm; }},
-    {"_atc_safe_z_offset", [](void *c) { return (float)((ATCHandler *)c)->safe_z_offset_mm; }},
-    {"_atc_fast_z_rate", [](void *c) { return (float)((ATCHandler *)c)->fast_z_rate; }},
-    {"_atc_slow_z_rate", [](void *c) { return (float)((ATCHandler *)c)->slow_z_rate; }},
-    {"_atc_margin_rate", [](void *c) { return (float)((ATCHandler *)c)->margin_rate; }},
-    {"_atc_probe_fast_rate", [](void *c) { return (float)((ATCHandler *)c)->probe_fast_rate; }},
-    {"_atc_probe_slow_rate", [](void *c) { return (float)((ATCHandler *)c)->probe_slow_rate; }},
-    {"_atc_probe_retract", [](void *c) { return (float)((ATCHandler *)c)->probe_retract_mm; }},
-    {"_atc_probe_height", [](void *c) { return (float)((ATCHandler *)c)->probe_height_mm; }},
-    {"_probe_mx", [](void *c) { return (float)((ATCHandler *)c)->probe_mx_mm; }},
-    {"_probe_my", [](void *c) { return (float)((ATCHandler *)c)->probe_my_mm; }},
-    {"_probe_mz", [](void *c) { return (float)((ATCHandler *)c)->probe_mz_mm; }},
-};
+float ATCHandler::param_clamp_state(void *c)
+{
+    return (float)((ATCHandler *)c)->atc_home_info.clamp_status;
+}
+float ATCHandler::param_tool_detected(void *c) { return (float)((ATCHandler *)c)->tool_detected; }
+float ATCHandler::param_active_tool(void *) { return (float)persist.tool(); }
 
 const SimpleShell::Sub<ATCHandler> ATCHandler::SUBS[] = {
     {"",      &ATCHandler::sub_state, "tool, offsets and clamp state"},
@@ -445,8 +420,38 @@ void ATCHandler::sub_rack(std::string, StreamOutput *stream)
 
 void ATCHandler::register_params()
 {
-    static Parameters::Named slots[sizeof(PARAMS) / sizeof(*PARAMS)];
-    for (unsigned i = 0; i < sizeof(PARAMS) / sizeof(*PARAMS); i++) Parameters::add(slots[i], PARAMS[i].name, PARAMS[i].get, this);
+    static constexpr Parameters::Named rows[] = {
+        {"_clamp_state", &ATCHandler::param_clamp_state},
+        {"_tool_detected", &ATCHandler::param_tool_detected},
+        {"_active_tool", &ATCHandler::param_active_tool},
+        {"_anchor1_x", &ATCHandler::param<&ATCHandler::anchor1_x>},
+        {"_anchor1_y", &ATCHandler::param<&ATCHandler::anchor1_y>},
+        {"_anchor2_offset_x", &ATCHandler::param<&ATCHandler::anchor2_offset_x>},
+        {"_anchor2_offset_y", &ATCHandler::param<&ATCHandler::anchor2_offset_y>},
+        {"_toolrack_offset_x", &ATCHandler::param<&ATCHandler::toolrack_offset_x>},
+        {"_toolrack_offset_y", &ATCHandler::param<&ATCHandler::toolrack_offset_y>},
+        {"_toolrack_z", &ATCHandler::param<&ATCHandler::toolrack_z>},
+        {"_rotation_offset_x", &ATCHandler::param<&ATCHandler::rotation_offset_x>},
+        {"_rotation_offset_y", &ATCHandler::param<&ATCHandler::rotation_offset_y>},
+        {"_rotation_offset_z", &ATCHandler::param<&ATCHandler::rotation_offset_z>},
+        {"_clearance_x", &ATCHandler::param<&ATCHandler::clearance_x>},
+        {"_clearance_y", &ATCHandler::param<&ATCHandler::clearance_y>},
+        {"_clearance_z", &ATCHandler::param<&ATCHandler::clearance_z>},
+        {"_atc_safe_z", &ATCHandler::param<&ATCHandler::safe_z_mm>},
+        {"_atc_safe_z_empty", &ATCHandler::param<&ATCHandler::safe_z_empty_mm>},
+        {"_atc_safe_z_offset", &ATCHandler::param<&ATCHandler::safe_z_offset_mm>},
+        {"_atc_fast_z_rate", &ATCHandler::param<&ATCHandler::fast_z_rate>},
+        {"_atc_slow_z_rate", &ATCHandler::param<&ATCHandler::slow_z_rate>},
+        {"_atc_margin_rate", &ATCHandler::param<&ATCHandler::margin_rate>},
+        {"_atc_probe_fast_rate", &ATCHandler::param<&ATCHandler::probe_fast_rate>},
+        {"_atc_probe_slow_rate", &ATCHandler::param<&ATCHandler::probe_slow_rate>},
+        {"_atc_probe_retract", &ATCHandler::param<&ATCHandler::probe_retract_mm>},
+        {"_atc_probe_height", &ATCHandler::param<&ATCHandler::probe_height_mm>},
+        {"_probe_mx", &ATCHandler::param<&ATCHandler::probe_mx_mm>},
+        {"_probe_my", &ATCHandler::param<&ATCHandler::probe_my_mm>},
+        {"_probe_mz", &ATCHandler::param<&ATCHandler::probe_mz_mm>},
+    };
+    Parameters::add(params_slot, rows, this);
 }
 
 bool ATCHandler::get_tool_status(struct tool_status *t) const

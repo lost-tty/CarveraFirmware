@@ -11,6 +11,7 @@ class Gcode;
 #include "SimpleShell.h"
 #include "libs/McodeRegistry.h"
 #include "libs/Watch.h"
+#include "Parameters.h"
 
 class ATCHandler : public Module, public Killable
 {
@@ -41,13 +42,17 @@ public:
     void on_config_reload(void *argument);
 
 private:
-    static const struct Param { const char *name; float (*get)(void *); } PARAMS[];
+    template<float ATCHandler::*M> static float param(void *c) { return ((ATCHandler *)c)->*M; }
+    static float param_clamp_state(void *c);
+    static float param_tool_detected(void *c);
+    static float param_active_tool(void *);
     void register_params();
     static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
     static const SimpleShell::Sub<ATCHandler> SUBS[];
     void sub_state(std::string args, StreamOutput *stream);
     void sub_rack(std::string args, StreamOutput *stream);
     SimpleShell::Registered shell_slot;
+    Parameters::Table params_slot;
     volatile uint8_t atc_state{0};
 
 

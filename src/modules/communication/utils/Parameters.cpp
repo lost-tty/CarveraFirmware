@@ -78,12 +78,12 @@ static bool player_playing()
     return player.is_playing();
 }
 
-Parameters::Named *Parameters::named = nullptr;
+Parameters::Table *Parameters::tables = nullptr;
 
-void Parameters::add(Named &slot, const char *name, getter get, void *context)
+void Parameters::add(Table &slot, const Named *rows, unsigned count, void *context)
 {
-    slot = Named{name, get, context, named};
-    named = &slot;
+    slot = Table{rows, count, context, tables};
+    tables = &slot;
 }
 
 static float probe_axis(unsigned i)
@@ -97,40 +97,62 @@ static float probe_axis(unsigned i)
     }
 }
 
-static const struct { const char *name; Parameters::getter get; } BUILTIN[] = {
-    {"_laser_mode",  [](void *) { return (float)THEKERNEL->get_laser_mode(); }},
-    {"_homed",       [](void *) { return (float)THEROBOT.is_homed_all_axes(); }},
-    {"_spindle_on",  [](void *) { return (float)spindle_on(); }},
-    {"_playing",     [](void *) { return (float)player_playing(); }},
-    {"_tlo",         [](void *) { return persist.tool_length(); }},
-    {"_probe_x",     [](void *) { return probe_axis(0); }},
-    {"_probe_y",     [](void *) { return probe_axis(1); }},
-    {"_probe_z",     [](void *) { return probe_axis(2); }},
-    {"_probe_ok",    [](void *) { return probe_axis(3); }},
+static float laser_mode(void *) { return (float)THEKERNEL->get_laser_mode(); }
+static float homed(void *) { return (float)THEROBOT.is_homed_all_axes(); }
+static float spindle_is_on(void *) { return (float)spindle_on(); }
+static float playing(void *) { return (float)player_playing(); }
+static float tlo(void *) { return persist.tool_length(); }
+static float probe_x(void *) { return probe_axis(0); }
+static float probe_y(void *) { return probe_axis(1); }
+static float probe_z(void *) { return probe_axis(2); }
+static float probe_ok(void *) { return probe_axis(3); }
+
+static constexpr Parameters::Named BUILTIN[] = {
+    {"_laser_mode",  laser_mode},
+    {"_homed",       homed},
+    {"_spindle_on",  spindle_is_on},
+    {"_playing",     playing},
+    {"_tlo",         tlo},
+    {"_probe_x",     probe_x},
+    {"_probe_y",     probe_y},
+    {"_probe_z",     probe_z},
+    {"_probe_ok",    probe_ok},
 };
 
 void Parameters::init()
 {
-    static Named slots[sizeof(BUILTIN) / sizeof(*BUILTIN)];
-    for (unsigned i = 0; i < sizeof(BUILTIN) / sizeof(*BUILTIN); i++) {
-        add(slots[i], BUILTIN[i].name, BUILTIN[i].get, nullptr);
+    static Table slot;
+    add(slot, BUILTIN, nullptr);
+}
+
+const Parameters::Named *Parameters::find(const char *name, void *&context)
+{
+    for (const Table *t = tables; t != nullptr; t = t->next) {
+        for (unsigned i = 0; i < t->count; i++) {
+            if (strcmp(t->rows[i].name, name) != 0) continue;
+            context = t->context;
+            return &t->rows[i];
+        }
     }
+    return nullptr;
 }
 
 bool Parameters::get_named(const char *name, float &v) const
 {
-    for (const Named *p = named; p != nullptr; p = p->next) {
-        if (strcmp(p->name, name) == 0) {
-            v = p->get(p->context);
-            return true;
-        }
-    }
-    return false;
+    void *context;
+    const Named *p = find(name, context);
+    if (p == nullptr) return false;
+    v = p->get(context);
+    return true;
 }
 
 void Parameters::list_named(StreamOutput *stream)
 {
-    for (const Named *p = named; p != nullptr; p = p->next) stream->printf("%-22s %.4f\n", p->name, p->get(p->context));
+    for (const Table *t = tables; t != nullptr; t = t->next) {
+        for (unsigned i = 0; i < t->count; i++) {
+            stream->printf("%-22s %.4f\n", t->rows[i].name, t->rows[i].get(t->context));
+        }
+    }
 }
 
 bool Parameters::set(int n, float v)
