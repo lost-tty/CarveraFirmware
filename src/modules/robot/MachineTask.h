@@ -124,7 +124,7 @@ private:
     void serve_tickets();
     void finish_clear();
 
-    static const uint16_t k_stack_words = 768;
+    static const uint16_t k_stack_words = 384;
     static const UBaseType_t k_priority = 2;
     static const UBaseType_t k_notify_index = 1;
     static const uint32_t k_poll_ms = 10;   // the conveyor waits on the same notification
