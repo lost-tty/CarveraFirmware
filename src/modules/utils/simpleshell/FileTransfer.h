@@ -49,7 +49,7 @@ private:
 
     static const uint32_t BYTE_TIMEOUT_MS = 200;    // between bytes inside one frame
     static const uint32_t IDLE_TIMEOUT_MS = 500;    // waiting for the next frame before repeating a request
-    static const int      MAX_RETRIES     = 60;     // repeated requests before giving up (30 s idle)
+    static const int      MAX_RETRIES     = 20;     // repeated requests before giving up (10 s idle)
     static const size_t   DOWNLOAD_CHUNK  = 4000;   // data bytes per FILE_DATA frame we send
 };
 

@@ -62,7 +62,7 @@
 #define second_usb_serial_enable_checksum  CHECKSUM("second_usb_serial_enable")
 
 #define MAIN_CONFIG(X) \
-    X(float, watchdog_timeout, "watchdog_timeout", 10.0f)
+    X(float, watchdog_timeout, "watchdog_timeout", 30.0f)
 CONFIG_STRUCT(MainConfig, MAIN_CONFIG);
 CONFIG_KEYS(main_config_keys, MainConfig, MAIN_CONFIG);
 CONFIG_GROUPS(main_config_groups,
