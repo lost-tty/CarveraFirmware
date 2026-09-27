@@ -148,9 +148,6 @@ void Kernel::init()
     step_ticker.set_frequency(this->base_stepping_frequency);
     step_ticker.set_unstep_time(microseconds_per_step_pulse);
 
-    // Initialize slow ticker
-    this->add_module(&slow_ticker);
-
     this->i2c = new mbed::I2C(P0_27, P0_28);
     this->i2c->frequency(200000);
 

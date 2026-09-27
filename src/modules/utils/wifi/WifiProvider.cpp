@@ -94,7 +94,7 @@ void WifiProvider::on_module_loaded()
     ADD_MCODE(m483, 483, IMMEDIATE, WifiProvider::query_ap_param);
     ADD_MCODE(m489, 489, IMMEDIATE, WifiProvider::report_status);
     this->register_for_event(ON_MAIN_LOOP);
-    this->register_for_event(ON_SECOND_TICK);
+    beacon.start();
 }
 
 void WifiProvider::on_pin_rise()
@@ -319,6 +319,11 @@ void WifiProvider::on_idle(void* argument)
 
 void WifiProvider::on_main_loop(void* argument)
 {
+    if (beacon_due) {
+        beacon_due= false;
+        on_second_tick(nullptr);
+    }
+
     string line;
     if (next_line(line)) SimpleShell::run(line, this);
 }

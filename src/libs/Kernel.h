@@ -11,7 +11,6 @@
 #include "Module.h"
 #include "StreamOutputPool.h"
 #include "StepTicker.h"
-#include "SlowTicker.h"
 #include "Planner.h"
 #include "Adc.h"
 #include "I2C.h" // mbed.h lib
@@ -92,7 +91,6 @@ class Kernel {
         StreamOutputPool  streams;
         Planner           planner;
         Config*           config;
-        SlowTicker        slow_ticker;
         StepTicker        step_ticker;
         Adc               adc;
         uint32_t          base_stepping_frequency;

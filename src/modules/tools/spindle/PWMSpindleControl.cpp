@@ -12,7 +12,6 @@
 #include "checksumm.h"
 #include "ConfigValue.h"
 #include "Logging.h"
-#include "SlowTicker.h"
 #include "Conveyor.h"
 #include "system_LPC17xx.h"
 #include "SpindlePublicAccess.h"

@@ -13,7 +13,6 @@ This is aprt of the Smoothie test framework, it generates a Mockable Kernl so ke
 #include "libs/Module.h"
 #include "libs/Config.h"
 #include "libs/nuts_bolts.h"
-#include "libs/SlowTicker.h"
 #include "libs/Logging.h"
 #include <mri.h>
 #include "checksumm.h"
@@ -53,8 +52,6 @@ Kernel::Kernel(){
     this->streams->append_stream(this->serial);
 
     this->current_path   = "/";
-
-    this->slow_ticker = new SlowTicker();
 
     // dummies (would be nice to refactor to not have to create a conveyor)
     this->conveyor= new Conveyor();

@@ -16,6 +16,7 @@ using namespace std;
 
 #include "Pin.h"
 #include "Module.h"
+#include "SoftTimer.h"
 #include "StreamOutput.h"
 #include "libs/McodeRegistry.h"
 
@@ -56,6 +57,9 @@ public:
 
 
 private:
+    void on_beacon() { beacon_due= true; }
+    SoftTimer beacon{"WifiBeacon", 1000, true, this, &WifiProvider::on_beacon};
+    volatile bool beacon_due{false};
     void query_sta_param(Gcode *);
     void query_ap_param(Gcode *);
     void report_status(Gcode *);
