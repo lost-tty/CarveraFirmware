@@ -35,6 +35,7 @@ class Player : public Module, public Source, public Killable {
         void on_module_loaded();
         static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
         bool is_playing() const { return playing_file; }
+        const string &playing_name() const { return filename; }
         bool m1_stops_program() const { return m1_stops; }
         bool get_progress(struct pad_progress &p);
         void on_gcode_received(Gcode *argument);

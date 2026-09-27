@@ -10,7 +10,7 @@
 
 class FileTransfer {
 public:
-    // clears on every exit path, including the early returns
+    // while this is held the stream carries transfer bytes: no text output, no frame decoding
     class Claim {
     public:
         explicit Claim(StreamOutput *s) : stream(s) { stream->set_transferring(true); }
@@ -44,6 +44,8 @@ private:
 
     char* pend = nullptr;
     int   pend_len = 0;
+
+    static constexpr const char *PART_SUFFIX = ".part";
 
     static const uint32_t BYTE_TIMEOUT_MS = 200;    // between bytes inside one frame
     static const uint32_t IDLE_TIMEOUT_MS = 500;    // waiting for the next frame before repeating a request

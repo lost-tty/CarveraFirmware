@@ -6,7 +6,6 @@
 #include "utils.h"
 #include "mbed.h"
 #include "Scripts.h"
-#include "Source.h"
 #include "md5.h"
 #include <cstring>
 
@@ -101,10 +100,6 @@ void FileTransfer::send_seq(StreamOutput* stream, uint8_t type, uint32_t seq)
 
 bool FileTransfer::upload(const std::string& filename, StreamOutput* stream)
 {
-    if (sources.active()) {
-        stream->printf("error:busy, a job or script is running\r\n");
-        return false;
-    }
     enum { WAIT_MD5, WAIT_VIEW, DATA } state = WAIT_MD5;
     uint32_t total_packets = 0, seq = 1, file_size = 0;
     int retries = 0;
@@ -119,11 +114,6 @@ bool FileTransfer::upload(const std::string& filename, StreamOutput* stream)
 
     pend_len = 0;
 
-    if (!THECONVEYOR.is_idle()) {
-        stream->send(Frame::FILE_CAN, "ok\r\n", 4);
-        return false;
-    }
-
     Claim claim(stream);
 
     // .lz uploads land in the .lz shadow directory and are decompressed to filename afterwards
@@ -135,6 +125,9 @@ bool FileTransfer::upload(const std::string& filename, StreamOutput* stream)
     }
     bool want_md5_file = filename.find("firmware.bin") == string::npos;
     bool hash_on_wire = !is_lz;
+
+    // a failed transfer leaves the .part behind, not a truncated file under the real name
+    if (!is_lz) datafile += PART_SUFFIX;
 
     FILE* fd = fopen(datafile.c_str(), "wb");
     FILE* fd_md5 = want_md5_file ? fopen(md5_filename.c_str(), "wb") : NULL;
@@ -282,12 +275,27 @@ done:
 
     if (ok && is_lz) {
         string dest = filename.substr(0, filename.find(".lz"));
-        ok = decompress(datafile, dest, file_size, stream, computed_md5);
+        string part = dest + PART_SUFFIX;
+        ok = decompress(datafile, part, file_size, stream, computed_md5);
         if (ok && received_md5 != computed_md5) {
             stream->printf("Error: MD5 verification failed\r\n");
             ok = false;
         }
-        if (!ok) remove(dest.c_str());
+        if (ok) {
+            remove(dest.c_str());
+            ok = rename(part.c_str(), dest.c_str()) == 0;
+            if (!ok) stream->printf("Error: could not rename %s\r\n", part.c_str());
+        }
+        if (!ok) remove(part.c_str());
+    }
+
+    if (!is_lz && ok) {
+        remove(filename.c_str());
+        ok = rename(datafile.c_str(), filename.c_str()) == 0;
+        if (!ok) {
+            stream->printf("Error: could not rename %s\r\n", datafile.c_str());
+            remove(datafile.c_str());
+        }
     }
 
     if (fd_md5 != NULL) {

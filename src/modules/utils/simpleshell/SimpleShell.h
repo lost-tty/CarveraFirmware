@@ -54,9 +54,7 @@ public:
     static void run(const std::string &line, StreamOutput *stream);
     static bool control_char(char c, StreamOutput *stream);
     void run_command(const std::string &line, StreamOutput *stream);
-    SimpleShell()
-    : resetTimer("SimpleShell::resetTimer", 3000, false, this, &SimpleShell::system_reset_callback)
-    {}
+    SimpleShell() {}
 
     void on_module_loaded();
     bool parse_command(const char *cmd, string args, StreamOutput *stream);
@@ -68,6 +66,8 @@ public:
     void ftype_command( string parameters, StreamOutput *stream );
 
 private:
+
+    bool being_played(const string &path, StreamOutput *stream);
 
     void jog(string params, StreamOutput *stream);
 
@@ -123,8 +123,6 @@ private:
     void eeprom_clear(string parameters, StreamOutput *stream );
     static const Sub<SimpleShell> EEPROM_SUBS[];
 
-    void system_reset_callback();
-
     typedef void (*PFUNC)(string parameters, StreamOutput *stream);
     typedef struct {
         const char* name;
@@ -138,6 +136,4 @@ private:
     static std::string current_path;
 
     FileTransfer transfer;
-
-    SoftTimer resetTimer;
 };

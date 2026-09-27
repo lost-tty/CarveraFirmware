@@ -26,7 +26,7 @@
 #include "FileStream.h"
 #include "checksumm.h"
 #include "Scripts.h"
-#include "Source.h"
+#include "modules/utils/player/Player.h"
 #include "Gcode.h"
 #include "Robot.h"
 #include "GcodeDispatch.h"
@@ -90,7 +90,7 @@ const SimpleShell::ptentry_t SimpleShell::commands_table[] = {
     {"mkdir",     &SimpleShell::mkdir_command,     "mkdir directory - create a new directory"},
     {"upload",    &SimpleShell::upload_command,    "upload filename - save incoming text to a file"},
     {"download",  &SimpleShell::download_command,  "download filename - download a file"},
-    {"reset",     &SimpleShell::reset_command,     "reset - reboot the system"},
+    {"reset",     &SimpleShell::reset_command,     "reset [-f] - reboot the system, -f reboots at once"},
     {"eeprom",    &SimpleShell::eeprom_command,    "eeprom [clear] - show the saved tool, offsets and #501-520; clear wipes them"},
     {"dfu",       &SimpleShell::dfu_command,       "dfu - enter DFU boot loader mode"},
     {"break",     &SimpleShell::break_command,     "break - enter debugger"},
@@ -121,11 +121,6 @@ const SimpleShell::ptentry_t SimpleShell::commands_table[] = {
     // Unknown command sentinel
     {nullptr, nullptr, nullptr}
 };
-
-void SimpleShell::system_reset_callback()
-{
-    system_reset(false);
-}
 
 void SimpleShell::on_module_loaded()
 {
@@ -354,14 +349,19 @@ void SimpleShell::remount_command( string parameters, StreamOutput *stream )
     stream->printf("remounted\r\n");
 }
 
+// a suspended job is not active but still reads on from its file
+bool SimpleShell::being_played(const string &path, StreamOutput *stream)
+{
+    if(!player.is_playing() || player.playing_name() != path) return false;
+    stream->printf("error:%s is being played\r\n", path.c_str());
+    return true;
+}
+
 // Delete a file
 void SimpleShell::rm_command( string parameters, StreamOutput *stream )
 {
-    if(sources.active()) {
-        stream->printf("error:busy, a job or script is running\r\n");
-        return;
-    }
     string path = absolute_from_relative(shift_parameter( parameters ));
+    if(being_played(path, stream)) return;
     string md5_path = change_to_md5_path(path);
     string lz_path = change_to_lz_path(path);
 
@@ -381,14 +381,11 @@ void SimpleShell::rm_command( string parameters, StreamOutput *stream )
 // Rename a file
 void SimpleShell::mv_command( string parameters, StreamOutput *stream )
 {
-    if(sources.active()) {
-        stream->printf("error:busy, a job or script is running\r\n");
-        return;
-    }
     string from = absolute_from_relative(shift_parameter( parameters ));
     string md5_from = change_to_md5_path(from);
     string lz_from = change_to_lz_path(from);
     string to = absolute_from_relative(shift_parameter(parameters));
+    if(being_played(from, stream) || being_played(to, stream)) return;
     string md5_to = change_to_md5_path(to);
     string lz_to = change_to_lz_path(to);
 
@@ -966,9 +963,18 @@ void SimpleShell::eeprom_clear( string parameters, StreamOutput *stream)
 
 void SimpleShell::reset_command( string parameters, StreamOutput *stream)
 {
-    stream->printf("Rebooting machine in 3 seconds...\r\n");
-
-    resetTimer.start();
+    if(parameters.find("-f") == string::npos) {
+        uint8_t state= THEKERNEL->get_state();
+        bool safe= state == IDLE || state == ALARM || state == SLEEP;
+        if(!safe) {
+            stream->printf("error:machine is %s, abort it first or reset -f\r\n",
+                           state == HOLD || state == SUSPEND ? "paused" : "busy");
+            return;
+        }
+    }
+    stream->printf("Rebooting machine...\r\n");
+    machine_task.halt(MANUAL, "reset");
+    system_reset(false);
 }
 
 // go into dfu boot mode
@@ -1721,6 +1727,7 @@ void SimpleShell::config_default_command( string parameters, StreamOutput *strea
 
 void SimpleShell::upload_command(std::string parameters, StreamOutput* stream) {
     std::string filename = absolute_from_relative(shift_parameter(parameters));
+    if(being_played(filename, stream)) return;
 
     bool ret = transfer.upload(filename, stream);
 
@@ -1729,7 +1736,6 @@ void SimpleShell::upload_command(std::string parameters, StreamOutput* stream) {
     } else {
         stream->printf("Upload failed for file: %s.\r\n", filename.c_str());
     }
-
 }
 
 void SimpleShell::download_command( string parameters, StreamOutput *stream )
