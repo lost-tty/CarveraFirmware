@@ -30,7 +30,6 @@ class Switch : public Module, public Killable {
 
         Switch(uint16_t name)
             : name_checksum(name),
-            pinpoll_timer("SwitchPolling", 10, true, this, &Switch::pinpoll_tick),
             pwm_timer("PWMTimer", 1, true, this->sigmadelta_pin, &Pwm::on_tick)
         {
             // kill() can run from the e-stop interrupt before the config is read
@@ -40,7 +39,6 @@ class Switch : public Module, public Killable {
             digital_pin= nullptr;
             on_command= off_command= ConfigTable::GCODE_NONE;
             subcode= 0;
-            output_on_command= output_off_command= nullptr;
         }
 
         void kill() override;
@@ -54,7 +52,6 @@ class Switch : public Module, public Killable {
         void set_state(bool on, float value);
 
         void on_module_loaded();
-        void on_main_loop(void *argument);
         void drive_output();
         void load_config(const SwitchConfigT &cfg);
         // Codes and pins are claimed at boot; changing them requires a restart.
@@ -63,27 +60,22 @@ class Switch : public Module, public Killable {
         void on_gcode(Gcode *);
         void off_gcode(Gcode *);
 
-        void pinpoll_tick();
         enum OUTPUT_TYPE {NONE, SIGMADELTA, DIGITAL, HWPWM, SWPWM, DIGITALPWM};
 
     private:
         static uint16_t mcode_of(uint16_t code) {
             return (code == ConfigTable::GCODE_NONE || (code & ConfigTable::GCODE_G)) ? 0 : code;
         }
-        void flip();
         bool match_input_on_gcode(const Gcode* gcode) const;
         bool match_input_off_gcode(const Gcode* gcode) const;
         void turn_on_switch(float value);
         void turn_off_switch();
 
         // nullptr when unset.
-        char *output_on_command;
-        char *output_off_command;
         uint16_t on_command;
         uint16_t off_command;
         uint8_t subcode;
 
-        SoftTimer pinpoll_timer;
         SoftTimer pwm_timer;
 
         float switch_value;
@@ -93,7 +85,6 @@ class Switch : public Module, public Killable {
 
         OUTPUT_TYPE output_type;
         union {
-            Pin          *input_pin;
             Pin          *digital_pin;
             Pwm          *sigmadelta_pin;
         };
@@ -103,9 +94,6 @@ class Switch : public Module, public Killable {
         };
         struct {
             uint16_t  name_checksum:16;
-            uint16_t  input_pin_behavior:16;
-            bool      switch_changed:1;
-            bool      input_pin_state:1;
             bool      switch_state:1;
             bool      ignore_on_halt:1;
             bool      failsafe:1;

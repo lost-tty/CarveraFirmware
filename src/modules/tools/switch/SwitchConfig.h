@@ -9,7 +9,6 @@ static const char *const switch_names[] = {
 static const char *const switch_output_types[] = {
     "pwm", "digital", "hwpwm", "swpwm", "digitalpwm", nullptr };
 enum : uint8_t { SW_OUT_PWM, SW_OUT_DIGITAL, SW_OUT_HWPWM, SW_OUT_SWPWM, SW_OUT_DIGITALPWM };
-static const char *const switch_input_behaviors[] = { "momentary", "toggle", nullptr };
 enum : uint8_t { SW_IN_MOMENTARY, SW_IN_TOGGLE };
 
 #define SWITCH_CONFIG(X) \
@@ -17,11 +16,7 @@ enum : uint8_t { SW_IN_MOMENTARY, SW_IN_TOGGLE };
     X(int,  subcode,              "subcode",              0) \
     X(gcode, input_on_command,    "input_on_command",     "") \
     X(gcode, input_off_command,   "input_off_command",    "") \
-    X(str,  output_on_command,    "output_on_command",    "", 16) \
-    X(str,  output_off_command,   "output_off_command",   "", 16) \
     X(bool, startup_state,        "startup_state",        false) \
-    X(pin,  input_pin,            "input_pin",            "nc") \
-    X(enum, input_pin_behavior,   "input_pin_behavior",   "momentary", switch_input_behaviors) \
     X(enum, output_type,          "output_type",          "digital", switch_output_types) \
     X(int,  failsafe_set_to,      "failsafe_set_to",      0) \
     X(bool, ignore_on_halt,       "ignore_on_halt",        false) \

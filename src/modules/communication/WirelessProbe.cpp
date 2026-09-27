@@ -66,8 +66,6 @@ void WirelessProbe::on_module_loaded() {
     this->serial->attach(this, &WirelessProbe::on_serial_char_received, mbed::Serial::RxIrq);
 
 
-    // We only call the command dispatcher in the main loop, nowhere else
-    this->register_for_event(ON_MAIN_LOOP);
     ADD_MCODE(m470, 470, IMMEDIATE, WirelessProbe::set_address);
     ADD_MCODE(m471, 471, IMMEDIATE, WirelessProbe::pair);
     ADD_MCODE(m472, 472, IMMEDIATE, WirelessProbe::laser_on);
@@ -86,8 +84,7 @@ void WirelessProbe::on_serial_char_received() {
     }
 }
 
-// Actual event calling must happen in the main loop because if it happens in the interrupt we will loose data
-void WirelessProbe::on_main_loop(void * argument) {
+void WirelessProbe::service() {
     if ( this->has_char('\n') ) {
         string received;
         received.reserve(20);

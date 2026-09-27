@@ -473,6 +473,7 @@ void Kernel::serve_io()
     watchdog.alive();
     wifi_provider.service();
     usb_host.service();
+    wireless_probe.service();
 }
 
 void Kernel::serve_main()

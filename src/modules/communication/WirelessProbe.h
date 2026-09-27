@@ -30,7 +30,7 @@ class WirelessProbe : public Module {
         void configure(const void *cfg);
         void on_module_loaded();
         void on_serial_char_received();
-        void on_main_loop(void * argument);
+        void service();
         void set_address(Gcode *);
         void pair(Gcode *);
         void laser_on(Gcode *);
@@ -57,6 +57,7 @@ class WirelessProbe : public Module {
         //string receive_buffer;                 // Received chars are stored here until a newline character is received
         RingBuffer<char,256> buffer;             // Receive buffer
         mbed::Serial* serial;
+
 };
 
 extern WirelessProbe wireless_probe;

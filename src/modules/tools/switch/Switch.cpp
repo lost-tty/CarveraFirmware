@@ -28,9 +28,6 @@
 #include <cstring>
 #include <cstdlib>
 
-#define    toggle_checksum              CHECKSUM("toggle")
-#define    momentary_checksum           CHECKSUM("momentary")
-
 #define ROUND2DP(x) (roundf(x * 1e2F) / 1e2F)
 
 // set the pin to the fail safe value on halt
@@ -42,23 +39,12 @@ void Switch::cleanup()
 
 void Switch::on_module_loaded()
 {
-    this->switch_changed = false;
 
     GcodeDispatch::add_handler(this);
-    this->register_for_event(ON_MAIN_LOOP);
-}
-
-static char *dup_or_null(const char *s)
-{
-    return *s ? strdup(s) : nullptr;
 }
 
 void Switch::configure(const SwitchConfigT &cfg)
 {
-    free(output_on_command);
-    free(output_off_command);
-    output_on_command= dup_or_null(cfg.output_on_command);
-    output_off_command= dup_or_null(cfg.output_off_command);
     if(output_type == NONE) return;   // Input switches have no output settings.
     this->failsafe= cfg.failsafe_set_to;
     this->ignore_on_halt= cfg.ignore_on_halt;
@@ -69,30 +55,9 @@ void Switch::load_config(const SwitchConfigT &cfg)
     on_command= cfg.input_on_command;
     off_command= cfg.input_off_command;
     subcode= cfg.subcode;
-    output_on_command= dup_or_null(cfg.output_on_command);
-    output_off_command= dup_or_null(cfg.output_off_command);
-
     this->switch_state = cfg.startup_state;
 
-    this->input_pin = new Pin();
-    this->input_pin->from_spec(cfg.input_pin)->as_input();
-
-    bool is_input;
-
-    if(this->input_pin->connected()) {
-        this->input_pin_behavior = cfg.input_pin_behavior == SW_IN_MOMENTARY
-            ? momentary_checksum : toggle_checksum;
-        is_input= true;
-        this->ignore_on_halt= true;
-
-    }else{
-        delete this->input_pin;
-        this->input_pin= nullptr;
-        is_input = false;
-    }
-
-
-    if(!is_input) {
+    {
         uint8_t type = cfg.output_type;
         this->failsafe= cfg.failsafe_set_to;
         this->ignore_on_halt= cfg.ignore_on_halt;
@@ -192,17 +157,9 @@ void Switch::load_config(const SwitchConfigT &cfg)
         else {
             this->output_type= NONE;
         }
-
-    } else {
-        this->output_type= NONE;
-        // set to initial state
-        this->input_pin_state = this->input_pin->get();
-        // input pin polling
-
-	    pinpoll_timer.start();
     }
 
-    if(!is_input) {
+    {
         if(this->output_type == SIGMADELTA) {
             float max_pwm = isnan(cfg.max_pwm) ? 255 : cfg.max_pwm;
             this->sigmadelta_pin->max_pwm(max_pwm);
@@ -476,56 +433,4 @@ void Switch::drive_output()
     }
 }
 
-void Switch::on_main_loop(void *)
-{
-    if(!this->switch_changed) return;
-
-    this->switch_changed = false;
-
-    // Config values encode spaces as '_'.
-    const char *out= this->switch_state ? output_on_command : output_off_command;
-    if(out != nullptr) {
-        std::string cmd= out;
-        std::replace(cmd.begin(), cmd.end(), '_', ' ');
-        gcode_dispatch.run_line(cmd, &StreamOutput::NullStream);
-    }
-    drive_output();
-}
-
-// TODO Make this use InterruptIn
-// Check the state of the button and act accordingly
-void Switch::pinpoll_tick()
-{
-    // If pin changed
-    bool current_state = this->input_pin->get();
-    if(this->input_pin_state != current_state) {
-        this->input_pin_state = current_state;
-        // If pin high
-        if( this->input_pin_state ) {
-            // if switch is a toggle switch
-            if( this->input_pin_behavior == toggle_checksum ) {
-                this->flip();
-            } else {
-                // else default is momentary
-                this->switch_state = this->input_pin_state;
-                this->switch_changed = true;
-            }
-
-        } else {
-            // else if button released
-            if( this->input_pin_behavior == momentary_checksum ) {
-                // if switch is momentary
-                this->switch_state = this->input_pin_state;
-                this->switch_changed = true;
-            }
-        }
-    }
-    return;
-}
-
-void Switch::flip()
-{
-    this->switch_state = !this->switch_state;
-    this->switch_changed = true;
-}
 
