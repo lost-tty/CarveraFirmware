@@ -192,7 +192,7 @@ void Pendant::tick()
         if (protocol_tries == 20) printk("USB keyboard did not accept boot protocol\n");
     }
     if (held_axis && mode >= 4 && now - last_segment >= SEGMENT_US) jog(held_axis, held_dir);
-    if (now - last_led_check >= 50000) {
+    if (now - last_led_check >= 100000) {
         last_led_check = now;
         update_leds(now);
     }
@@ -203,7 +203,7 @@ void Pendant::tick()
 void Pendant::update_leds(uint32_t now)
 {
     if (!present) return;
-    bool fast = (now / 250000) & 1, slow = (now / 1000000) & 1, pulse = (now % 1000000) < 100000;
+    bool fast = (now / 250000) & 1, slow = (now / 1000000) & 1, pulse = (now % 1000000) < 200000;
     uint8_t state = THEKERNEL->get_state();
     uint8_t v = 0;
     if (state == ALARM)                       v |= fast ? KEYBOARD_LED_NUMLOCK : 0;

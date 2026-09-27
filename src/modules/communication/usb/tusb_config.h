@@ -1,7 +1,7 @@
 #ifndef TUSB_CONFIG_H_
 #define TUSB_CONFIG_H_
 
-#define CFG_TUSB_OS                 OPT_OS_NONE     // polled from the main loop
+#define CFG_TUSB_OS                 OPT_OS_FREERTOS
 #define CFG_TUSB_DEBUG              0
 
 #define CFG_TUH_ENABLED             1

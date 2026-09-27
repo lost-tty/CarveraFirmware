@@ -5,13 +5,13 @@
 #include "libs/RingBuffer.h"
 #include "Pendant.h"
 
-// USB host port with TinyUSB, serviced from the main loop. HID handlers queue command lines that are
-// dispatched from the main loop like console input.
+#include "FreeRTOS.h"
+#include "task.h"
+
 class UsbHost : public Module {
     public:
         UsbHost() : pendant(*this) {}
         void on_module_loaded();
-        void service();
         void on_main_loop(void* argument);
 
         void queue_line(const char* line);
@@ -23,6 +23,13 @@ class UsbHost : public Module {
 
     private:
         bool init_controller();
+        static void run(void *self);
+
+        static const uint32_t k_poll_ms = 50;
+        static const uint16_t k_stack_words = 512;
+        StackType_t stack[k_stack_words];
+        StaticTask_t task;
+        TaskHandle_t handle{nullptr};
 
         Pendant pendant;
         RingBuffer<char, 128> lines;

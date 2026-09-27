@@ -1,4 +1,5 @@
 #include "UsbHost.h"
+#include "FreeRTOS.h"
 #include "SimpleShell.h"
 #include "libs/Kernel.h"
 #include "libs/Logging.h"
@@ -60,6 +61,8 @@ void UsbHost::on_module_loaded()
     // interrupt the OHCI driver relies on, so do the initial port scan its hcd_init omits
     if (hcd_port_connect_status(0)) hcd_event_device_attach(0, false);
 
+    handle= xTaskCreateStatic(run, "USB", k_stack_words, this, tskIDLE_PRIORITY + 1, stack, &task);
+
     register_for_event(ON_MAIN_LOOP);
 }
 
@@ -80,14 +83,17 @@ bool UsbHost::init_controller()
     LPC_PINCON->PINSEL1 = (LPC_PINCON->PINSEL1 & ~((3 << 26) | (3 << 28))) | (1 << 26) | (1 << 28);  // USB_D+/D-
 
     NVIC_SetVector(USB_IRQn, (uintptr_t)USB_IRQHandler);
-    NVIC_SetPriority(USB_IRQn, 6);   // tuh_init() enables it
+    NVIC_SetPriority(USB_IRQn, configMAX_SYSCALL_INTERRUPT_PRIORITY >> (8 - __NVIC_PRIO_BITS));
     return true;
 }
 
-void UsbHost::service()
+void UsbHost::run(void *self)
 {
-    tuh_task();
-    pendant.tick();
+    UsbHost *me= (UsbHost *)self;
+    for(;;) {
+        tuh_task_ext(k_poll_ms, false);
+        me->pendant.tick();
+    }
 }
 
 void UsbHost::on_hid_protocol(uint8_t idx, uint8_t protocol)

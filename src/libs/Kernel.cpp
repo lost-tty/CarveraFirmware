@@ -133,7 +133,6 @@ void Kernel::init()
 
     // Set other priorities lower than the timers
     NVIC_SetPriority(ADC_IRQn, 5);
-    NVIC_SetPriority(USB_IRQn, 5);
 
     // NVIC_SetPriority shifts by the chip's bits, FreeRTOS compares the raw register
     NVIC_SetVector(RIT_IRQn, (uintptr_t)&RIT_IRQHandler);
@@ -472,7 +471,6 @@ void Kernel::serve_io()
 {
     watchdog.alive();
     wifi_provider.service();
-    usb_host.service();
     wireless_probe.service();
 }
 
