@@ -17,24 +17,24 @@ class Pendant {
         bool has_device() const { return present && boot_protocol; }
 
     private:
-        enum Action : uint8_t { JOG, MODE, HOLD, ABORT, ZERO, HOME, SPINDLE, VACUUM, LIGHT, UNLOCK, RESUME, FEED };
+        enum Action : uint8_t { JOG, MODE, HOLD, ABORT, HOME, PARK, SPINDLE, VACUUM, LIGHT, UNLOCK, RESUME, FEED, CONT };
         struct Key { uint8_t key; bool shifted; Action action; char axis; int8_t dir; };
         static const Key keys[];
 
         void key_down(uint8_t key, bool shifted);
-        void key_up(uint8_t key);
-        void jog(char axis, int8_t dir);
+        void set_jog(const Key *k);
+        void step(char axis, int8_t dir);
         void toggle_switch(const char* name);
         void update_leds(uint32_t now);
         void line(const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 
         UsbHost& host;
         hid_keyboard_report_t prev = {};
-        uint8_t mode = 2;               // 0-3 step sizes, 4-5 continuous slow/fast
+        uint8_t mode = 2;               // which of step_sizes a tap moves
+        uint8_t speed = 2;              // which of cont_speeds a held key runs at
+        bool cont = false;              // CapsLock: hold a jog key to run until it is let go
         int feed_pct = 100;
-        char held_axis = 0;
-        int8_t held_dir = 0;
-        uint32_t last_segment = 0;
+        const Key *jogging = nullptr;   // the jog key the last report had held, if any
 
         bool present = false;
         bool boot_protocol = false;

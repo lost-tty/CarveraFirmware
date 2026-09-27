@@ -35,6 +35,10 @@ public:
             return false;
         }
         ring[head]= Entry{interval, count, add};
+        if(count != k_mark) {
+            pushed_ticks+= (uint32_t)span(ring[head]);
+            pushed_steps+= count;
+        }
         head= next(head);
         return true;
     }
@@ -62,52 +66,37 @@ public:
         uint32_t ticks= (uint32_t)((scaled + (1 << (k_add_shift - 1))) >> k_add_shift);
         scaled+= add;
         left--;
-        return ticks < 1 ? 1 : ticks;
+        if(ticks < 1) ticks= 1;
+        played_ticks+= ticks;
+        played_steps++;
+        return ticks;
     }
 
     void clear()
     {
         head= tail= 0;
         left= 0;
+        pushed_ticks= played_ticks= 0;
+        pushed_steps= played_steps= 0;
     }
 
-    uint32_t queued_steps() const
-    {
-        uint32_t n= left;
-        for (uint16_t i = tail; i != head; i= next(i)) {
-            if(ring[i].count != k_mark) n+= ring[i].count;
-        }
-        return n;
-    }
+    uint32_t ticks_queued() const { return pushed_ticks - played_ticks; }
+    uint32_t queued_steps() const { return pushed_steps - played_steps; }
 
-    void truncate(uint32_t keep)
-    {
-        if(left >= keep) {
-            left= keep;
-            head= tail;
-            return;
-        }
-
-        uint32_t n= left;
-        uint16_t i= tail;
-        while(i != head) {
-            if(ring[i].count != k_mark) {
-                if(n + ring[i].count > keep) {
-                    if(keep > n) {
-                        ring[i].count= keep - n;
-                        i= next(i);
-                    }
-                    break;
-                }
-                n+= ring[i].count;
-            }
-            i= next(i);
-        }
-        head= i;
-    }
 
 private:
     static uint16_t next(uint16_t i) { return (uint16_t)((i + 1) % k_entries); }
+
+    static const uint32_t k_span_max= 1u << 30;
+    static uint32_t span(const Entry &e)
+    {
+        int64_t mid= (int64_t)((uint64_t)e.interval << k_add_shift)
+                   + ((int64_t)e.add * (int64_t)(e.count - 1)) / 2;
+        if(mid < (1 << k_add_shift)) mid= 1 << k_add_shift;
+        uint64_t t= ((uint64_t)mid * e.count) >> k_add_shift;
+        return t > k_span_max ? k_span_max : (uint32_t)t;
+    }
+
 
     Entry ring[k_entries];
     volatile uint16_t head{0};
@@ -116,5 +105,8 @@ private:
     int64_t scaled{0};
     int32_t add{0};
     uint32_t left{0};
+
+    uint32_t pushed_ticks{0}, pushed_steps{0};              // the producer writes these
+    volatile uint32_t played_ticks{0}, played_steps{0};     // the interrupt writes these
 
 };

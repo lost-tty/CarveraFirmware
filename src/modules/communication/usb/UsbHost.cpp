@@ -134,7 +134,8 @@ void UsbHost::on_hid_report(uint8_t dev_addr, uint8_t idx, const uint8_t* report
 void UsbHost::queue_line(const char* line)
 {
     int len = strlen(line);
-    if (len + 1 > lines.capacity() - lines.size()) return;
+    if (len + 1 > lines.capacity() - (int)lines.size()) return;
+
     for (int i = 0; i < len; i++) lines.push_back(line[i]);
     lines.push_back('\n');
 }

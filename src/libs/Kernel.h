@@ -39,7 +39,8 @@ enum STATE {
 	ALARM   = 4,
 	SLEEP   = 5,
 	SUSPEND = 6,
-	WAIT    = 7
+	WAIT    = 7,
+	JOG     = 8
 };
 
 

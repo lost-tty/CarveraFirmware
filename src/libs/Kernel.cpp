@@ -197,6 +197,8 @@ uint8_t Kernel::get_state()
     	return HOME;
     } else if (feed_hold) {
     	return HOLD;
+    } else if (machine_task.is_jogging()) {
+    	return JOG;
     } else if (THECONVEYOR.is_idle()) {
     	return IDLE;
     } else {
@@ -233,6 +235,9 @@ std::string Kernel::get_query_string()
     } else if (state == RUN) {
         running = true;
         str.append("Run");
+    } else if (state == JOG) {
+        running = true;
+        str.append("Jog");
     }
 
     size_t n;

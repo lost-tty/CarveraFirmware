@@ -1,5 +1,6 @@
 #pragma once
 
+class Block;
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
@@ -66,8 +67,9 @@ public:
 
     bool post(Job job, const Gcode &gcode);
 
-    // a queued jog would keep moving after the button is let go, so a full ring drops it
-    bool post_jog(const float delta[], uint8_t naxis, float scale);
+    bool post_jog(const float delta[], uint8_t naxis, float scale, bool held= false);
+    bool is_jogging() const { return jogging; }
+    void abort_jog();
 
     bool post_move(const float delta[], float rate_mm_s);
 
@@ -123,6 +125,7 @@ private:
     void loop();
     void serve_tickets();
     void finish_clear();
+    volatile bool jogging{false};
 
     static const uint16_t k_stack_words = 384;
     static const UBaseType_t k_priority = 2;
@@ -143,7 +146,7 @@ private:
     // the line is copied: the dispatcher's is gone by the time this runs. a jog carries a
     // delta instead, to keep out of the modal state a program is using
     struct Ticket {
-        enum Kind : uint8_t { LINE, JOG, MOVE } kind;
+        enum Kind : uint8_t { LINE, JOG, JOG_HELD, MOVE } kind;
         Job job;
         Gcode gcode;
         Jog move;

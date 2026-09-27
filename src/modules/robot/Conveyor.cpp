@@ -127,12 +127,11 @@ void Conveyor::feed_stream()
             break;
         }
 
-        unsigned int ahead= 0;
-        for (unsigned int i= queue.isr_tail_i; i != fed_i; i= queue.next(i)) {
-            ahead++;
-        }
-        if(ahead >= k_feed_ahead && queue.next(fed_i) != queue.head_i) {
-            break;
+        if(fed_steps == 0 && !ticker.steps().empty()) {
+            float hz= ticker.rate();
+            if(hz > 0.0F && ticker.steps().ticks_queued() >= (uint32_t)(hz * k_feed_ahead_ms / 1000.0F)) {
+                break;
+            }
         }
 
         uint32_t whole= b->steps_event_count();

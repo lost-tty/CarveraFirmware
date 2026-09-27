@@ -210,6 +210,11 @@ bool GcodeDispatch::safe_while_running(const gcode::Words &words)
 // an interleaved line would move the machine out of sequence; a suspended job is safe to jog
 void GcodeDispatch::run_mdi(const SerialMessage &msg)
 {
+    if(machine_task.is_jogging()) {
+        msg.stream->printf("error:busy, jogging\r\n");
+        return;
+    }
+
     if(sources.active()) {
         // without the parameters: reading #5021 drains the queue, and the letters decide this
         gcode::Line parsed;

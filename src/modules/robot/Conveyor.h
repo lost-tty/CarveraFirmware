@@ -80,7 +80,7 @@ private:
     void collect();
     void queue_head_block(void);
 
-    static const unsigned int k_feed_ahead= 8;
+    static const uint32_t k_feed_ahead_ms= 60;
     void feed_stream();
 
     static const UBaseType_t k_notify_index = 1;

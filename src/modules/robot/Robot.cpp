@@ -344,7 +344,7 @@ bool Robot::jog(const float delta[], float scale)
     return false;
 }
 
-bool Robot::jog_move(const float delta[], uint8_t naxis, float scale)
+float Robot::jog_rate(const float delta[], uint8_t naxis, float scale) const
 {
     float rate_mm_s= NAN;
     for (uint8_t i = 0; i < naxis; ++i) {
@@ -352,11 +352,79 @@ bool Robot::jog_move(const float delta[], uint8_t naxis, float scale)
         float r= actuators[i]->get_max_rate();
         rate_mm_s= isnan(rate_mm_s) ? r : std::min(rate_mm_s, r);
     }
-    if(isnan(rate_mm_s)) return false;
+    return isnan(rate_mm_s) ? 0.0F : rate_mm_s * scale;
+}
 
-    if(!delta_move(delta, rate_mm_s * scale, naxis)) return false;
+bool Robot::jog_move(const float delta[], uint8_t naxis, float scale)
+{
+    float rate= jog_rate(delta, naxis, scale);
+    if(rate <= 0.0F) return false;
+
+    if(!delta_move(delta, rate, naxis)) return false;
 
     THECONVEYOR.force_queue();
+    return true;
+}
+
+// The move a held jog queues: as far as dir goes before it would leave the work envelope or
+// enter a keepout zone. Rotary and unhomed axes have no limit to measure against and get
+// k_jog_open_mm instead. Releasing the key brakes long before this in practice.
+bool Robot::jog_travel(const float dir[], uint8_t naxis, float out[]) const
+{
+    float len= 0.0F;
+    for (uint8_t i= 0; i < naxis; ++i) len+= dir[i] * dir[i];
+    len= sqrtf(len);
+    if(len <= 0.0F) return false;
+
+    float from[3];
+    get_axis_position(from);
+
+    // Nothing bounds a rotary or an unhomed axis, so the fallback is how far the slowest axis
+    // in this direction runs in k_jog_open_s at full rate: long enough that the operator meets
+    // the end of the machine rather than a number chosen here, whatever the machine's size.
+    float room= jog_rate(dir, naxis, 1.0F) * k_jog_open_s;
+    if(room <= 0.0F) return false;
+    if(soft_endstop_enabled) {
+        for (uint8_t i= 0; i <= Z_AXIS && i < naxis; ++i) {
+            if(dir[i] == 0.0F || !is_homed(i)) continue;
+            float edge= dir[i] < 0.0F ? soft_endstop_min[i] : soft_endstop_max[i];
+            if(isnan(edge)) continue;
+            // back off a hair: converting the axis distance to a path distance and back is
+            // not exact, and within_soft_limits compares against the same edge with a strict
+            // test, so landing a few ULP past it has the planner refuse the whole move
+            float d= fabsf(edge - from[i]) * len / fabsf(dir[i]) - k_jog_limit_gap_mm;
+            if(d < room) room= d;
+        }
+    }
+
+    // Zones bound the tool tip, which hangs below the spindle nose the position refers to.
+    if(keepout_on && is_homed_all_axes()) {
+        float to[3];
+        for (int i= 0; i < 3; ++i) to[i]= from[i] + (i < naxis ? dir[i] : 0.0F) * room / len;
+
+        float tz= persist.tool_z();
+        float reach= isnan(cfg.keepout_tool_z) || tz == 0 ? 0 : tz - cfg.keepout_tool_z;
+        float tip_from[3]{from[X_AXIS], from[Y_AXIS], from[Z_AXIS] - reach};
+        float tip_to[3]{to[X_AXIS], to[Y_AXIS], to[Z_AXIS] - reach};
+
+        // Each entry() is a fraction of the same segment, so the nearest one is the answer;
+        // multiplying them together would compound into a far shorter move than any zone asks.
+        float nearest= 1.0F;
+        for (uint8_t n= 0; n < k_keepout_zones; n++) {
+            const KeepOut &z= keepout[n];
+            if(z.unbounded() || z.contains(tip_from)) continue;
+            float t= z.entry(tip_from, tip_to);
+            if(t < nearest) nearest= t;
+        }
+        // clear_of_keepout counts a move that ends on the face as crossing it, so stop short
+        if(nearest < 1.0F) {
+            room*= nearest;
+            room-= k_jog_keepout_gap_mm;
+        }
+    }
+
+    if(room <= k_jog_min_mm) return false;      // already up against whatever stops it
+    for (uint8_t i= 0; i < naxis; ++i) out[i]= dir[i] * room / len;
     return true;
 }
 

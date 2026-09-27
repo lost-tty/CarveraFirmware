@@ -22,8 +22,7 @@
 #define state_checksum  CHECKSUM("state")
 
 static const float step_sizes[]  = { 0.01f, 0.1f, 1.0f, 10.0f };
-static const float cont_scale[]  = { 0.1f, 0.5f };           // of the axis max rate
-static const uint32_t SEGMENT_US = 100000;                   // continuous jog feeds 100 ms of motion at a time
+static const float cont_speeds[] = { 0.02f, 0.05f, 0.1f, 0.25f, 0.5f };   // of max rate
 
 // numpad and full keyboard entries side by side; "shifted" = NumLock held or Shift
 const Pendant::Key Pendant::keys[] = {
@@ -35,17 +34,22 @@ const Pendant::Key Pendant::keys[] = {
     { HID_KEY_KEYPAD_9,        false, JOG,     'Z', +1 }, { HID_KEY_PAGE_UP,     false, JOG, 'Z', +1 },
     { HID_KEY_KEYPAD_1,        false, JOG,     'A', -1 },
     { HID_KEY_KEYPAD_7,        false, JOG,     'A', +1 },
-    { HID_KEY_KEYPAD_4,        true,  ZERO,    'X',  0 }, { HID_KEY_ARROW_LEFT,  true,  ZERO, 'X', 0 },
-    { HID_KEY_KEYPAD_6,        true,  ZERO,    'X',  0 }, { HID_KEY_ARROW_RIGHT, true,  ZERO, 'X', 0 },
-    { HID_KEY_KEYPAD_2,        true,  ZERO,    'Y',  0 }, { HID_KEY_ARROW_DOWN,  true,  ZERO, 'Y', 0 },
-    { HID_KEY_KEYPAD_8,        true,  ZERO,    'Y',  0 }, { HID_KEY_ARROW_UP,    true,  ZERO, 'Y', 0 },
-    { HID_KEY_KEYPAD_3,        true,  ZERO,    'Z',  0 }, { HID_KEY_PAGE_DOWN,   true,  ZERO, 'Z', 0 },
-    { HID_KEY_KEYPAD_9,        true,  ZERO,    'Z',  0 }, { HID_KEY_PAGE_UP,     true,  ZERO, 'Z', 0 },
+    // shifted, the same keys jog continuously for as long as they are held
+    { HID_KEY_KEYPAD_4,        true,  JOG,     'X', -1 }, { HID_KEY_ARROW_LEFT,  true,  JOG, 'X', -1 },
+    { HID_KEY_KEYPAD_6,        true,  JOG,     'X', +1 }, { HID_KEY_ARROW_RIGHT, true,  JOG, 'X', +1 },
+    { HID_KEY_KEYPAD_2,        true,  JOG,     'Y', -1 }, { HID_KEY_ARROW_DOWN,  true,  JOG, 'Y', -1 },
+    { HID_KEY_KEYPAD_8,        true,  JOG,     'Y', +1 }, { HID_KEY_ARROW_UP,    true,  JOG, 'Y', +1 },
+    { HID_KEY_KEYPAD_3,        true,  JOG,     'Z', -1 }, { HID_KEY_PAGE_DOWN,   true,  JOG, 'Z', -1 },
+    { HID_KEY_KEYPAD_9,        true,  JOG,     'Z', +1 }, { HID_KEY_PAGE_UP,     true,  JOG, 'Z', +1 },
+    { HID_KEY_KEYPAD_1,        true,  JOG,     'A', -1 },
+    { HID_KEY_KEYPAD_7,        true,  JOG,     'A', +1 },
+    { HID_KEY_CAPS_LOCK,       false, CONT,     0,   0 },
     { HID_KEY_KEYPAD_ADD,      false, MODE,     0,  +1 }, { HID_KEY_EQUAL,       false, MODE,  0, +1 },
     { HID_KEY_KEYPAD_SUBTRACT, false, MODE,     0,  -1 }, { HID_KEY_MINUS,       false, MODE,  0, -1 },
     { HID_KEY_KEYPAD_ADD,      true,  FEED,     0,  +1 }, { HID_KEY_EQUAL,       true,  FEED,  0, +1 },
     { HID_KEY_KEYPAD_SUBTRACT, true,  FEED,     0,  -1 }, { HID_KEY_MINUS,       true,  FEED,  0, -1 },
     { HID_KEY_KEYPAD_5,        false, HOLD,     0,   0 }, { HID_KEY_SPACE,       false, HOLD,  0,  0 },
+    { HID_KEY_KEYPAD_0,        false, PARK,     0,   0 },
     { HID_KEY_KEYPAD_0,        true,  HOME,     0,   0 },
     { HID_KEY_KEYPAD_MULTIPLY, true,  SPINDLE,  0,   0 },
     { HID_KEY_KEYPAD_DIVIDE,   false, VACUUM,   0,   0 },
@@ -70,7 +74,12 @@ void Pendant::set_device(uint8_t addr, uint8_t idx, bool is_present)
     protocol_tries = 0;
     next_protocol_try = us_ticker_read();
     leds = 0xFF;
-    held_axis = 0;
+
+    // Unplugged mid jog: the machine is moving on a key the operator can no longer release,
+    // so this is a fault rather than a tidy stop.
+    bool was_jogging = jogging != nullptr;
+    jogging = nullptr;
+    if (was_jogging && !is_present) machine_task.halt(MANUAL, "pendant unplugged while jogging");
 }
 
 // TinyUSB assumes boot protocol after its own request even if the keyboard stalled it (still
@@ -85,10 +94,47 @@ void Pendant::on_protocol(uint8_t idx, uint8_t protocol)
 void Pendant::on_report(const hid_keyboard_report_t& report)
 {
     if (!boot_protocol) return;   // report protocol layout differs
-    bool shifted = (report.modifier & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT)) || in_report(report, HID_KEY_NUM_LOCK);
-    for (uint8_t k : prev.keycode) if (k != 0 && !in_report(report, k)) key_up(k);
+
+    bool shifted = (report.modifier & (KEYBOARD_MODIFIER_LEFTSHIFT | KEYBOARD_MODIFIER_RIGHTSHIFT))
+                   || in_report(report, HID_KEY_NUM_LOCK);
+
+    const Key *held = nullptr;
+    for (uint8_t k : report.keycode) {
+        if (k == 0) continue;
+        for (auto& e : keys) if (e.key == k && e.action == JOG) { held = &e; break; }
+        if (held != nullptr) break;
+    }
+    if (held == nullptr) set_jog(nullptr);
+    else if (held != jogging) set_jog(cont != shifted ? held : nullptr);
+
     for (uint8_t k : report.keycode) if (k != 0 && !in_report(prev, k)) key_down(k, shifted);
     prev = report;
+}
+
+void Pendant::set_jog(const Key *k)
+{
+    if (k == jogging) return;
+    jogging = k;
+
+    if (k == nullptr) {
+        machine_task.abort_jog();
+        return;
+    }
+
+    uint8_t n = THEROBOT.get_number_registered_motors();
+    int i = k->axis >= 'X' ? k->axis - 'X' : k->axis - 'A' + 3;
+    if (i < 0 || i >= n) { jogging = nullptr; return; }
+
+    float delta[k_max_actuators] = {0};
+    delta[i] = k->dir;
+
+    // nothing queued, so there is nothing to stop and the key can be pressed again
+    if (!machine_task.post_jog(delta, n, cont_speeds[speed], true)) jogging = nullptr;
+}
+
+void Pendant::step(char axis, int8_t dir)
+{
+    line("$J %c%.3f", axis, dir * step_sizes[mode]);
 }
 
 void Pendant::line(const char* fmt, ...)
@@ -108,15 +154,25 @@ void Pendant::key_down(uint8_t key, bool shifted)
         if (machine_task.is_halted() && k.action != UNLOCK && k.action != HOME) return;
         switch (k.action) {
             case JOG:
-                held_axis = k.axis;
-                held_dir = k.dir;
-                jog(k.axis, k.dir);
+                if (cont == shifted) step(k.axis, k.dir);
                 break;
+            case CONT:
+                cont = !cont;
+                printk("Jog %s\n", cont ? "continuous" : "step");
+                break;
+            // + and - pick how far a tap moves, or how fast a held key runs
             case MODE: {
-                const int n = 4 + 2;
-                mode = (mode + n + k.dir) % n;
-                if (mode < 4) printk("Jog step %.2f mm\n", step_sizes[mode]);
-                else printk("Jog continuous %d%%\n", (int)(cont_scale[mode - 4] * 100));
+                if (cont) {
+                    const int n = sizeof(cont_speeds) / sizeof(cont_speeds[0]);
+                    int i = speed + k.dir;
+                    speed = i < 0 ? 0 : (i >= n ? n - 1 : i);
+                    printk("Jog speed %d%%\n", (int)(cont_speeds[speed] * 100));
+                } else {
+                    const int n = sizeof(step_sizes) / sizeof(step_sizes[0]);
+                    int i = mode + k.dir;
+                    mode = i < 0 ? 0 : (i >= n ? n - 1 : i);
+                    printk("Jog step %.2f mm\n", step_sizes[mode]);
+                }
                 break;
             }
             case FEED:
@@ -134,8 +190,8 @@ void Pendant::key_down(uint8_t key, bool shifted)
                 break;
             case UNLOCK:  line("$X"); break;
             case HOME:    line("$H"); break;
+            case PARK:    line("G28"); break;
             case RESUME:  line("resume"); break;
-            case ZERO:    line("G10 L20 P0 %c0", k.axis); break;
             case VACUUM:  toggle_switch("vacuum"); break;
             case LIGHT:   toggle_switch("light"); break;
             case SPINDLE: {
@@ -151,28 +207,6 @@ void Pendant::key_down(uint8_t key, bool shifted)
     }
 }
 
-void Pendant::key_up(uint8_t key)
-{
-    for (auto& k : keys) {
-        if (k.key == key && k.action == JOG && k.axis == held_axis) held_axis = 0;
-    }
-}
-
-void Pendant::jog(char axis, int8_t dir)
-{
-    float distance;
-    if (mode < 4) {
-        distance = step_sizes[mode];
-        held_axis = 0;
-    } else {
-        int i = axis >= 'X' ? axis - 'X' : axis - 'A' + 3;
-        if (i >= THEROBOT.get_number_registered_motors()) return;
-        distance = THEROBOT.motor_max_rate(i) * cont_scale[mode - 4] * SEGMENT_US / 1e6f;
-        last_segment = us_ticker_read();
-    }
-    if (mode < 4) line("$J %c%.3f", axis, dir * distance);
-    else line("$J %c%.3f F%.2f", axis, dir * distance, cont_scale[mode - 4]);
-}
 
 void Pendant::toggle_switch(const char* name)
 {
@@ -191,7 +225,6 @@ void Pendant::tick()
         tuh_hid_set_protocol(dev_addr, dev_idx, HID_PROTOCOL_BOOT);
         if (protocol_tries == 20) printk("USB keyboard did not accept boot protocol\n");
     }
-    if (held_axis && mode >= 4 && now - last_segment >= SEGMENT_US) jog(held_axis, held_dir);
     if (now - last_led_check >= 100000) {
         last_led_check = now;
         update_leds(now);
@@ -208,9 +241,9 @@ void Pendant::update_leds(uint32_t now)
     uint8_t v = 0;
     if (state == ALARM)                       v |= fast ? KEYBOARD_LED_NUMLOCK : 0;
     else if (state == HOLD || state == SUSPEND) v |= slow ? KEYBOARD_LED_NUMLOCK : 0;
-    else if (state == RUN || state == HOME)   v |= KEYBOARD_LED_NUMLOCK;
+    else if (state == RUN || state == HOME || state == JOG) v |= KEYBOARD_LED_NUMLOCK;
     else if (!THEROBOT.is_homed_all_axes())   v |= pulse ? KEYBOARD_LED_NUMLOCK : 0;
-    if (mode >= 4) v |= KEYBOARD_LED_CAPSLOCK;
+    if (cont) v |= KEYBOARD_LED_CAPSLOCK;
     if (state == ALARM && fast) v |= KEYBOARD_LED_SCROLLLOCK;
     if (v == leds) return;
     static uint8_t out;

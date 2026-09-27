@@ -123,22 +123,32 @@ bool MachineTask::wait_idle(EventBits_t ends)
     }
 }
 
-bool MachineTask::post_jog(const float delta[], uint8_t naxis, float scale)
+bool MachineTask::post_jog(const float delta[], uint8_t naxis, float scale, bool held)
 {
     if(xTaskGetCurrentTaskHandle() == handle) return false;
     if(naxis > k_max_actuators || halted) return false;
 
-    // a queued jog would keep moving after the button is let go, so a full ring drops it
+    if(held && jogging) abort_jog();    // a new direction takes over from the one still down
+
     uint8_t slot;
     if(xQueueReceive(free_slots, &slot, 0) != pdTRUE) return false;
 
-    ring[slot].kind= Ticket::JOG;
-    for (uint8_t i = 0; i < naxis; ++i) ring[slot].move.delta[i]= delta[i];
+    ring[slot].kind= held ? Ticket::JOG_HELD : Ticket::JOG;
+    for (uint8_t i= 0; i < naxis; ++i) ring[slot].move.delta[i]= delta[i];
     ring[slot].move.naxis= naxis;
     ring[slot].move.scale= scale;
 
+    if(held) jogging= true;
     publish(slot);
     return true;
+}
+
+// the operator let go, or the client went quiet: brake, and tick() drops the rest of the move
+void MachineTask::abort_jog()
+{
+    if(!jogging) return;
+    jogging= false;
+    if(!THECONVEYOR.is_idle()) THEKERNEL->step_ticker.stop();
 }
 
 bool MachineTask::post_move(const float delta[], float rate_mm_s)
@@ -214,7 +224,13 @@ void MachineTask::serve_tickets()
         Ticket t= ring[slot];
         xQueueSend(free_slots, &slot, 0);   // the copy is ours, the slot can be refilled
 
-        if(t.kind == Ticket::JOG) {
+        if(t.kind == Ticket::JOG_HELD) {
+            float delta[k_max_actuators];
+            if(jogging && (!THEROBOT.jog_travel(t.move.delta, t.move.naxis, delta) ||
+                           !THEROBOT.jog_move(delta, t.move.naxis, t.move.scale))) {
+                jogging= false;
+            }
+        } else if(t.kind == Ticket::JOG) {
             THEROBOT.jog_move(t.move.delta, t.move.naxis, t.move.scale);
         } else if(t.kind == Ticket::MOVE) {
             THEROBOT.delta_move_sync(t.move.delta, t.move.scale, t.move.naxis);
@@ -260,6 +276,8 @@ void MachineTask::tick()
 {
     if(!on_task()) __debugbreak();
 
+    if(jogging && THECONVEYOR.is_idle()) jogging= false;
+
     // here, not in the loop: a wait for the queue runs the tick itself and cannot end before this
     StepTicker &ticker= THEKERNEL->step_ticker;
     if(ticker.motion() == StepTicker::HELD) {
@@ -285,6 +303,7 @@ void MachineTask::halt(uint8_t why, const char *what)
         msg[sizeof(msg) - 1]= '\0';
     }
     halted= true;
+    jogging= false;
     Killable::kill_all();
     pending= true;
 }

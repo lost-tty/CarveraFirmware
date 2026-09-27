@@ -47,6 +47,8 @@ class StepTicker{
             return timer_hz / (float)last_interval;
         }
 
+        float rate() const { return timer_hz; }
+
         void set_watch(Watch *w) { watch= w; }
         bool watching() const { return watch != nullptr; }
 

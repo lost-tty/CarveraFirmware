@@ -1337,6 +1337,7 @@ void SimpleShell::jog(string parameters, StreamOutput *stream)
     // get axis to move and amount (X0.1)
     // may specify multiple axis
 
+    enum { STEP, HELD, STOP } want= STEP;
     float scale= 1.0F;
     float delta[n_motors];
     for (int i = 0; i < n_motors; ++i) {
@@ -1346,12 +1347,19 @@ void SimpleShell::jog(string parameters, StreamOutput *stream)
     // $J is first parameter
     shift_parameter(parameters);
     if(parameters.empty()) {
-        stream->printf("usage: $J X0.01 [F0.5] - axis can be XYZABC, optional speed is scale of max_rate\n");
+        stream->printf("usage: $J [-c] X0.01 [F0.5] - axis can be XYZABC, optional speed is a "
+                       "scale of max_rate. -c runs until -s stops it or it reaches a limit\n");
         return;
     }
 
     while(!parameters.empty()) {
         string p= shift_parameter(parameters);
+
+        if(p == "-c" || p == "-s") {
+            if(want != STEP) { stream->printf("error:-c and -s are opposites\n"); return; }
+            want= p == "-c" ? HELD : STOP;
+            continue;
+        }
 
         char ax= toupper(p[0]);
         if(ax == 'F') {
@@ -1374,7 +1382,13 @@ void SimpleShell::jog(string parameters, StreamOutput *stream)
         delta[a]= strtof(p.substr(1).c_str(), NULL);
     }
 
-    if(!THEROBOT.jog(delta, scale)) stream->printf("error:jog refused\n");
+    bool ok= true;
+    switch(want) {
+        case STOP: machine_task.abort_jog(); break;
+        case HELD: ok= machine_task.post_jog(delta, n_motors, scale, true); break;
+        case STEP: ok= THEROBOT.jog(delta, scale); break;
+    }
+    if(!ok) stream->printf("error:jog refused\n");
 }
 
 void SimpleShell::help_command(string parameters, StreamOutput *stream)

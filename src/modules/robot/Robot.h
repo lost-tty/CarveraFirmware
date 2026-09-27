@@ -107,6 +107,7 @@ class Robot : public Module {
         bool delta_move_sync(const float delta[], float rate_mm_s, uint8_t naxis);
         bool jog(const float delta[], float scale);
         bool jog_move(const float delta[], uint8_t naxis, float scale);
+        bool jog_travel(const float dir[], uint8_t naxis, float out[]) const;
         bool move_to_machine_position(const float pos[3]);
         bool step_motor(uint8_t axis, bool dir, unsigned steps, unsigned steps_per_sec, std::string &err);
         uint8_t register_motor(StepperMotor*);
@@ -155,6 +156,12 @@ class Robot : public Module {
 
     private:
         friend class NoSegmentation;
+
+        float jog_rate(const float delta[], uint8_t naxis, float scale) const;
+        static constexpr float k_jog_open_s = 30.0f;
+        static constexpr float k_jog_limit_gap_mm = 0.001f;
+        static constexpr float k_jog_min_mm = 0.05f;
+        static constexpr float k_jog_keepout_gap_mm = 0.1f;
 
         struct {
             bool disable_segmentation:1;

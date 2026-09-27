@@ -179,7 +179,10 @@ void MainButton::go_to_sleep()
 void MainButton::short_press(uint8_t state)
 {
     switch(state) {
-        case IDLE: case RUN: case HOME: machine_task.halt(MANUAL, "stopped by button"); break;
+        case IDLE:
+        case RUN:
+        case HOME:
+        case JOG:   machine_task.halt(MANUAL, "stopped by button"); break;
         case HOLD:  machine_task.hold(false); break;
         case SLEEP: system_reset(false); break;
         case ALARM: break;   // it takes a long press to clear an alarm
@@ -192,7 +195,9 @@ void MainButton::long_press(uint8_t state)
         case IDLE:
             if(cfg.long_press_enable == LONG_PRESS_SLEEP) go_to_sleep();
             break;
-        case RUN: case HOME: machine_task.halt(MANUAL, "stopped by button"); break;
+        case RUN:
+        case HOME:
+        case JOG:   machine_task.halt(MANUAL, "stopped by button"); break;
         case HOLD:  machine_task.hold(false); break;
         case SLEEP: system_reset(false); break;
         case ALARM:
@@ -214,7 +219,8 @@ void MainButton::update_led(uint8_t state)
     uint8_t r= 0, g= 0, b= 0;
     switch(state) {
         case IDLE:    b= 1; break;
-        case RUN:     g= 1; break;
+        case RUN:
+        case JOG:     g= 1; break;
         case HOME:    r= 1; g= 1; break;
         case HOLD:    g= blink; break;
         case ALARM:   r= 1; break;

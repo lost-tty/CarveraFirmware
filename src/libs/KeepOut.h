@@ -22,6 +22,26 @@ struct KeepOut {
         return true;
     }
 
+    // How far along the segment from a to b the box begins, as a fraction, or 1 when the
+    // segment never reaches it. What crossed() works out and throws away.
+    float entry(const float a[3], const float b[3]) const
+    {
+        float t0 = 0, t1 = 1;
+        for (int i = 0; i < 3; i++) {
+            float d = b[i] - a[i];
+            if(d == 0) {
+                if((!std::isnan(min[i]) && a[i] < min[i]) || (!std::isnan(max[i]) && a[i] > max[i])) return 1;
+                continue;
+            }
+            float tlo = ((std::isnan(min[i]) ? -INFINITY : min[i]) - a[i]) / d;
+            float thi = ((std::isnan(max[i]) ? INFINITY : max[i]) - a[i]) / d;
+            t0 = std::fmax(t0, std::fmin(tlo, thi));
+            t1 = std::fmin(t1, std::fmax(tlo, thi));
+            if(t0 > t1) return 1;
+        }
+        return t0;
+    }
+
     // the segment from a to b passes through the box
     bool crossed(const float a[3], const float b[3]) const
     {
