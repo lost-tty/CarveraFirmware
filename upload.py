@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Upload a file to the machine over TCP using the Makera frame protocol (src/libs/Frame.h).
 import argparse
+import collections
 import hashlib
 import socket
 import struct
@@ -13,6 +14,8 @@ INFO, CTRL_MULTI, FILE_START = 0x90, 0xA2, 0xB0
 MD5, VIEW, DATA, END, CAN, RETRY = 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6
 PACKET_SIZE = 8192
 TIMEOUT = 10
+RESET_SETTLE_S = 0.5
+RATE_WINDOW_S = 2.0
 
 
 def crc16(data):
@@ -27,6 +30,42 @@ def crc16(data):
 def frame(ftype, payload=b''):
     body = struct.pack('>HB', len(payload) + 3, ftype) + payload
     return HEADER + body + struct.pack('>H', crc16(body)) + FOOTER
+
+
+def format_rate(bytes_per_s):
+    return f'{bytes_per_s / 1024:.1f} KiB/s'
+
+
+class Progress:
+    # update() and line() may run on different threads: only update() touches the deque
+    def __init__(self, size):
+        self.size = size
+        self.done = 0
+        self.start = time.monotonic()
+        self.samples = collections.deque([(self.start, 0)])
+
+    def update(self, done):
+        self.done = max(self.done, min(done, self.size))
+        now = time.monotonic()
+        self.samples.append((now, self.done))
+        # keep the newest sample at or before the window start as the baseline
+        while len(self.samples) > 1 and self.samples[1][0] <= now - RATE_WINDOW_S:
+            self.samples.popleft()
+
+    def line(self):
+        # measured from the baseline to now, so a stall decays toward 0 instead of freezing the last rate
+        base_t, base_done = self.samples[0]
+        done = self.done
+        elapsed = time.monotonic() - base_t
+        rate = (done - base_done) / elapsed if elapsed > 0 else 0.0
+        line = f'{done}/{self.size} bytes  {100 * done / max(self.size, 1):.0f}%  {format_rate(rate)}'
+        if rate > 0:
+            line += f'  {(self.size - done) / rate:.0f} s left'
+        return line
+
+    def summary(self):
+        elapsed = time.monotonic() - self.start
+        return f'{self.size} bytes in {elapsed:.1f} s, {format_rate(self.size / elapsed) if elapsed > 0 else "-"}'
 
 
 class FrameReader:
@@ -81,7 +120,7 @@ def main():
     sock.sendall(frame(FILE_START, f'upload {args.destination_path}'.encode()))
     sock.sendall(frame(MD5, md5))
 
-    sent = 0
+    progress = Progress(len(data))
     timeouts = 0
     while True:
         ftype, payload = reader.next(TIMEOUT)
@@ -101,21 +140,17 @@ def main():
             seq = struct.unpack('>I', payload[:4])[0]
             chunk = data[(seq - 1) * PACKET_SIZE: seq * PACKET_SIZE]
             sock.sendall(frame(DATA, struct.pack('>I', seq) + chunk))
-            sent = max(sent, seq)
-            print(f'\r{sent}/{total}', end='', flush=True)
+            progress.update(seq * PACKET_SIZE)
+            print(f'\r{progress.line()}\x1b[K', end='', flush=True)
         elif ftype == END:
-            print('\nupload complete')
+            print(f'\nupload complete, {progress.summary()}')
             break
         elif ftype == CAN:
             sys.exit('\nupload cancelled by machine')
 
     if args.reset:
         sock.sendall(frame(CTRL_MULTI, b'reset'))
-        end = time.time() + 4
-        while time.time() < end:
-            ftype, payload = reader.next(1)
-            if ftype == INFO:
-                print(payload.decode(errors='replace'), end='')
+        time.sleep(RESET_SETTLE_S)  # closing right away can lose the command
     sock.close()
 
 
