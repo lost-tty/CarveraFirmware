@@ -43,15 +43,14 @@ void Scripts::on_module_loaded()
     gcode_dispatch.set_script_hook(this);
     SimpleShell::add_command(shell_slot, "macro", &Scripts::shell, this,
                              "macro list | params | check | run <sub> [args] | trace on|off");
-    load(&StreamOutput::AllStreams);
+    load();
 }
 
 #define SD_DIR SCRIPTS_DIR
-
-bool Scripts::load(StreamOutput *stream)
+bool Scripts::load()
 {
     if(runner != nullptr && runner->running()) {
-        stream->printf("error:script running\n");
+        printk("error:script running\n");
         return false;
     }
     delete runner;
@@ -59,14 +58,14 @@ bool Scripts::load(StreamOutput *stream)
     Macros::Report r;
     std::string err;
     loaded= macros.load(_binary_macros_ngc_start, _binary_macros_ngc_end, SD_DIR, r, err);
-    if(!r.fallback.empty()) stream->printf("error:%s, using the embedded scripts\n", r.fallback.c_str());
+    if(!r.fallback.empty()) printk("error:%s, using the embedded scripts\n", r.fallback.c_str());
     if(!loaded) {
-        stream->printf("error:%s\n", macros.located(err, macros.program().error_offset).c_str());
+        printk("error:%s\n", macros.located(err, macros.program().error_offset).c_str());
         return false;
     }
     runner= new script::Runner(macros.program(), gcode_dispatch.parameters());
-    if(r.replaced + r.added > 0) stream->printf("scripts: %u embedded, %u replaced, %u added from " SD_DIR "\n", r.embedded, r.replaced, r.added);
-    else stream->printf("scripts: %u embedded\n", r.embedded);
+    if(r.replaced + r.added > 0) printk("scripts: %u embedded, %u replaced, %u added from " SD_DIR "\n", r.embedded, r.replaced, r.added);
+    else printk("scripts: %u embedded\n", r.embedded);
     return true;
 }
 
@@ -153,7 +152,7 @@ Source::Result Scripts::next(SerialMessage &msg)
                 snprintf(buf, sizeof(buf), "line %u:", macros.source().line_of(runner->last_offset()));
                 printk("%s> %s\n", macros.located(buf, runner->last_offset()).c_str(), msg.message.c_str());
             }
-            msg.stream= &StreamOutput::NullStream;
+            msg.stream= &THEKERNEL->streams;
             return LINE;
         case script::Runner::MESSAGE:
             printk("%s\n", msg.message.c_str());
@@ -192,7 +191,7 @@ void Scripts::file_changed(const char *path)
 {
     if(path == nullptr || strncmp(path, SD_DIR, sizeof(SD_DIR) - 1) != 0) return;
     loaded= false;
-    load(&StreamOutput::AllStreams);
+    load();
 }
 
 bool Scripts::run_sub(const char *sub, const float *args, unsigned nargs)
@@ -224,9 +223,9 @@ void Scripts::shell(void *self, const char *cmd, std::string args, StreamOutput 
     SimpleShell::dispatch(static_cast<Scripts *>(self), SUBS, cmd, args, stream);
 }
 
-void Scripts::sub_check(std::string, StreamOutput *stream)
+void Scripts::sub_check(std::string, StreamOutput *)
 {
-    load(stream);
+    load();
 }
 
 void Scripts::sub_list(std::string, StreamOutput *stream)

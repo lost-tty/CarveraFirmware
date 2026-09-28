@@ -18,7 +18,7 @@ public:
     ~CartGridStrategy();
     bool handleGcode(Gcode* gcode);
     bool handleConfig();
-    void report_settings(StreamOutput *stream) override;
+    void report_settings() override;
     void register_mcodes() override;
 
     void clear_bed(Gcode *);
@@ -34,11 +34,11 @@ private:
     bool scan_bed(Gcode *gc);
     bool findBed(float x, float y, float z);
     void setAdjustFunction(bool on);
-    void print_bed_level(StreamOutput *stream);
+    void print_bed_level();
     void doCompensation(float *target, bool inverse, bool debug);
     void reset_bed_level();
-    void save_grid(StreamOutput *stream);
-    bool load_grid(StreamOutput *stream);
+    void save_grid();
+    bool load_grid();
 
     float initial_height;
 

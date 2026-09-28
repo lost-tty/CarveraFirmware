@@ -8,11 +8,7 @@
 #ifndef STREAMOUTPUTPOOL_H
 #define STREAMOUTPUTPOOL_H
 
-using namespace std;
 #include <set>
-#include <string>
-#include <cstdio>
-#include <cstdarg>
 
 #include "libs/StreamOutput.h"
 
@@ -22,7 +18,7 @@ public:
     int puts(const char* s, int size)
     {
         int r = 0;
-        for(set<StreamOutput*>::iterator i = this->streams.begin(); i != this->streams.end(); i++)
+        for(std::set<StreamOutput*>::iterator i = this->streams.begin(); i != this->streams.end(); i++)
         {
             if ((*i)->is_transferring()) continue; // text would corrupt the transfer
             int k = (*i)->puts(s, size);
@@ -34,8 +30,9 @@ public:
 
     void send(uint8_t type, const void *payload, size_t len)
     {
-        for(set<StreamOutput*>::iterator i = this->streams.begin(); i != this->streams.end(); i++)
+        for(std::set<StreamOutput*>::iterator i = this->streams.begin(); i != this->streams.end(); i++)
         {
+            if ((*i)->is_transferring()) continue; // text would corrupt the transfer
             (*i)->send(type, payload, len);
         }
     }
@@ -51,7 +48,7 @@ public:
     }
 
 private:
-    set<StreamOutput*> streams;
+    std::set<StreamOutput*> streams;
 };
 
 #endif

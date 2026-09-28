@@ -54,7 +54,7 @@ void SourceStack::on_main_loop(void *)
     }
 
     Source *s= stack.back();
-    SerialMessage msg{&StreamOutput::NullStream, "", 0};
+    SerialMessage msg{&THEKERNEL->streams, "", 0};
     switch(s->next(msg)) {
         case Source::LINE:
             // a halt inside clears the stack, s is not touched after this

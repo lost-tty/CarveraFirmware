@@ -128,16 +128,16 @@ int main() {
     CHECK(l.parse("X#<TOOL_X> Y#<_clamp>", &p) && NEAR(word(l, 'X')->value, -100.5f) && word(l, 'Y')->value == 2);
     CHECK(l.parse("X[1 AND 0]", &p) && word(l, 'X')->value == 0);
 
-    Gcode g1("G32 X1.2 Y2.3", nullptr);
+    Gcode g1("G32 X1.2 Y2.3");
     CHECK(g1.has_g && !g1.has_m && g1.g == 32 && g1.subcode == 0);
     CHECK(g1.get_num_args() == 2 && NEAR(g1.get_value('X'), 1.2f) && NEAR(g1.get_value('Y'), 2.3f));
 
-    Gcode g2("M6 T3", nullptr);
+    Gcode g2("M6 T3");
     CHECK(g2.has_m && g2.m == 6 && g2.get_num_args() == 0 && g2.get_int('T') == 3);
 
-    Gcode g3("G10 L20 P0 X-1.5", nullptr);
+    Gcode g3("G10 L20 P0 X-1.5");
     CHECK(g3.get_int('L') == 20 && g3.get_uint('P') == 0 && g3.get_uint('X') == 0 && NEAR(g3.get_value('X'), -1.5f));
-    Gcode g7("P4294967296 Q99999999999 R-99999999999", nullptr);
+    Gcode g7("P4294967296 Q99999999999 R-99999999999");
     CHECK(g7.get_uint('P') == 4294967295u && g7.get_int('Q') == 2147483647 && g7.get_int('R') == -2147483647 - 1);
     CHECK(g3.get_args().size() == 3 && g3.get_args().count('G') == 0);
 
@@ -146,9 +146,9 @@ int main() {
 
     gcode::Line ml;
     CHECK(ml.parse("G90 G0 X1 M3 S100", &p));
-    Gcode g5(ml.words(), 1, nullptr, 7);
+    Gcode g5(ml.words(), 1, 7);
     CHECK(g5.has_g && g5.g == 0 && !g5.has_m && g5.line == 7 && g5.has_letter('S') && g5.get_num_args() == 2);
-    Gcode g6(ml.words(), ml.words().size(), nullptr, 0);
+    Gcode g6(ml.words(), ml.words().size(), 0);
     CHECK(!g6.has_g && !g6.has_m);
 
     printf(failures ? "%d failures\n" : "all passed\n", failures);

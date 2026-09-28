@@ -628,60 +628,60 @@ void Robot::check_max_actuator_speeds()
 //A GCode has been received
 //See if the current Gcode line has some orders for us
 // the gcode that would restore these settings, for M503
-void Robot::report_settings(void *self, StreamOutput *stream)
+void Robot::report_settings(void *self)
 {
-    ((Robot *)self)->report_settings(stream);
+    ((Robot *)self)->report_settings();
 }
 
-void Robot::report_settings(StreamOutput *stream)
+void Robot::report_settings()
 {
-                stream->printf(";Steps per unit:\nM92 ");
+                printk(";Steps per unit:\nM92 ");
                 for (int i = 0; i < n_motors; ++i) {
                     char axis= (i <= Z_AXIS ? 'X'+i : 'A'+(i-A_AXIS));
-                    stream->printf("%c%1.5f ", axis, actuators[i]->get_steps_per_mm());
+                    printk("%c%1.5f ", axis, actuators[i]->get_steps_per_mm());
                 }
-                stream->printf("\n");
+                printk("\n");
 
                 // only print if not NAN
-                stream->printf(";Acceleration mm/sec^2:\nM204 S%1.5f ", default_acceleration);
+                printk(";Acceleration mm/sec^2:\nM204 S%1.5f ", default_acceleration);
                 for (int i = 0; i < n_motors; ++i) {
                     char axis= (i <= Z_AXIS ? 'X'+i : 'A'+(i-A_AXIS));
-                    if(!isnan(actuators[i]->get_acceleration())) stream->printf("%c%1.5f ", axis, actuators[i]->get_acceleration());
+                    if(!isnan(actuators[i]->get_acceleration())) printk("%c%1.5f ", axis, actuators[i]->get_acceleration());
                 }
-                stream->printf("\n");
+                printk("\n");
 
-                stream->printf(";X- Junction Deviation, Z- Z junction deviation, S - Minimum Planner speed mm/sec:\nM205 X%1.5f Z%1.5f S%1.5f\n", THEKERNEL->planner.junction_deviation, isnan(THEKERNEL->planner.z_junction_deviation)?-1:THEKERNEL->planner.z_junction_deviation, THEKERNEL->planner.minimum_planner_speed);
+                printk(";X- Junction Deviation, Z- Z junction deviation, S - Minimum Planner speed mm/sec:\nM205 X%1.5f Z%1.5f S%1.5f\n", THEKERNEL->planner.junction_deviation, isnan(THEKERNEL->planner.z_junction_deviation)?-1:THEKERNEL->planner.z_junction_deviation, THEKERNEL->planner.minimum_planner_speed);
 
-                stream->printf(";Max cartesian feedrates in mm/sec:\nM203 X%1.5f Y%1.5f Z%1.5f S%1.5f\n", this->max_speeds[X_AXIS], this->max_speeds[Y_AXIS], this->max_speeds[Z_AXIS], this->max_speed);
+                printk(";Max cartesian feedrates in mm/sec:\nM203 X%1.5f Y%1.5f Z%1.5f S%1.5f\n", this->max_speeds[X_AXIS], this->max_speeds[Y_AXIS], this->max_speeds[Z_AXIS], this->max_speed);
 
-                stream->printf(";Max actuator feedrates in mm/sec:\nM203.1 ");
+                printk(";Max actuator feedrates in mm/sec:\nM203.1 ");
                 for (int i = 0; i < n_motors; ++i) {
                     char axis= (i <= Z_AXIS ? 'X'+i : 'A'+(i-A_AXIS));
-                    stream->printf("%c%1.5f ", axis, actuators[i]->get_max_rate());
+                    printk("%c%1.5f ", axis, actuators[i]->get_max_rate());
                 }
-                stream->printf("\n");
+                printk("\n");
 
                 // get or save any arm solution specific optional values
                 BaseSolution::arm_options_t options;
                 if(arm_solution->get_optional(options) && !options.empty()) {
-                    stream->printf(";Optional arm solution specific settings:\nM665");
+                    printk(";Optional arm solution specific settings:\nM665");
                     for(auto &i : options) {
-                        stream->printf(" %c%1.4f", i.first, i.second);
+                        printk(" %c%1.4f", i.first, i.second);
                     }
-                    stream->printf("\n");
+                    printk("\n");
                 }
 
                 // save wcs_offsets and current_wcs
                 // TODO this may need to be done whenever they change to be compliant
                 if(cfg.save_g54) {
-                    stream->printf(";WCS settings\n");
-                    stream->printf("%s\n", wcs2gcode(current_wcs).c_str());
+                    printk(";WCS settings\n");
+                    printk("%s\n", wcs2gcode(current_wcs).c_str());
                     int n = 1;
                     for(auto &i : wcs_offsets) {
                         if(i != wcs_t(0, 0, 0)) {
                             float x, y, z;
                             std::tie(x, y, z) = i;
-                            stream->printf("G10 L2 P%d X%f Y%f Z%f ; %s\n", n, x, y, z, wcs2gcode(n-1).c_str());
+                            printk("G10 L2 P%d X%f Y%f Z%f ; %s\n", n, x, y, z, wcs2gcode(n-1).c_str());
                         }
                         ++n;
                     }
@@ -692,7 +692,7 @@ void Robot::report_settings(StreamOutput *stream)
                     if(g92_offset != wcs_t(0, 0, 0)) {
                         float x, y, z;
                         std::tie(x, y, z) = g92_offset;
-                        stream->printf("G92.3 X%f Y%f Z%f\n", x, y, z); // sets G92 to the specified values
+                        printk("G92.3 X%f Y%f Z%f\n", x, y, z); // sets G92 to the specified values
                     }
                 }
 }
@@ -942,9 +942,9 @@ void Robot::steps_per_mm(Gcode *gcode)
             if (i <= Z_AXIS) steps = this->from_millimeters(steps);
             actuators[i]->change_steps_per_mm(steps);
         }
-        gcode->stream->printf("%c:%f ", axis, actuators[i]->get_steps_per_mm());
+        printk("%c:%f ", axis, actuators[i]->get_steps_per_mm());
     }
-    gcode->stream->printf("\n");
+    printk("\n");
     check_max_actuator_speeds();
 }
 
@@ -955,7 +955,7 @@ void Robot::report_position(Gcode *gcode)
     if(gcode->subcode > COMPENSATED) return;
     char buf[80];
     format_position((position_source)gcode->subcode, tags[gcode->subcode], buf, sizeof(buf));
-    gcode->stream->printf("%s\n", buf);
+    printk("%s\n", buf);
 }
 
 // M203 the cartesian feedrates, M203.1 the actuator ones
@@ -963,17 +963,17 @@ void Robot::max_feedrates(Gcode *gcode)
 {
     if(gcode->get_num_args() == 0) {
         for (size_t i = X_AXIS; i <= Z_AXIS; i++) {
-            gcode->stream->printf(" %c: %g ", 'X' + i, gcode->subcode == 0 ? this->max_speeds[i] : actuators[i]->get_max_rate());
+            printk(" %c: %g ", 'X' + i, gcode->subcode == 0 ? this->max_speeds[i] : actuators[i]->get_max_rate());
         }
         if(gcode->subcode == 1) {
             for (size_t i = A_AXIS; i < n_motors; i++) {
-                gcode->stream->printf(" %c: %g ", 'A' + i - A_AXIS, actuators[i]->get_max_rate());
+                printk(" %c: %g ", 'A' + i - A_AXIS, actuators[i]->get_max_rate());
             }
         }else{
-            gcode->stream->printf(" S: %g ", this->max_speed);
+            printk(" S: %g ", this->max_speed);
         }
 
-        gcode->stream->printf("\n");
+        printk("\n");
         return;
     }
 
@@ -1001,7 +1001,7 @@ void Robot::max_feedrates(Gcode *gcode)
 
     // this format is deprecated
     if(gcode->subcode == 0 && (gcode->has_letter('A') || gcode->has_letter('B') || gcode->has_letter('C'))) {
-        gcode->stream->printf("NOTE this format is deprecated, Use M203.1 instead\n");
+        printk("NOTE this format is deprecated, Use M203.1 instead\n");
         for (size_t i = X_AXIS; i <= Z_AXIS; i++) {
             if (gcode->has_letter('A' + i)) {
                 float v= gcode->get_value('A'+i);
@@ -1067,30 +1067,30 @@ void Robot::soft_endstops_gcode(Gcode *gcode)
         return;
     }
 
-    gcode->stream->printf("Soft endstops are %s", soft_endstop_enabled ? "Enabled" : "Disabled");
+    printk("Soft endstops are %s", soft_endstop_enabled ? "Enabled" : "Disabled");
     for (int i = X_AXIS; i <= Z_AXIS; ++i) {
         if(isnan(soft_endstop_min[i])) {
-            gcode->stream->printf(",%c min is disabled", 'X'+i);
+            printk(",%c min is disabled", 'X'+i);
         } else {
-            gcode->stream->printf(",%c min = %1.3f", 'X'+i, soft_endstop_min[i]);
+            printk(",%c min = %1.3f", 'X'+i, soft_endstop_min[i]);
         }
         if(isnan(soft_endstop_max[i])) {
-            gcode->stream->printf(",%c max is disabled", 'X'+i);
+            printk(",%c max is disabled", 'X'+i);
         } else {
-            gcode->stream->printf(",%c max = %1.3f", 'X'+i, soft_endstop_max[i]);
+            printk(",%c max = %1.3f", 'X'+i, soft_endstop_max[i]);
         }
         if(!is_homed(i)) {
-            gcode->stream->printf(",%c axis is not homed", 'X'+i);
+            printk(",%c axis is not homed", 'X'+i);
         }
     }
-    gcode->stream->printf("\n");
+    printk("\n");
 }
 
 // M220 S<percent>: scale every feedrate the program asks for
 void Robot::speed_override(Gcode *gcode)
 {
     if (!gcode->has_letter('S')) {
-        gcode->stream->printf("Speed factor at %6.2f %%\n", 6000.0F / seconds_per_minute);
+        printk("Speed factor at %6.2f %%\n", 6000.0F / seconds_per_minute);
         return;
     }
 
@@ -1114,7 +1114,7 @@ void Robot::vacuum_mode(Gcode *gcode)
         if (ss.state) SwitchPool::set_state(vacuum_checksum, on);
     }
 
-    gcode->stream->printf("turning vacuum mode %s\r\n", on ? "on" : "off");
+    printk("turning vacuum mode %s\r\n", on ? "on" : "off");
 }
 
 // M400: nothing to do, the barrier already drained the queue
@@ -1138,19 +1138,19 @@ void Robot::arm_solution_gcode(Gcode *gcode)
         // foreach optional value
         for(auto &i : options) {
             // print all current values of supported options
-            gcode->stream->printf("%c: %8.4f ", i.first, i.second);
-            gcode->stream->printf("\n");
+            printk("%c: %8.4f ", i.first, i.second);
+            printk("\n");
         }
     }
 
     if(gcode->has_letter('S')) { // set delta segments per second, not saved by M500
         this->delta_segments_per_second = gcode->get_value('S');
-        gcode->stream->printf("Delta segments set to %8.4f segs/sec\n", this->delta_segments_per_second);
+        printk("Delta segments set to %8.4f segs/sec\n", this->delta_segments_per_second);
 
     } else if(gcode->has_letter('U')) { // or set mm_per_line_segment, not saved by M500
         this->mm_per_line_segment = gcode->get_value('U');
         this->delta_segments_per_second = 0;
-        gcode->stream->printf("mm per line segment set to %8.4f\n", this->mm_per_line_segment);
+        printk("mm per line segment set to %8.4f\n", this->mm_per_line_segment);
     }
 }
 

@@ -14,7 +14,7 @@ void Settings::add(Sink &slot, ReportFn fn, void *module)
     *end = &slot;
 }
 
-void Settings::report_all(StreamOutput *stream)
+void Settings::report_all()
 {
-    for (Sink *s = sinks; s != nullptr; s = s->next) s->report(s->module, stream);
+    for (Sink *s = sinks; s != nullptr; s = s->next) s->report(s->module);
 }

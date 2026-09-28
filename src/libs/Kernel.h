@@ -54,9 +54,6 @@ class Kernel {
 
         void init();
 
-        void printk(const char* format, ...) __attribute__ ((format(printf, 2, 3)));
-        void vprintk(const char* format, va_list args);
-
         void add_module(Module* module);
         void register_for_event(_EVENT_ENUM id_event, Module *module);
         void call_event(_EVENT_ENUM id_event, void * argument= nullptr);

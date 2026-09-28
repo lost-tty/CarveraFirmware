@@ -33,7 +33,7 @@ public:
     bool run_sub(const char *sub, const float *args, unsigned nargs);
 
 private:
-    bool load(StreamOutput *stream);
+    bool load();
     bool run(const char *sub, const float *args, unsigned nargs, StreamOutput *reply, std::string &err);
     void finish();
     void halt(int reason);

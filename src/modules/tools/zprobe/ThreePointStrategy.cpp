@@ -102,33 +102,33 @@ bool ThreePointStrategy::handleConfig()
     const float *points[3] = { threepoint_config.point1, threepoint_config.point2,
                                threepoint_config.point3 };
     for (int i = 0; i < 3; i++) {
-        if(!isnan(points[i][0])) probe_points[i] = std::make_tuple(points[i][0], points[i][1]);
+        if(!std::isnan(points[i][0])) probe_points[i] = std::make_tuple(points[i][0], points[i][1]);
     }
 
     // A missing offset is 0.
     const float *po = threepoint_config.probe_offsets;
-    this->probe_offsets= std::make_tuple(isnan(po[0]) ? 0 : po[0], isnan(po[1]) ? 0 : po[1],
-                                         isnan(po[2]) ? 0 : po[2]);
+    this->probe_offsets= std::make_tuple(std::isnan(po[0]) ? 0 : po[0], std::isnan(po[1]) ? 0 : po[1],
+                                         std::isnan(po[2]) ? 0 : po[2]);
 
     return true;
 }
 
-void ThreePointStrategy::report_settings(StreamOutput *stream)
+void ThreePointStrategy::report_settings()
 {
     float x, y, z;
-    stream->printf(";Probe points:\n");
+    printk(";Probe points:\n");
     for (int i = 0; i < 3; ++i) {
         std::tie(x, y) = probe_points[i];
-        stream->printf("M557 P%d X%1.5f Y%1.5f\n", i, x, y);
+        printk("M557 P%d X%1.5f Y%1.5f\n", i, x, y);
     }
-    stream->printf(";Probe offsets:\n");
+    printk(";Probe offsets:\n");
     std::tie(x, y, z) = probe_offsets;
-    stream->printf("M565 X%1.5f Y%1.5f Z%1.5f\n", x, y, z);
+    printk("M565 X%1.5f Y%1.5f Z%1.5f\n", x, y, z);
 
     if(save_plane && this->plane != nullptr) {
         uint32_t a, b, c, d;
         this->plane->encode(a, b, c, d);
-        stream->printf(";Saved bed plane:\nM561 A%lu B%lu C%lu D%lu \n", a, b, c, d);
+        printk(";Saved bed plane:\nM561 A%lu B%lu C%lu D%lu \n", a, b, c, d);
     }
 }
 
@@ -138,17 +138,17 @@ bool ThreePointStrategy::handleGcode(Gcode *gcode)
         // G code processing
         if(gcode->g == 29) { // test probe points for level
             if(!test_probe_points(gcode)) {
-                gcode->stream->printf("Probe failed to complete, probe not triggered or other error\n");
+                printk("Probe failed to complete, probe not triggered or other error\n");
             }
             return true;
 
         } else if( gcode->g == 31 ) { // report status
             if(this->plane == nullptr) {
-                 gcode->stream->printf("Bed leveling plane is not set\n");
+                 printk("Bed leveling plane is not set\n");
             }else{
-                 gcode->stream->printf("Bed leveling plane normal= %f, %f, %f\n", plane->getNormal()[0], plane->getNormal()[1], plane->getNormal()[2]);
+                 printk("Bed leveling plane normal= %f, %f, %f\n", plane->getNormal()[0], plane->getNormal()[1], plane->getNormal()[2]);
             }
-            gcode->stream->printf("Probe is %s\n", zprobe->getProbeStatus() ? "Triggered" : "Not triggered");
+            printk("Probe is %s\n", zprobe->getProbeStatus() ? "Triggered" : "Not triggered");
             return true;
 
         } else if( gcode->g == 32 ) { // three point probe
@@ -160,10 +160,10 @@ bool ThreePointStrategy::handleGcode(Gcode *gcode)
             this->plane= nullptr;
             setAdjustFunction(false);
 
-            if(!doProbing(gcode->stream)) {
-                gcode->stream->printf("Probe failed to complete, probe not triggered or other error\n");
+            if(!doProbing()) {
+                printk("Probe failed to complete, probe not triggered or other error\n");
             } else {
-                gcode->stream->printf("Probe completed, bed plane defined\n");
+                printk("Probe completed, bed plane defined\n");
             }
             return true;
         }
@@ -189,7 +189,7 @@ void ThreePointStrategy::set_probe_points(Gcode *gcode)
     if(gcode->has_letter('X')) x = gcode->get_value('X');
     if(gcode->has_letter('Y')) y = gcode->get_value('Y');
     if(idx < 0 || idx > 2) {
-        gcode->stream->printf("only 3 probe points allowed P0-P2\n");
+        printk("only 3 probe points allowed P0-P2\n");
         return;
     }
     probe_points[idx] = std::make_tuple(x, y);
@@ -202,7 +202,7 @@ void ThreePointStrategy::set_plane(Gcode *gcode)
     if(gcode->get_num_args() == 0) {
         this->plane= nullptr;
         setAdjustFunction(false);
-        gcode->stream->printf("saved plane cleared\n");
+        printk("saved plane cleared\n");
         return;
     }
 
@@ -234,14 +234,14 @@ void ThreePointStrategy::homeXY()
     endstops.home_axes(xy);
 }
 
-bool ThreePointStrategy::doProbing(StreamOutput *stream)
+bool ThreePointStrategy::doProbing()
 {
     float x, y;
     // check the probe points have been defined
     for (int i = 0; i < 3; ++i) {
         std::tie(x, y) = probe_points[i];
-        if(isnan(x) || isnan(y)) {
-            stream->printf("Probe point P%d has not been defined, use M557 P%d Xnnn Ynnn to define it\n", i, i);
+        if(std::isnan(x) || std::isnan(y)) {
+            printk("Probe point P%d has not been defined, use M557 P%d Xnnn Ynnn to define it\n", i, i);
             return false;
         }
     }
@@ -281,13 +281,13 @@ bool ThreePointStrategy::doProbing(StreamOutput *stream)
         if(!zprobe->doProbeAt(z, x-std::get<X_AXIS>(this->probe_offsets), y-std::get<Y_AXIS>(this->probe_offsets))) return false;
 
         z= zprobe->getProbeHeight() - z; // relative distance between the probe points, lower is negative z
-        stream->printf("DEBUG: P%d:%1.4f\n", i, z);
+        printk("DEBUG: P%d:%1.4f\n", i, z);
         v[i] = Vector3(x, y, z);
     }
 
     // if first point is not within tolerance report it, it should ideally be 0
     if(fabsf(v[0][2]) > tolerance) {
-        stream->printf("WARNING: probe is not within tolerance: %f > %f\n", fabsf(v[0][2]), tolerance);
+        printk("WARNING: probe is not within tolerance: %f > %f\n", fabsf(v[0][2]), tolerance);
     }
 
     // define the plane
@@ -296,12 +296,12 @@ bool ThreePointStrategy::doProbing(StreamOutput *stream)
     auto mmx = std::minmax({v[0][2], v[1][2], v[2][2]});
     if((mmx.second - mmx.first) <= tolerance) {
         this->plane= nullptr; // plane is flat no need to do anything
-        stream->printf("DEBUG: flat plane\n");
+        printk("DEBUG: flat plane\n");
         setAdjustFunction(false);
 
     }else{
         this->plane = new Plane3D(v[0], v[1], v[2]);
-        stream->printf("DEBUG: plane normal= %f, %f, %f\n", plane->getNormal()[0], plane->getNormal()[1], plane->getNormal()[2]);
+        printk("DEBUG: plane normal= %f, %f, %f\n", plane->getNormal()[0], plane->getNormal()[1], plane->getNormal()[2]);
         setAdjustFunction(true);
     }
 
@@ -317,24 +317,24 @@ bool ThreePointStrategy::test_probe_points(Gcode *gcode)
     for (int i = 0; i < 3; ++i) {
         float x, y;
         std::tie(x, y) = probe_points[i];
-        if(isnan(x) || isnan(y)) {
-            gcode->stream->printf("Probe point P%d has not been defined, use M557 P%d Xnnn Ynnn to define it\n", i, i);
+        if(std::isnan(x) || std::isnan(y)) {
+            printk("Probe point P%d has not been defined, use M557 P%d Xnnn Ynnn to define it\n", i, i);
             return false;
         }
 
         float z;
         if(!zprobe->doProbeAt(z, x-std::get<X_AXIS>(this->probe_offsets), y-std::get<Y_AXIS>(this->probe_offsets))) return false;
 
-        gcode->stream->printf("X:%1.4f Y:%1.4f Z:%1.4f\n", x, y, z);
+        printk("X:%1.4f Y:%1.4f Z:%1.4f\n", x, y, z);
 
-        if(isnan(last_z)) {
+        if(std::isnan(last_z)) {
             last_z= z;
         }else{
             max_delta= std::max(max_delta, fabsf(z-last_z));
         }
     }
 
-    gcode->stream->printf("max delta: %f\n", max_delta);
+    printk("max delta: %f\n", max_delta);
 
     return true;
 }

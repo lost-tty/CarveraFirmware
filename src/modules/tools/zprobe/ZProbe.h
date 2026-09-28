@@ -30,7 +30,7 @@ class ZProbe: public Module
 public:
     void on_module_loaded();
     void on_gcode_received(Gcode *argument);
-    static void report_settings(void *self, StreamOutput *stream);
+    static void report_settings(void *self);
     void set_probe_settings(Gcode *);
 
     bool run_probe(float& mm, float feedrate, float max_dist= -1, bool reverse= false);

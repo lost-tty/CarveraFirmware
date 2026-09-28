@@ -184,13 +184,13 @@ bool ZProbe::doProbeAt(float &mm, float x, float y)
     return run_probe_return(mm, slow_feedrate);
 }
 
-void ZProbe::report_settings(void *self, StreamOutput *stream)
+void ZProbe::report_settings(void *self)
 {
     ZProbe *z= (ZProbe *)self;
-    stream->printf(";Probe feedrates Slow/fast(K)/Return (mm/sec) max_z (mm) height (mm) dwell (s):\nM670 S%1.2f K%1.2f R%1.2f Z%1.2f H%1.2f D%1.2f\n",
+    printk(";Probe feedrates Slow/fast(K)/Return (mm/sec) max_z (mm) height (mm) dwell (s):\nM670 S%1.2f K%1.2f R%1.2f Z%1.2f H%1.2f D%1.2f\n",
         z->slow_feedrate, z->fast_feedrate, z->return_feedrate, z->max_z, z->probe_height, z->dwell_before_probing);
 
-    for(auto s : z->strategies) s->report_settings(stream);
+    for(auto s : z->strategies) s->report_settings();
 }
 
 void ZProbe::on_gcode_received(Gcode *argument)
@@ -202,7 +202,7 @@ void ZProbe::on_gcode_received(Gcode *argument)
         invert_probe = false;
         // make sure the probe is defined and not already triggered before moving motors
         if(!this->probe_pin.connected()) {
-            gcode->stream->printf("ZProbe pin not configured.\n");
+            printk("ZProbe pin not configured.\n");
             return;
         }
 
@@ -210,7 +210,7 @@ void ZProbe::on_gcode_received(Gcode *argument)
         THECONVEYOR.wait_for_idle();
 
         if(this->probe_pin.get()) {
-            gcode->stream->printf("ZProbe triggered before move, aborting command.\n");
+            printk("ZProbe triggered before move, aborting command.\n");
             return;
         }
 
@@ -226,12 +226,12 @@ void ZProbe::on_gcode_received(Gcode *argument)
 
             if(probe_result) {
                 // the result is in actuator coordinates moved
-                gcode->stream->printf("Z:%1.4f\n", THEROBOT.from_millimeters(mm));
+                printk("Z:%1.4f\n", THEROBOT.from_millimeters(mm));
 
                 if(set_z) THEROBOT.set_wcs_position(Z_AXIS, THEROBOT.to_millimeters(gcode->get_value('Z')));
 
             } else {
-                gcode->stream->printf("ZProbe not triggered\n");
+                printk("ZProbe not triggered\n");
             }
 
         } else {
@@ -242,7 +242,7 @@ void ZProbe::on_gcode_received(Gcode *argument)
                         return;
                     }
                 }
-                gcode->stream->printf("No strategy found to handle G%d\n", gcode->g);
+                printk("No strategy found to handle G%d\n", gcode->g);
 
             }else{
                 // P paramater selects which strategy to send the code to
@@ -250,12 +250,12 @@ void ZProbe::on_gcode_received(Gcode *argument)
                 uint16_t i= gcode->get_value('P');
                 if(i < strategies.size()) {
                     if(!strategies[i]->handleGcode(gcode)){
-                        gcode->stream->printf("strategy #%d did not handle G%d\n", i, gcode->g);
+                        printk("strategy #%d did not handle G%d\n", i, gcode->g);
                     }
                     return;
 
                 }else{
-                    gcode->stream->printf("strategy #%d is not loaded\n", i);
+                    printk("strategy #%d is not loaded\n", i);
                 }
             }
         }
@@ -263,13 +263,13 @@ void ZProbe::on_gcode_received(Gcode *argument)
     } else if(gcode->has_g && gcode->g == 38 ) { // G38.2 Straight Probe with error, G38.3 straight probe without error
         // linuxcnc/grbl style probe http://www.linuxcnc.org/docs/2.5/html/gcode/gcode.html#sec:G38-probe
         if(gcode->subcode < 2 || gcode->subcode > 6) {
-            gcode->stream->printf("Error :Only G38.2 to G38.5 are supported\n");
+            printk("Error :Only G38.2 to G38.5 are supported\n");
             return;
         }
 
         // make sure the probe is defined and not already triggered before moving motors
         if(!this->probe_pin.connected()) {
-            gcode->stream->printf("Error :ZProbe not connected.\n");
+            printk("Error :ZProbe not connected.\n");
             return;
         }
 
@@ -320,7 +320,7 @@ void ZProbe::probe_XYZ(Gcode *gcode)
     }
 
     if(x == 0 && y == 0 && z == 0) {
-        gcode->stream->printf("error:at least one of X Y or Z must be specified, and be > or < 0\n");
+        printk("error:at least one of X Y or Z must be specified, and be > or < 0\n");
         return;
     }
 
@@ -331,7 +331,7 @@ void ZProbe::probe_XYZ(Gcode *gcode)
     THECONVEYOR.wait_for_idle();
 
     if(this->probe_pin.get() != invert_probe) {
-        gcode->stream->printf("Error:ZProbe triggered before move, aborting command.\n");
+        printk("Error:ZProbe triggered before move, aborting command.\n");
         machine_task.halt(PROBE_FAIL, "probe failed");
         return;
     }
@@ -345,7 +345,7 @@ void ZProbe::probe_XYZ(Gcode *gcode)
     float delta[3]= {x, y, z};
     if(!THEROBOT.delta_move_watch(delta, rate, 3, probe_watch)) {
         if(!machine_task.is_halted()) {
-            gcode->stream->printf("ERROR: Move too small,  %1.3f, %1.3f, %1.3f\n", x, y, z);
+            printk("ERROR: Move too small,  %1.3f, %1.3f, %1.3f\n", x, y, z);
             machine_task.halt(PROBE_FAIL, "probe failed");
         }
         return;
@@ -359,12 +359,12 @@ void ZProbe::probe_XYZ(Gcode *gcode)
     uint8_t probeok= probe_watch.hit ? 1 : 0;
 
     // print results using the GRBL format
-    gcode->stream->printf("[PRB:%1.3f,%1.3f,%1.3f:%d]\n", THEROBOT.from_millimeters(pos[X_AXIS]), THEROBOT.from_millimeters(pos[Y_AXIS]), THEROBOT.from_millimeters(pos[Z_AXIS]), probeok);
+    printk("[PRB:%1.3f,%1.3f,%1.3f:%d]\n", THEROBOT.from_millimeters(pos[X_AXIS]), THEROBOT.from_millimeters(pos[Y_AXIS]), THEROBOT.from_millimeters(pos[Z_AXIS]), probeok);
     THEROBOT.set_last_probe_position(std::make_tuple(pos[X_AXIS], pos[Y_AXIS], pos[Z_AXIS], probeok));
 
     if(probeok == 0 && (gcode->subcode == 2 || gcode->subcode == 4)) {
         // issue error if probe was not triggered and subcode is 2 or 4
-        gcode->stream->printf("ALARM: Probe fail\n");
+        printk("ALARM: Probe fail\n");
         machine_task.halt(PROBE_FAIL, "probe failed");
     }
 }
@@ -378,7 +378,7 @@ void ZProbe::calibrate_Z(Gcode *gcode)
     }
 
     if(z == 0) {
-        gcode->stream->printf("error: Z must be specified, and be > or < 0\n");
+        printk("error: Z must be specified, and be > or < 0\n");
         return;
     }
 
@@ -389,7 +389,7 @@ void ZProbe::calibrate_Z(Gcode *gcode)
     THECONVEYOR.wait_for_idle();
 
     if (this->calibrate_pin.get()) {
-        gcode->stream->printf("error: ZCalibrate triggered before move, aborting command.\n");
+        printk("error: ZCalibrate triggered before move, aborting command.\n");
         return;
     }
 
@@ -407,7 +407,7 @@ void ZProbe::calibrate_Z(Gcode *gcode)
     float delta[3]= {0, 0, z};
     if(!THEROBOT.delta_move_watch(delta, rate, 3, probe_watch)) {
         if(!machine_task.is_halted()) {
-            gcode->stream->printf("ERROR: Move too small,  %1.3f\n", z);
+            printk("ERROR: Move too small,  %1.3f\n", z);
             machine_task.halt(PROBE_FAIL, "probe failed");
         }
         return;
@@ -421,12 +421,12 @@ void ZProbe::calibrate_Z(Gcode *gcode)
     uint8_t calibrateok = probe_watch.hit ? 1 : 0;
 
     // print results using the GRBL format
-    gcode->stream->printf("[PRB:%1.3f,%1.3f,%1.3f:%d]\n", THEROBOT.from_millimeters(pos[X_AXIS]), THEROBOT.from_millimeters(pos[Y_AXIS]), THEROBOT.from_millimeters(pos[Z_AXIS]), calibrateok);
+    printk("[PRB:%1.3f,%1.3f,%1.3f:%d]\n", THEROBOT.from_millimeters(pos[X_AXIS]), THEROBOT.from_millimeters(pos[Y_AXIS]), THEROBOT.from_millimeters(pos[Z_AXIS]), calibrateok);
     THEROBOT.set_last_probe_position(std::make_tuple(pos[X_AXIS], pos[Y_AXIS], pos[Z_AXIS], calibrateok));
 
     if (calibrateok == 0) {
         // issue error if probe was not triggered and subcode is 2 or 4
-        gcode->stream->printf("ALARM: Calibrate fail!\n");
+        printk("ALARM: Calibrate fail!\n");
         machine_task.halt(CALIBRATE_FAIL, "calibration failed");
     }
 

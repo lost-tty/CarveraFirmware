@@ -171,7 +171,7 @@ void init() {
     THEKERNEL->add_module(&simpleshell);
 
     printk("Smoothie Running @%luMHz\r\n", (unsigned long)(SystemCoreClock / 1000000));
-    simpleshell.version_command("", &THEKERNEL->streams);
+    printk("version = %s\n", VERSION);
 
     bool sdok = (sd.disk_initialize() == 0);
     if(!sdok) printk("SDCard failed to initialize\r\n");

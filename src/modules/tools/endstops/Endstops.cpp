@@ -29,6 +29,7 @@
 
 #include <ctype.h>
 #include <algorithm>
+#include <cmath>
 #include "modules/robot/MachineTask.h"
 
 // All axes home to max. Z has no min endstop.
@@ -220,7 +221,7 @@ void Endstops::back_off_home(axis_bitmap_t axis)
             delta[e.axis_index]= e.retract * (e.home_direction ? 1 : -1) - e.past_edge;
             moving= true;
             // select slowest of them all
-            slow_rate= isnan(slow_rate) ? e.slow_rate : std::min(slow_rate, e.slow_rate);
+            slow_rate= std::isnan(slow_rate) ? e.slow_rate : std::min(slow_rate, e.slow_rate);
         }
     }
 
@@ -453,7 +454,7 @@ void Endstops::set_homing_offset(Gcode *gcode)
 
     if (gcode->has_letter('X')) {
         if(!homing_axis[X_AXIS].homed) {
-            gcode->stream->printf("error: Axis X must be homed before setting Homing offset\n");
+            printk("error: Axis X must be homed before setting Homing offset\n");
             return;
         }
         homing_axis[X_AXIS].home_offset += (THEROBOT.to_millimeters(gcode->get_value('X')) - pos[X_AXIS]);
@@ -461,7 +462,7 @@ void Endstops::set_homing_offset(Gcode *gcode)
     }
     if (gcode->has_letter('Y')) {
         if(!homing_axis[Y_AXIS].homed) {
-            gcode->stream->printf("error: Axis Y must be homed before setting Homing offset\n");
+            printk("error: Axis Y must be homed before setting Homing offset\n");
             return;
         }
         homing_axis[Y_AXIS].home_offset += (THEROBOT.to_millimeters(gcode->get_value('Y')) - pos[Y_AXIS]);
@@ -469,30 +470,30 @@ void Endstops::set_homing_offset(Gcode *gcode)
     }
     if (gcode->has_letter('Z')) {
         if(!homing_axis[Z_AXIS].homed) {
-            gcode->stream->printf("error: Axis Z must be homed before setting Homing offset\n");
+            printk("error: Axis Z must be homed before setting Homing offset\n");
             return;
         }
         homing_axis[Z_AXIS].home_offset += (THEROBOT.to_millimeters(gcode->get_value('Z')) - pos[Z_AXIS]);
         homing_axis[Z_AXIS].homed= false; // force it to be homed
     }
 
-    gcode->stream->printf("Homing Offset: X %5.3f Y %5.3f Z %5.3f will take effect next home\n", homing_axis[X_AXIS].home_offset, homing_axis[Y_AXIS].home_offset, homing_axis[Z_AXIS].home_offset);
+    printk("Homing Offset: X %5.3f Y %5.3f Z %5.3f will take effect next home\n", homing_axis[X_AXIS].home_offset, homing_axis[Y_AXIS].home_offset, homing_axis[Z_AXIS].home_offset);
 }
 
 
 // parse gcodes
-void Endstops::report_settings(void *self, StreamOutput *stream)
+void Endstops::report_settings(void *self)
 {
     Endstops *e= (Endstops *)self;
-    stream->printf(";Home offset (mm):\nM206 ");
+    printk(";Home offset (mm):\nM206 ");
     for (auto &p : e->homing_axis) {
         if(p.pin_info == nullptr) continue; // ignore if not a homing endstop
-        stream->printf("%c%1.2f ", p.axis, p.home_offset);
+        printk("%c%1.2f ", p.axis, p.home_offset);
     }
-    stream->printf("\n");
+    printk("\n");
 
     if(e->g28_position[X_AXIS] != 0 || e->g28_position[Y_AXIS] != 0) {
-        stream->printf(";predefined position:\nG28.1 X%1.4f Y%1.4f\n", e->g28_position[X_AXIS], e->g28_position[Y_AXIS]);
+        printk(";predefined position:\nG28.1 X%1.4f Y%1.4f\n", e->g28_position[X_AXIS], e->g28_position[Y_AXIS]);
     }
 }
 
@@ -563,13 +564,13 @@ void Endstops::on_gcode_received(Gcode *argument)
             case 6: // G28.6 is a smoothie special it shows the homing status of each axis
                 for (auto &p : homing_axis) {
                     if(p.pin_info == nullptr) continue; // ignore if not a homing endstop
-                    gcode->stream->printf("%c:%d ", p.axis, p.homed);
+                    printk("%c:%d ", p.axis, p.homed);
                 }
-                gcode->stream->printf("\n");
+                printk("\n");
                 break;
 
             default:
-                gcode->stream->printf("error:Unsupported command\n");
+                printk("error:Unsupported command\n");
                 break;
         }
 
@@ -583,16 +584,16 @@ void Endstops::report_switches(Gcode *gcode)
         if(h.pin_info == nullptr) continue; // ignore if not a homing endstop
         string name;
         name.append(1, h.axis).append(h.home_direction ? "_min" : "_max");
-        gcode->stream->printf("%s:%d ", name.c_str(), h.pin_info->pin.get());
+        printk("%s:%d ", name.c_str(), h.pin_info->pin.get());
     }
-    gcode->stream->printf("pins- ");
+    printk("pins- ");
     for(auto& p : endstops) {
         string str(1, p->axis);
         if(p->limit_enable) str.append("L");
-        gcode->stream->printf("(%s)P%d.%d:%d ", str.c_str(), p->pin.port_number, p->pin.pin, p->pin.get());
+        printk("(%s)P%d.%d:%d ", str.c_str(), p->pin.port_number, p->pin.pin, p->pin.get());
     }
-    gcode->stream->printf(" Probe: %d", zprobe.getProbeStatus());
-    gcode->stream->printf("\n");
+    printk(" Probe: %d", zprobe.getProbeStatus());
+    printk("\n");
 }
 
 // M206: the offset applied at the next home
@@ -605,10 +606,10 @@ void Endstops::set_home_offset(Gcode *gcode)
 
     for (auto &p : homing_axis) {
         if(p.pin_info == nullptr) continue; // ignore if not a homing endstop
-        gcode->stream->printf("%c: %5.3f ", p.axis, p.home_offset);
+        printk("%c: %5.3f ", p.axis, p.home_offset);
     }
 
-    gcode->stream->printf(" will take effect next home\n");
+    printk(" will take effect next home\n");
 }
 
 // M306: the same offset, from where the machine stands now

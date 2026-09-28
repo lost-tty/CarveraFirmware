@@ -143,7 +143,7 @@ bool CartGridStrategy::handleConfig()
     only_by_two_corners = cartgrid_config.only_by_two_corners;
     do_manual_attach = cartgrid_config.do_manual_attach;
 
-    if(!isnan(cartgrid_config.height_limit) && !isnan(cartgrid_config.dampening_start)) {
+    if(!std::isnan(cartgrid_config.height_limit) && !std::isnan(cartgrid_config.dampening_start)) {
         this->damping_interval = cartgrid_config.height_limit - cartgrid_config.dampening_start;
     } else {
         this->damping_interval = NAN;
@@ -166,7 +166,7 @@ bool CartGridStrategy::handleConfig()
     // Probe offsets xxx,yyy,zzz
     {
         const float *v = cartgrid_config.probe_offsets;
-        if(!isnan(v[2])) {
+        if(!std::isnan(v[2])) {
             this->probe_offsets = std::make_tuple(v[0], v[1], v[2]);
         }
     }
@@ -175,7 +175,7 @@ bool CartGridStrategy::handleConfig()
     if (do_manual_attach)
     {
         const float *w = cartgrid_config.mount_position;
-        if(!isnan(w[2])) {
+        if(!std::isnan(w[2])) {
             m_attach = new float[3];
             m_attach[0]= w[0];
             m_attach[1]= w[1];
@@ -204,20 +204,20 @@ bool CartGridStrategy::handleConfig()
     return true;
 }
 
-void CartGridStrategy::save_grid(StreamOutput *stream)
+void CartGridStrategy::save_grid()
 {
     if(only_by_two_corners){
-        stream->printf("error:Unable to save grid in only_by_two_corners mode\n");
+        printk("error:Unable to save grid in only_by_two_corners mode\n");
         return;
     }
 
-    if(isnan(grid[0])) {
-        stream->printf("error:No grid to save\n");
+    if(std::isnan(grid[0])) {
+        printk("error:No grid to save\n");
         return;
     }
 
     if((current_grid_x_size != configured_grid_x_size) || (current_grid_y_size != configured_grid_y_size)) {
-        stream->printf("error:Unable to save grid with size different from configured\n");
+        printk("error:Unable to save grid with size different from configured\n");
         return;
     }
 
@@ -225,12 +225,12 @@ void CartGridStrategy::save_grid(StreamOutput *stream)
     const char *filename= (this->new_file_format) ? GRIDFILE_NM : GRIDFILE;
     FILE *fp = fopen(filename, "w");
     if(fp == NULL) {
-        stream->printf("error:Failed to open grid file %s\n", filename);
+        printk("error:Failed to open grid file %s\n", filename);
         return;
     }
     uint8_t tmp_configured_grid_size = configured_grid_x_size;
     if(fwrite(&tmp_configured_grid_size, sizeof(uint8_t), 1, fp) != 1) {
-        stream->printf("error:Failed to write grid x size\n");
+        printk("error:Failed to write grid x size\n");
         fclose(fp);
         return;
     }
@@ -238,20 +238,20 @@ void CartGridStrategy::save_grid(StreamOutput *stream)
     if(this->new_file_format){
         tmp_configured_grid_size = configured_grid_y_size;
         if(fwrite(&tmp_configured_grid_size, sizeof(uint8_t), 1, fp) != 1) {
-            stream->printf("error:Failed to write grid y size\n");
+            printk("error:Failed to write grid y size\n");
             fclose(fp);
             return;
         }
     }
 
     if(fwrite(&x_size, sizeof(float), 1, fp) != 1)  {
-        stream->printf("error:Failed to write x_size\n");
+        printk("error:Failed to write x_size\n");
         fclose(fp);
         return;
     }
 
     if(fwrite(&y_size, sizeof(float), 1, fp) != 1)  {
-        stream->printf("error:Failed to write y_size\n");
+        printk("error:Failed to write y_size\n");
         fclose(fp);
         return;
     }
@@ -259,20 +259,20 @@ void CartGridStrategy::save_grid(StreamOutput *stream)
     for (int y = 0; y < configured_grid_y_size; y++) {
         for (int x = 0; x < configured_grid_x_size; x++) {
             if(fwrite(&grid[x + (configured_grid_x_size * y)], sizeof(float), 1, fp) != 1) {
-                stream->printf("error:Failed to write grid\n");
+                printk("error:Failed to write grid\n");
                 fclose(fp);
                 return;
             }
         }
     }
-    stream->printf("grid saved to %s\n", filename);
+    printk("grid saved to %s\n", filename);
     fclose(fp);
 }
 
-bool CartGridStrategy::load_grid(StreamOutput *stream)
+bool CartGridStrategy::load_grid()
 {
     if(only_by_two_corners){
-        stream->printf("error:Unable to load grid in only_by_two_corners mode\n");
+        printk("error:Unable to load grid in only_by_two_corners mode\n");
         return false;
     }
 
@@ -281,7 +281,7 @@ bool CartGridStrategy::load_grid(StreamOutput *stream)
 
     FILE *fp = fopen(filename, "r");
     if(fp == NULL) {
-        stream->printf("error:Failed to open grid %s\n", filename);
+        printk("error:Failed to open grid %s\n", filename);
         return false;
     }
 
@@ -289,13 +289,13 @@ bool CartGridStrategy::load_grid(StreamOutput *stream)
     float x, y;
 
     if(fread(&load_grid_x_size, sizeof(uint8_t), 1, fp) != 1) {
-        stream->printf("error:Failed to read grid size\n");
+        printk("error:Failed to read grid size\n");
         fclose(fp);
         return false;
     }
 
     if(load_grid_x_size != configured_grid_x_size) {
-        stream->printf("error:grid size x is different read %d - config %d\n", load_grid_x_size, configured_grid_x_size);
+        printk("error:grid size x is different read %d - config %d\n", load_grid_x_size, configured_grid_x_size);
         fclose(fp);
         return false;
     }
@@ -304,32 +304,32 @@ bool CartGridStrategy::load_grid(StreamOutput *stream)
 
     if(this->new_file_format){
         if(fread(&load_grid_y_size, sizeof(uint8_t), 1, fp) != 1) {
-            stream->printf("error:Failed to read grid size\n");
+            printk("error:Failed to read grid size\n");
             fclose(fp);
             return false;
         }
 
         if(load_grid_y_size != configured_grid_y_size) {
-            stream->printf("error:grid size y is different read %d - config %d\n", load_grid_y_size, configured_grid_x_size);
+            printk("error:grid size y is different read %d - config %d\n", load_grid_y_size, configured_grid_x_size);
             fclose(fp);
             return false;
         }
     }
 
     if(fread(&x, sizeof(float), 1, fp) != 1) {
-        stream->printf("error:Failed to read grid x size\n");
+        printk("error:Failed to read grid x size\n");
         fclose(fp);
         return false;
     }
 
     if(fread(&y, sizeof(float), 1, fp) != 1) {
-        stream->printf("error:Failed to read grid y size\n");
+        printk("error:Failed to read grid y size\n");
         fclose(fp);
         return false;
     }
 
     if(x != x_size || y != y_size) {
-        stream->printf("error:bed dimensions changed read (%f, %f) - config (%f,%f)\n", x, y, x_size, y_size);
+        printk("error:bed dimensions changed read (%f, %f) - config (%f,%f)\n", x, y, x_size, y_size);
         fclose(fp);
         return false;
     }
@@ -337,23 +337,23 @@ bool CartGridStrategy::load_grid(StreamOutput *stream)
     for (int y = 0; y < configured_grid_y_size; y++) {
         for (int x = 0; x < configured_grid_x_size; x++) {
             if(fread(&grid[x + (configured_grid_x_size * y)], sizeof(float), 1, fp) != 1) {
-                stream->printf("error:Failed to read grid\n");
+                printk("error:Failed to read grid\n");
                 fclose(fp);
                 return false;
             }
         }
     }
-    stream->printf("grid loaded, grid: (%f, %f), size: %d x %d\n", x_size, y_size, load_grid_x_size, load_grid_y_size);
+    printk("grid loaded, grid: (%f, %f), size: %d x %d\n", x_size, y_size, load_grid_x_size, load_grid_y_size);
     fclose(fp);
     return true;
 }
 
-void CartGridStrategy::report_settings(StreamOutput *stream)
+void CartGridStrategy::report_settings()
 {
     float x, y, z;
     std::tie(x, y, z) = probe_offsets;
-    stream->printf(";Probe offsets:\nM565 X%1.5f Y%1.5f Z%1.5f\n", x, y, z);
-    if(save && !isnan(grid[0])) stream->printf(";Load saved grid\nM375\n");
+    printk(";Probe offsets:\nM565 X%1.5f Y%1.5f Z%1.5f\n", x, y, z);
+    if(save && !std::isnan(grid[0])) printk(";Load saved grid\nM375\n");
 }
 
 void CartGridStrategy::register_mcodes()
@@ -370,7 +370,7 @@ void CartGridStrategy::clear_bed(Gcode *gcode)
 {
     setAdjustFunction(false);
     reset_bed_level();
-    gcode->stream->printf("grid cleared and disabled\n");
+    printk("grid cleared and disabled\n");
 }
 
 // M374: save the grid, M374.1: delete the saved one
@@ -380,20 +380,20 @@ void CartGridStrategy::save_grid_gcode(Gcode *gcode)
         // we use a different file format depending on whether it is square or not
         const char *filename= (this->new_file_format) ? GRIDFILE_NM : GRIDFILE;
         remove(filename);
-        gcode->stream->printf("%s deleted\n", filename);
+        printk("%s deleted\n", filename);
         return;
     }
 
     __disable_irq();
-    save_grid(gcode->stream);
+    save_grid();
     __enable_irq();
 }
 
 // M375: load the grid, M375.1: show it
 void CartGridStrategy::load_grid_gcode(Gcode *gcode)
 {
-    if(gcode->subcode == 1) print_bed_level(gcode->stream);
-    else if(load_grid(gcode->stream)) setAdjustFunction(true);
+    if(gcode->subcode == 1) print_bed_level();
+    else if(load_grid()) setAdjustFunction(true);
 }
 
 void CartGridStrategy::set_probe_offsets(Gcode *gcode)
@@ -418,9 +418,9 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
             }
 
             if(!doProbe(gcode)) {
-                gcode->stream->printf("Probe failed to complete, check the initial probe height and/or initial_height settings\n");
+                printk("Probe failed to complete, check the initial probe height and/or initial_height settings\n");
             } else {
-                gcode->stream->printf("Probe completed.\n");
+                printk("Probe completed.\n");
             }
 
             return true;
@@ -435,7 +435,7 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
             }
 
             if(!scan_bed(gcode)) {
-                gcode->stream->printf("scan failed to complete\n");
+                printk("scan failed to complete\n");
             }
 
             return true;
@@ -465,7 +465,7 @@ void CartGridStrategy::setAdjustFunction(bool on)
 
 bool CartGridStrategy::findBed(float x, float y, float z)
 {
-    if(!isnan(initial_height)) {
+    if(!std::isnan(initial_height)) {
         zprobe->coordinated_move(NAN, NAN, initial_height, zprobe->getFastFeedrate()); // move Z only to initial_height
     }
     zprobe->coordinated_move(x - X_PROBE_OFFSET_FROM_EXTRUDER, y - Y_PROBE_OFFSET_FROM_EXTRUDER, NAN, zprobe->getFastFeedrate()); // move at initial_height to x, y
@@ -488,7 +488,7 @@ bool CartGridStrategy::scan_bed(Gcode *gc)
     int m = gc->has_letter('J') ? gc->get_value('J') : configured_grid_y_size;
 
     if((n < 5)||(m < 5)) {
-        gc->stream->printf("Need at least a 5x5 grid to scan\n");
+        printk("Need at least a 5x5 grid to scan\n");
         return false;
     }
 
@@ -496,7 +496,7 @@ bool CartGridStrategy::scan_bed(Gcode *gc)
         _x_size = gc->get_value('X'); // override default probe width
         _y_size = gc->get_value('Y'); // override default probe length
     } else {
-        gc->stream->printf("X and Y parameters needed to specify x size and y size\n");
+        printk("X and Y parameters needed to specify x size and y size\n");
         return false;
     }
 
@@ -510,7 +510,7 @@ bool CartGridStrategy::scan_bed(Gcode *gc)
     float mm;
     if(!zprobe->doProbeAt(mm, _x_start - X_PROBE_OFFSET_FROM_EXTRUDER, _y_start - Y_PROBE_OFFSET_FROM_EXTRUDER)) return false;
     float z_reference = (gc->has_letter('H') ? gc->get_value('H') : zprobe->getProbeHeight()) - mm;
-    gc->stream->printf("first probe at X%1.3f, Y%1.3f is %1.3f mm\n", _x_start, _y_start, z_reference);
+    printk("first probe at X%1.3f, Y%1.3f is %1.3f mm\n", _x_start, _y_start, z_reference);
     float max_delta= fabs(z_reference);
 
     float x_step = _x_size / n;
@@ -527,9 +527,9 @@ bool CartGridStrategy::scan_bed(Gcode *gc)
             scanline.append(buf, n);
             if(fabs(z) > max_delta) max_delta= fabs(z);
         }
-        gc->stream->printf("%s\n", scanline.c_str());
+        printk("%s\n", scanline.c_str());
     }
-    gc->stream->printf("Maximum delta: %1.3f\n", max_delta);
+    printk("Maximum delta: %1.3f\n", max_delta);
     return true;
 }
 
@@ -537,7 +537,7 @@ bool CartGridStrategy::doProbe(Gcode *gc)
 {
     Robot::NoSegmentation no_segmentation;
     bool use_wcs= false;
-    gc->stream->printf("Rectangular Grid Probe...\n");
+    printk("Rectangular Grid Probe...\n");
 
     // if R1 then force only_by_two_corners using current position for start point
     // R0 turns off two corners mode
@@ -545,7 +545,7 @@ bool CartGridStrategy::doProbe(Gcode *gc)
         if(gc->get_int('R') == 1) {
             only_by_two_corners= true;
             use_wcs= true;
-            gc->stream->printf("Leveling start, offset by XY\n");
+            printk("Leveling start, offset by XY\n");
         }else{
             only_by_two_corners= false;
         }
@@ -566,7 +566,7 @@ bool CartGridStrategy::doProbe(Gcode *gc)
             this->x_size = gc->get_value('A'); // override default probe width
             this->y_size = gc->get_value('B'); // override default probe length
         } else {
-            gc->stream->printf("In only_by_two_corners mode all XYAB parameters needed\n");
+            printk("In only_by_two_corners mode all XYAB parameters needed\n");
             return false;
         }
     } else {
@@ -577,7 +577,7 @@ bool CartGridStrategy::doProbe(Gcode *gc)
     }
 
     if(x_size == 0 || y_size == 0) {
-        gc->stream->printf("ERROR: Probe Size cannot be 0\n");
+        printk("ERROR: Probe Size cannot be 0\n");
         return false;
     }
 
@@ -588,7 +588,7 @@ bool CartGridStrategy::doProbe(Gcode *gc)
     if(gc->has_letter('J')) current_grid_y_size = gc->get_value('J'); // override default grid y size
 
     if((this->current_grid_x_size * this->current_grid_y_size)  > (this->configured_grid_x_size * this->configured_grid_y_size)){
-        gc->stream->printf("Grid size (%d x %d = %d) bigger than configured (%d x %d = %d). Change configuration.\n",
+        printk("Grid size (%d x %d = %d) bigger than configured (%d x %d = %d). Change configuration.\n",
                             this->current_grid_x_size, this->current_grid_y_size, this->current_grid_x_size*this->current_grid_x_size,
                             this->configured_grid_x_size, this->configured_grid_y_size, this->configured_grid_x_size*this->configured_grid_y_size);
         return false;
@@ -598,9 +598,9 @@ bool CartGridStrategy::doProbe(Gcode *gc)
         // Move to the attachment point defined
         zprobe->coordinated_move( m_attach[0], m_attach[1], m_attach[2], zprobe->getFastFeedrate());
 
-        gc->stream->printf(" ************************************************************\n");
-        gc->stream->printf("     Ensure probe is attached and trigger probe when done\n");
-        gc->stream->printf(" ************************************************************\n");
+        printk(" ************************************************************\n");
+        printk("     Ensure probe is attached and trigger probe when done\n");
+        printk(" ************************************************************\n");
 
         while( !zprobe->getProbeStatus()) {
             if(machine_task.is_halted()) return(false);
@@ -609,18 +609,18 @@ bool CartGridStrategy::doProbe(Gcode *gc)
 
     // find bed, and leave probe probe_height above bed
     if(!findBed(x_start, y_start, gc->has_letter('H') ? gc->get_value('H') : zprobe->getProbeHeight())) {
-        gc->stream->printf("Finding bed failed, check the initial height setting\n");
+        printk("Finding bed failed, check the initial height setting\n");
         return false;
     }
 
-    gc->stream->printf("Probe start ht: %0.3f mm, start MCS x,y: %0.3f,%0.3f, rectangular bed width,height in mm: %0.3f,%0.3f, grid size: %dx%d\n", gc->has_letter('H') ? gc->get_value('H') : zprobe->getProbeHeight(),
+    printk("Probe start ht: %0.3f mm, start MCS x,y: %0.3f,%0.3f, rectangular bed width,height in mm: %0.3f,%0.3f, grid size: %dx%d\n", gc->has_letter('H') ? gc->get_value('H') : zprobe->getProbeHeight(),
     		x_start, y_start, x_size, y_size, current_grid_x_size, current_grid_y_size);
 
     // do first probe at start point
     float mm;
     if(!zprobe->doProbeAt(mm, this->x_start - X_PROBE_OFFSET_FROM_EXTRUDER, this->y_start - Y_PROBE_OFFSET_FROM_EXTRUDER)) return false;
     float z_reference = (gc->has_letter('H') ? gc->get_value('H') : zprobe->getProbeHeight()) - mm; // this should be zero
-    gc->stream->printf("probe at 0,0 is %1.3f mm\n", z_reference);
+    printk("probe at 0,0 is %1.3f mm\n", z_reference);
 
     // keep track of worst case delta
     float max_delta= fabs(z_reference);
@@ -647,23 +647,23 @@ bool CartGridStrategy::doProbe(Gcode *gc)
             }
 
             float measured_z = (gc->has_letter('H') ? gc->get_value('H') : zprobe->getProbeHeight()) - mm - z_reference; // this is the delta z from bed at 0,0
-            gc->stream->printf("DEBUG: X%1.3f, Y%1.3f, Z%1.3f\n", xProbe, yProbe, measured_z);
+            printk("DEBUG: X%1.3f, Y%1.3f, Z%1.3f\n", xProbe, yProbe, measured_z);
             grid[xCount + (this->current_grid_x_size * yCount)] = measured_z;
             if(fabs(measured_z) > max_delta) max_delta= fabs(measured_z);
         }
     }
 
-    print_bed_level(gc->stream);
+    print_bed_level();
 
-    gc->stream->printf("Maximum delta: %1.3f\n", max_delta);
+    printk("Maximum delta: %1.3f\n", max_delta);
 
     if (do_manual_attach) {
         // Move to the attachment point defined for removal of probe
         zprobe->coordinated_move( m_attach[0], m_attach[1], m_attach[2], zprobe->getFastFeedrate());
 
-        gc->stream->printf(" ********************\n");
-        gc->stream->printf("     Remove probe\n");
-        gc->stream->printf(" ********************\n");
+        printk(" ********************\n");
+        printk("     Remove probe\n");
+        printk(" ********************\n");
     }
 
     setAdjustFunction(true);
@@ -678,7 +678,7 @@ void CartGridStrategy::doCompensation(float *target, bool inverse, bool debug)
     // Adjust print surface height by linear interpolation over the bed_level array.
     // offset scale: 1 for default (use offset as is)
     float scale = 1.0;
-    if (!isnan(this->damping_interval)) {
+    if (!std::isnan(this->damping_interval)) {
         // if the height is below our compensation limit:
         if(target[Z_AXIS] <= height_limit) {
             // scale the offset as necessary:
@@ -724,7 +724,7 @@ void CartGridStrategy::doCompensation(float *target, bool inverse, bool debug)
     float offset = (1 - ratio_x) * left + ratio_x * right;
 
     // handle case where the grid was incomplete (should never happen)
-    if(isnan(offset)) return;
+    if(std::isnan(offset)) return;
 
     if (inverse) {
         target[Z_AXIS] -= offset * scale;
@@ -758,14 +758,14 @@ void CartGridStrategy::doCompensation(float *target, bool inverse, bool debug)
 
 
 // Print calibration results for plotting or manual frame adjustment.
-void CartGridStrategy::print_bed_level(StreamOutput *stream)
+void CartGridStrategy::print_bed_level()
 {
     if(!human_readable){
         for (int y = 0; y < current_grid_y_size; y++) {
             for (int x = 0; x < current_grid_x_size; x++) {
-                stream->printf("%1.4f ", grid[x + (current_grid_x_size * y)]);
+                printk("%1.4f ", grid[x + (current_grid_x_size * y)]);
             }
-            stream->printf("\n");
+            printk("\n");
         }
     } else {
 
@@ -778,22 +778,22 @@ void CartGridStrategy::print_bed_level(StreamOutput *stream)
         int yInc = (y_size<0) ? 1: -1;
 
         for (int y = yStart; y != yStop; y += yInc) {
-            stream->printf("%10.4f|", y * (y_size / (current_grid_y_size - 1)));
+            printk("%10.4f|", y * (y_size / (current_grid_y_size - 1)));
             for (int x = xStart; x != xStop; x += xInc) {
-                stream->printf("%10.4f ",  grid[x + (current_grid_x_size * y)]);
+                printk("%10.4f ",  grid[x + (current_grid_x_size * y)]);
             }
-            stream->printf("\n");
+            printk("\n");
         }
-        stream->printf("           ");
+        printk("           ");
         for (int x = xStart; x != xStop; x += xInc) {
-            stream->printf("-----+-----");
+            printk("-----+-----");
         }
-        stream->printf("\n");
-        stream->printf("           ");
+        printk("\n");
+        printk("           ");
         for (int x = xStart; x != xStop; x += xInc) {
-            stream->printf("%1.4f ",  x * (x_size / (current_grid_x_size - 1)));
+            printk("%1.4f ",  x * (x_size / (current_grid_x_size - 1)));
         }
-            stream->printf("\n");
+            printk("\n");
 
     }
 

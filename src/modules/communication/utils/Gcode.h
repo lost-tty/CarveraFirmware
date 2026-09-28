@@ -17,16 +17,14 @@
 
 using std::string;
 
-class StreamOutput;
-
-// One command word (G or M) of a line plus all of the line's parameter words
+// One command word (G or M) of a line plus all of the line's parameter words.
 class Gcode {
     public:
         Gcode() : m(0), g(0), line(0), subcode(0), has_m(false), has_g(false),
-            mcs(false), stream(nullptr) {}
-        Gcode(const string& text, StreamOutput* stream, unsigned int line = 0);
+            mcs(false) {}
+        Gcode(const string& text, unsigned int line = 0);
         // command is an index into words, or words.size() for a line without G or M
-        Gcode(const gcode::Words& words, size_t command, StreamOutput* stream, unsigned int line);
+        Gcode(const gcode::Words& words, size_t command, unsigned int line);
 
         bool has_letter(char letter) const { return find(letter) != nullptr; }
         float get_value(char letter) const;
@@ -47,7 +45,6 @@ class Gcode {
             bool mcs:1;                                       // G53: this motion is in machine coordinates
         };
 
-        StreamOutput* stream;
         string error_text;
         string text;        // the part of the line that is not g-code
 

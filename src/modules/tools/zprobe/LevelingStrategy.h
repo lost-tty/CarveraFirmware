@@ -16,7 +16,7 @@ public:
     LevelingStrategy(ZProbe* zprobe) : zprobe(zprobe){};
     virtual ~LevelingStrategy(){};
     virtual bool handleGcode(Gcode* gcode)= 0;
-    virtual void report_settings(StreamOutput *stream) {}
+    virtual void report_settings() {}
     virtual void register_mcodes() {}
     virtual bool handleConfig()= 0;
 

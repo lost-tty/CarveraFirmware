@@ -37,7 +37,7 @@ class Robot : public Module {
         void init();
         void on_module_loaded();
         void on_gcode_received(Gcode *argument);
-        static void report_settings(void *self, StreamOutput *stream);
+        static void report_settings(void *self);
         void end_of_program(Gcode *);
         void motors_on(Gcode *);
         void motors_off(Gcode *);
@@ -51,7 +51,7 @@ class Robot : public Module {
         void vacuum_mode(Gcode *);
         void wait_for_moves(Gcode *);
         void arm_solution_gcode(Gcode *);
-        void report_settings(StreamOutput *stream);
+        void report_settings();
 
         void reset_axis_position(float position, int axis);
         void reset_axis_position(float x, float y, float z);

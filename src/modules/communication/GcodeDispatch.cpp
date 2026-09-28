@@ -180,13 +180,13 @@ void GcodeDispatch::init()
 }
 
 // no module writes the config, so M500 has always only reported, like M503
-void GcodeDispatch::report_settings(Gcode *gcode)
+void GcodeDispatch::report_settings(Gcode *)
 {
-    Settings::report_all(gcode->stream);
+    Settings::report_all();
 }
 
-// an error goes to every console: a job's lines reply to the null stream
-bool GcodeDispatch::fail(StreamOutput *, const char *msg)
+// an error goes to every console
+bool GcodeDispatch::fail(const char *msg)
 {
     printk("error:%s\n", msg);
     return false;
@@ -211,7 +211,7 @@ bool GcodeDispatch::safe_while_running(const gcode::Words &words)
 void GcodeDispatch::run_mdi(const SerialMessage &msg)
 {
     if(machine_task.is_jogging()) {
-        msg.stream->printf("error:busy, jogging\r\n");
+        printk("error:busy, jogging\r\n");
         return;
     }
 
@@ -219,11 +219,11 @@ void GcodeDispatch::run_mdi(const SerialMessage &msg)
         // without the parameters: reading #5021 drains the queue, and the letters decide this
         gcode::Line parsed;
         if(!parsed.parse(msg.message.c_str(), nullptr)) {
-            msg.stream->printf("error:%s, and parameters are not read while a job runs\r\n", parsed.error_text().c_str());
+            printk("error:%s, and parameters are not read while a job runs\r\n", parsed.error_text().c_str());
             return;
         }
         if(!safe_while_running(parsed.words())) {
-            msg.stream->printf("error:busy, a job or script is running\r\n");
+            printk("error:busy, a job or script is running\r\n");
             return;
         }
     }
@@ -258,29 +258,29 @@ bool GcodeDispatch::dispatch(const SerialMessage &msg, bool nested)
         while(j < s.size() && isdigit(s[j])) j++;
         while(j < s.size() && s[j] == ' ') j++;
     }
-    if(j < s.size() && s[j] == '#') return parameter_statement(s.c_str() + j, msg.stream);
+    if(j < s.size() && s[j] == '#') return parameter_statement(s.c_str() + j);
 
     // M118 carries free text
     if(s.size() - j >= 4 && memcmp(s.data() + j, "M118", 4) == 0
        && (j + 4 == s.size() || s[j + 4] == ' ' || s[j + 4] == '\t')) {
         if(machine_task.is_halted()) {
-            msg.stream->printf("error:Alarm lock\n");
+            printk("error:Alarm lock\n");
             return false;
         }
-        return announce(s, j + 4, msg.stream, msg.line);
+        return announce(s, j + 4, msg.line);
     }
 
     gcode::Line parsed; // local: modules may dispatch console lines while a line executes
-    if(!parsed.parse(s.c_str() + i, &params)) return fail(msg.stream, parsed.error_text().c_str());
-    return execute(parsed.words(), s.substr(i), msg.stream, msg.line, nested);
+    if(!parsed.parse(s.c_str() + i, &params)) return fail(parsed.error_text().c_str());
+    return execute(parsed.words(), s.substr(i), msg.line, nested);
 }
 
 void GcodeDispatch::say(Gcode *gcode)
 {
-    THEKERNEL->streams.printf("%s\r\n", gcode->text.c_str());
+    printk("%s\r\n", gcode->text.c_str());
 }
 
-bool GcodeDispatch::announce(const string &line, size_t from, StreamOutput *stream, unsigned int number)
+bool GcodeDispatch::announce(const string &line, size_t from, unsigned int number)
 {
     string out;
     while(from < line.size() && (line[from] == ' ' || line[from] == '\t')) from++;
@@ -310,78 +310,78 @@ bool GcodeDispatch::announce(const string &line, size_t from, StreamOutput *stre
 
     gcode::Words words;
     words.push_back(gcode::Word{.letter= 'M', .subcode= 0, .has_value= true, .value= 118.0F});
-    Gcode gcode(words, 0, stream, number);
+    Gcode gcode(words, 0, number);
     gcode.text= out;
     run_mcode(gcode, false);
     return true;
 }
 
 // "#n = expr" assigns, "#n" prints
-bool GcodeDispatch::parameter_statement(const char *p, StreamOutput *stream)
+bool GcodeDispatch::parameter_statement(const char *p)
 {
     std::string err;
     if(strchr(p, '=') != nullptr) {
-        if(!gcode::assign(p, params, err)) return fail(stream, err.c_str());
+        if(!gcode::assign(p, params, err)) return fail(err.c_str());
     } else {
         char *end;
         int n= strtol(p + 1, &end, 10);
         float v;
-        if(end == p + 1) return fail(stream, "bad parameter number");
-        if(params.get(n, v)) stream->printf("#%d = %.4f\r\n", n, v);
-        else stream->printf("#%d not set\r\n", n);
+        if(end == p + 1) return fail("bad parameter number");
+        if(params.get(n, v)) printk("#%d = %.4f\r\n", n, v);
+        else printk("#%d not set\r\n", n);
     }
     return true;
 }
 
 // M999 is the only way out of a halt, so it is handled before the alarm lock refuses everything else
-GcodeDispatch::Gate GcodeDispatch::allowed_while_halted(const gcode::Words &words, StreamOutput *stream)
+GcodeDispatch::Gate GcodeDispatch::allowed_while_halted(const gcode::Words &words)
 {
     if(!machine_task.is_halted()) return PASS;
 
     for (const gcode::Word &w : words) {
         if(w.letter == 'M' && w.value == 999) {
-            machine_task.unlock(stream);
+            machine_task.unlock(&THEKERNEL->streams);
             return HANDLED;
         }
     }
     for (const gcode::Word &w : words) {
         if(!is_command(w)) {
             if(!is_axis(w.letter)) continue;
-            stream->printf("error:Alarm lock\n");
+            printk("error:Alarm lock\n");
             return REFUSED;
         }
         if(classify(w).flags & WHEN_HALTED) continue;
-        stream->printf("error:Alarm lock\n");
+        printk("error:Alarm lock\n");
         return REFUSED;
     }
     return PASS;
 }
 
-GcodeDispatch::Gate GcodeDispatch::homed_enough(const gcode::Words &words, StreamOutput *stream)
+GcodeDispatch::Gate GcodeDispatch::homed_enough(const gcode::Words &words)
 {
     for (const gcode::Word &w : words) {
         if(w.letter == 'M' && (w.value == 887 || w.value == 888)) {
             homed_check= (w.value == 887);
-            stream->printf("Homed check %s\n", homed_check ? "enabled" : "disabled");
+            printk("Homed check %s\n", homed_check ? "enabled" : "disabled");
             return HANDLED;
         }
         if(!homed_check || !is_command(w)) continue;
         if((classify(w).flags & NEEDS_HOMED) && !THEROBOT.is_homed_all_axes()) {
-            fail(stream, "Machine has not been homed, home first (M888 disables this check)");
+            fail("Machine has not been homed, home first (M888 disables this check)");
             return REFUSED;
         }
     }
     return PASS;
 }
 
-bool GcodeDispatch::execute(const gcode::Words &words, const string &text, StreamOutput *stream, unsigned int line, bool nested)
+bool GcodeDispatch::execute(const gcode::Words &words, const string &text, unsigned int line, bool nested)
 {
     if(words.empty()) {
         return true;
     }
 
-    Gate gate= allowed_while_halted(words, stream);
-    if(gate == PASS) gate= homed_enough(words, stream);
+    Gate gate= allowed_while_halted(words);
+    if(gate == PASS) gate= homed_enough(words);
     if(gate != PASS) return gate == HANDLED;
 
     // A line holds one or more blocks: a repeated modal group, or a G53 after a motion word, starts
@@ -439,15 +439,15 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
     for (const Cmd &c : order) {
         const gcode::Word &w= all[c.index];
         Blk &b= blocks[c.block];
-        if(c.rank == MOTION && b.mcs && w.value > 1) return fail(stream, "G53 needs G0 or G1");
-        if(c.rank == MOTION && b.axis_code) return fail(stream, "G10/G22/G28/G30/G92 cannot share a line with a motion word");
+        if(c.rank == MOTION && b.mcs && w.value > 1) return fail("G53 needs G0 or G1");
+        if(c.rank == MOTION && b.axis_code) return fail("G10/G22/G28/G30/G92 cannot share a line with a motion word");
     }
     for (size_t i= 0; i < words.size(); i++) {
         const gcode::Word &w= words[i];
         if(!w.has_value && (blocks[block_of[i]].motion || blocks[block_of[i]].axis_code) && is_move_word(w.letter)) {
             char buf[24];
             snprintf(buf, sizeof(buf), "%c needs a value", w.letter);
-            return fail(stream, buf);
+            return fail(buf);
         }
     }
 
@@ -468,7 +468,7 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
             if(i == c.index) index= k;
             k++;
         }
-        Gcode gcode(block_words, index, stream, line);
+        Gcode gcode(block_words, index, line);
 
         if(c.rank == MOTION) {
             gcode.mcs= blocks[c.block].mcs;
@@ -485,18 +485,18 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, Strea
         // a scripted code runs its sub after the modules have seen it, so their handlers still apply;
         // the ok follows when the sub is done, which is the last block of the line by rank
         std::string err;
-        if(scripts != nullptr && !nested && scripts->trigger(gcode, stream, err)) {
-            return err.empty() || fail(stream, err.c_str());
+        if(scripts != nullptr && !nested && scripts->trigger(gcode, &THEKERNEL->streams, err)) {
+            return err.empty() || fail(err.c_str());
         }
 
         // a macro may claim a code no module does, and a nested line never reaches the trigger
         if(!claimed && !nested) {
             char buf[24];
             snprintf(buf, sizeof(buf), "unsupported M%u", gcode.m);
-            return fail(stream, buf);
+            return fail(buf);
         }
 
-        if(!gcode.error_text.empty()) return fail(stream, gcode.error_text.c_str());
+        if(!gcode.error_text.empty()) return fail(gcode.error_text.c_str());
     }
     return true;
 }

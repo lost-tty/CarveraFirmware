@@ -150,5 +150,5 @@ void UsbHost::on_main_loop(void*)
         if (c != '\n') line += c;
     } while (c != '\n' && lines.size() > 0);
 
-    SimpleShell::run(line, &StreamOutput::NullStream);
+    SimpleShell::run(line, &THEKERNEL->streams);
 }

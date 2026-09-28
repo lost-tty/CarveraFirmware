@@ -17,7 +17,7 @@ public:
     ThreePointStrategy(ZProbe *zprobe);
     ~ThreePointStrategy();
     bool handleGcode(Gcode* gcode);
-    void report_settings(StreamOutput *stream) override;
+    void report_settings() override;
     void register_mcodes() override;
 
     void set_probe_points(Gcode *);
@@ -30,7 +30,7 @@ private:
     McodeRegistry::Mcode m557, m561, m565;
 
     void homeXY();
-    bool doProbing(StreamOutput *stream);
+    bool doProbing();
     std::tuple<float, float> parseXY(const char *str);
     std::tuple<float, float, float> parseXYZ(const char *str);
     void setAdjustFunction(bool);

@@ -170,17 +170,6 @@ void Kernel::init()
     this->planner.init();
 }
 
-void Kernel::printk(const char* format, ...) {
-    va_list args;
-    va_start(args, format);
-    vprintk(format, args);
-    va_end(args);
-}
-
-void Kernel::vprintk(const char* format, va_list args) {
-    streams.vprintf(format, args);
-}
-
 // some boards don't have leds.. TOO BAD!
 
 // get current state

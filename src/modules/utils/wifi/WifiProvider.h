@@ -53,8 +53,6 @@ public:
     int putc(int c);
     int getc(void);
     bool ready();
-    int type(); // 0: serial, 1: wifi
-
 
 public:
     void configure(const void *cfg);

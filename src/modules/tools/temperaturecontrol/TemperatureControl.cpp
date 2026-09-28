@@ -74,7 +74,7 @@ void TemperatureControl::load_config()
 
 void TemperatureControl::report_temperature(Gcode *gcode)
 {
-    gcode->stream->printf("%s:%3.1f /0.0 @0\n", cfg.designator, this->get_temperature());
+    printk("%s:%3.1f /0.0 @0\n", cfg.designator, this->get_temperature());
 }
 
 // the pool has already checked that S names this controller, or that there is no S at all
@@ -84,14 +84,14 @@ void TemperatureControl::sensor_settings_gcode(Gcode *gcode)
         TempSensor::sensor_options_t args= gcode->get_args();
         args.erase('S'); // don't include the S
         if(args.size() > 0 && !sensor->set_optional(args)) {
-            gcode->stream->printf("Unable to properly set sensor settings, make sure you specify all required values\n");
+            printk("Unable to properly set sensor settings, make sure you specify all required values\n");
         }
     } else {
         sensor->get_raw();
         TempSensor::sensor_options_t options;
         if(sensor->get_optional(options)) {
             for(auto &i : options) {
-                gcode->stream->printf("%s(S%d): %c %1.18f\n", cfg.designator, this->pool_index, i.first, i.second);
+                printk("%s(S%d): %c %1.18f\n", cfg.designator, this->pool_index, i.first, i.second);
             }
         }
     }

@@ -147,7 +147,7 @@ void Thermistor::get_raw()
 
     // if using a predefined thermistor show its name and which table it is from
     if(thermistor_number != 0) {
-        string name= (thermistor_number&0x80) ? predefined_thermistors_beta[(thermistor_number&0x7F)-1].name :  predefined_thermistors[thermistor_number-1].name;
+        std::string name= (thermistor_number&0x80) ? predefined_thermistors_beta[(thermistor_number&0x7F)-1].name :  predefined_thermistors[thermistor_number-1].name;
         printk("Using predefined thermistor %d in %s table: %s\n", thermistor_number&0x7F, (thermistor_number&0x80)?"Beta":"S/H", name.c_str());
     }
 

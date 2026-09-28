@@ -31,7 +31,7 @@ class Endstops : public Module{
 
         void home_axes(axis_bitmap_t haxis);
         void home_all();
-        static void report_settings(void *self, StreamOutput *stream);
+        static void report_settings(void *self);
         void report_switches(Gcode *);
         void set_home_offset(Gcode *);
         void set_home_offset_here(Gcode *);

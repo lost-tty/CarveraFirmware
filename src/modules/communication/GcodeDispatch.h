@@ -50,12 +50,12 @@ public:
 private:
     enum Gate { PASS, HANDLED, REFUSED };
     bool dispatch(const SerialMessage &msg, bool nested);
-    Gate allowed_while_halted(const gcode::Words &words, StreamOutput *stream);
-    Gate homed_enough(const gcode::Words &words, StreamOutput *stream);
-    bool execute(const gcode::Words &words, const std::string &text, StreamOutput *stream, unsigned int line, bool nested);
-    bool parameter_statement(const char *p, StreamOutput *stream);
-    bool announce(const std::string &line, size_t from, StreamOutput *stream, unsigned int number);
-    bool fail(StreamOutput *stream, const char *msg);
+    Gate allowed_while_halted(const gcode::Words &words);
+    Gate homed_enough(const gcode::Words &words);
+    bool execute(const gcode::Words &words, const std::string &text, unsigned int line, bool nested);
+    bool parameter_statement(const char *p);
+    bool announce(const std::string &line, size_t from, unsigned int number);
+    bool fail(const char *msg);
     static bool safe_while_running(const gcode::Words &words);
     static void broadcast(Gcode &gcode, OnMachine);
     static void broadcast_drained(Gcode &gcode, OnMachine);

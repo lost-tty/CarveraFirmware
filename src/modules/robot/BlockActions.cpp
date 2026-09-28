@@ -61,7 +61,7 @@ void BlockActions::run(const Pending &p)
                                 .has_value= true, .value= (float)p.number});
     for (uint8_t i = 0; i < p.n_words; i++) words.push_back(p.words[i]);
 
-    Gcode gcode(words, 0, nullptr, 0);
+    Gcode gcode(words, 0, 0);
     if(p.text >= 0) {
         gcode.text = texts[p.text];
     }

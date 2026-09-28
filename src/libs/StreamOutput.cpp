@@ -1,24 +1,20 @@
 #include "StreamOutput.h"
-#include "Kernel.h"
-#include "StreamOutputPool.h"
 #include "Frame.h"
+#include "FreeRTOS.h"
+#include "semphr.h"
 
-NullStreamOutput StreamOutput::NullStream;
-AllStreamsOutput StreamOutput::AllStreams;
+static SemaphoreHandle_t output_lock;
+static StaticSemaphore_t output_lock_store;
 
-int AllStreamsOutput::vprintf(const char *format, va_list args)
+static void lock_output()
 {
-    return THEKERNEL->streams.vprintf(format, args);
+    if(output_lock == nullptr) output_lock= xSemaphoreCreateMutexStatic(&output_lock_store);
+    xSemaphoreTake(output_lock, portMAX_DELAY);
 }
 
-int AllStreamsOutput::puts(const char *str, int size)
+static void unlock_output()
 {
-    return THEKERNEL->streams.puts(str, size);
-}
-
-void AllStreamsOutput::send(uint8_t type, const void *payload, size_t len)
-{
-    THEKERNEL->streams.send(type, payload, len);
+    xSemaphoreGive(output_lock);
 }
 
 // longer payloads are split into several frames of the same type
@@ -60,6 +56,7 @@ int StreamOutput::vprintf(const char *format, va_list args)
 void StreamOutput::send(uint8_t type, const void *payload, size_t len)
 {
     const uint8_t *p = static_cast<const uint8_t *>(payload);
+    lock_output();
     do {
         size_t n = len > MAX_FRAME_PAYLOAD ? MAX_FRAME_PAYLOAD : len;
         size_t total = Frame::encode(type, p, n, frame_buf);
@@ -67,4 +64,5 @@ void StreamOutput::send(uint8_t type, const void *payload, size_t len)
         p += n;
         len -= n;
     } while (len > 0);
+    unlock_output();
 }

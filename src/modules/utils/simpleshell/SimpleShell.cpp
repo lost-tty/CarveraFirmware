@@ -75,8 +75,6 @@ extern "C" uint32_t  __malloc_free_list;
 
 // support upload file type definition
 #define FILETYPE	"lz"		//compressed by quicklz
-// version definition
-#define VERSION "1.0.7"
 
 // command lookup table
 const SimpleShell::ptentry_t SimpleShell::commands_table[] = {
@@ -1211,7 +1209,7 @@ void SimpleShell::calc_thermistor_command( string parameters, StreamOutput *stre
         }else{
             char buf[80];
             snprintf(buf, sizeof(buf), "M305 S%d I%1.18f J%1.18f K%1.18f", saveto, c1, c2, c3);
-            gcode_dispatch.run_line(buf, &StreamOutput::NullStream);
+            gcode_dispatch.run_line(buf, &THEKERNEL->streams);
             stream->printf("  Setting Thermistor %d to those settings, save with M500\n", saveto);
         }
 

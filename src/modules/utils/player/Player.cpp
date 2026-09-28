@@ -9,6 +9,7 @@
 
 #include "SimpleShell.h"
 #include "Robot.h"
+#include "libs/Kernel.h"
 #include "libs/nuts_bolts.h"
 #include "libs/utils.h"
 #include "SerialConsole.h"
@@ -117,7 +118,7 @@ void Player::optional_stop(Gcode *)
 void Player::optional_stop_mode(Gcode *gcode)
 {
     m1_stops= gcode->m == 334;
-    gcode->stream->printf("turning optional stop mode %s\r\n", m1_stops ? "on" : "off");
+    printk("turning optional stop mode %s\r\n", m1_stops ? "on" : "off");
 }
 
 // M600: suspend
@@ -128,7 +129,7 @@ void Player::suspend_gcode(Gcode *)
 
 void Player::resume_gcode(Gcode *gcode)
 {
-    this->resume_command("", gcode->stream);
+    this->resume_command("", &THEKERNEL->streams);
 }
 
 // When a new line is received, check if it is a command, and if it is, act upon it
@@ -325,8 +326,8 @@ Source::Result Player::next(SerialMessage &msg)
             printk("%lu: %s", file.lines(), buf);
         }
         msg.message = buf;
-        // playing a file: suppress the per line replies, the trace above is the output
-        msg.stream = &(StreamOutput::NullStream);
+        // playing a file: the trace above is the output, replies go to every console
+        msg.stream = &THEKERNEL->streams;
         msg.line = file.lines();
         return LINE;
     }

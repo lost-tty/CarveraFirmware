@@ -30,7 +30,7 @@ static McodeRegistry::Mcode code{0, McodeRegistry::ANY_SUBCODE, McodeRegistry::A
 
 static Gcode line(const char *text)
 {
-    return Gcode(std::string(text), nullptr, 0);
+    return Gcode(std::string(text), 0);
 }
 
 int main()

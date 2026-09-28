@@ -95,7 +95,7 @@ void WirelessProbe::service() {
         	   // printk("WP received: [%s]\n", received.c_str());
         	   if (received[0] == 'V') {
             	   // get wireless probe voltage
-            	   Gcode gc(received, &StreamOutput::NullStream);
+            	   Gcode gc(received);
             	   if (gc.get_value('V') <= 4.2) {
                 	   this->wp_voltage = gc.get_value('V');
                 	   // compare voltage value and switch probe charger
