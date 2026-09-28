@@ -20,6 +20,7 @@ class Gcode;
 #include <string>
 #include <cstdint>
 #include <map>
+#include <queue>
 #include <vector>
 
 #include "FreeRTOS.h"
@@ -55,7 +56,7 @@ class Player : public Module, public Source, public Killable {
     private:
         typedef void (Player::*command_t)(string, StreamOutput *);
         static const struct Cmd { const char *name; command_t fn; const char *help; } COMMANDS[];
-        SimpleShell::Registered shell_slots[6];
+        SimpleShell::Registered shell_slots[7];
         void play_command( string parameters, StreamOutput* stream );
         void progress_command( string parameters, StreamOutput* stream );
         void abort_command( string parameters, StreamOutput* stream );
@@ -63,6 +64,7 @@ class Player : public Module, public Source, public Killable {
         void suspend_now();
         void resume_command( string parameters, StreamOutput* stream );
         void goto_command( string parameters, StreamOutput* stream );
+        void buffer_command( string parameters, StreamOutput* stream );
         void test_command(string parameters, StreamOutput* stream );
 
         unsigned long calculate_elapsed_secs();
@@ -76,6 +78,7 @@ class Player : public Module, public Source, public Killable {
         bool verbose;
 
         GcodeFile file;
+        std::queue<string> buffered_queue; // console lines queued by "buffer", fed one per loop before the next file line
         TickType_t start_time;
         struct {
             bool playing_file:1;

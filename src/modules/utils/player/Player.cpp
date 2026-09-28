@@ -140,6 +140,7 @@ const Player::Cmd Player::COMMANDS[] = {
     {"suspend",  &Player::suspend_command,  "suspend [h] - suspend the job, h keeps the spindle on"},
     {"resume",   &Player::resume_command,   "resume - resume a suspended job"},
     {"goto",     &Player::goto_command,     "goto line - jump to a line while suspended"},
+    {"buffer",   &Player::buffer_command,   "buffer <gcode> - queue a gcode line to run before the next file line"},
     {nullptr, nullptr, nullptr},
 };
 
@@ -150,6 +151,12 @@ void Player::shell(void *self, const char *name, std::string args, StreamOutput 
     for (const Cmd *c= COMMANDS; c->name != nullptr; ++c) {
         if(strcmp(c->name, name) == 0) { (me->*(c->fn))(args, stream); return; }
     }
+}
+
+void Player::buffer_command( string parameters, StreamOutput *stream )
+{
+    buffered_queue.push(parameters);
+    stream->printf("Command buffered: %s\r\n", parameters.c_str());
 }
 
 // Play a gcode file by considering each line as if it was received on the serial console
@@ -286,6 +293,8 @@ void Player::abort()
     this->m1_stops = false;
     this->filename = "";
     this->verbose = false;
+    while (!buffered_queue.empty())
+         buffered_queue.pop();
     file.close();
     machine_task.enforce_keepout();
 }
@@ -316,6 +325,14 @@ Source::Result Player::next(SerialMessage &msg)
         this->suspend_pending = false;
         suspend_now();
         return WAIT;
+    }
+
+    if (!buffered_queue.empty()) {
+        msg.message = buffered_queue.front();
+        buffered_queue.pop();
+        // a buffered line runs ahead of the next file line, so that is the line a stop here reports
+        msg.line = file.lines() + 1;
+        return LINE;
     }
 
     char buf[130];
