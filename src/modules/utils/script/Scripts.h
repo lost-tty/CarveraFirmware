@@ -44,6 +44,8 @@ private:
     std::string name;                   // sub being run, for messages
     bool loaded= false;
     bool trace= false;                  // echo every executed line with its origin
+    bool cycle_run= false;              // the sub running was triggered by a canned cycle (G80-89)
+    GcodeDispatch::ModalState saved_modal;  // the program's group 1 while a cycle sub runs
 };
 
 extern Scripts scripts;

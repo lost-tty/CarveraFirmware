@@ -92,7 +92,7 @@ static bool is_modal_setting(Class c) {
 
 Module *GcodeDispatch::handlers = nullptr;
 
-bool GcodeDispatch::run_mcode(Gcode &gcode, bool nested)
+bool GcodeDispatch::run_mcode(Gcode &gcode)
 {
     const McodeRegistry::Mcode *m= McodeRegistry::find(gcode.m, gcode.subcode);
     if(m == nullptr) return false;
@@ -150,7 +150,7 @@ void GcodeDispatch::broadcast_drained(Gcode &gcode, OnMachine on)
     broadcast(gcode, on);
 }
 
-void GcodeDispatch::run_gcode(Gcode &gcode, uint8_t flags, bool nested)
+void GcodeDispatch::run_gcode(Gcode &gcode, uint8_t flags)
 {
     MachineTask::Job job= (flags & DRAINS) ? broadcast_drained : broadcast;
 
@@ -171,7 +171,9 @@ void GcodeDispatch::add_handler(Module *module)
 void GcodeDispatch::init()
 {
     Parameters::init();
-    modal_group_1= 0;
+    modal_motion= 0;
+    modal_cycle= 0;
+    cycle_initial= 0;
     homed_check= true;
 
     ADD_MCODE(m500, 500, IMMEDIATE, GcodeDispatch::report_settings);
@@ -230,17 +232,17 @@ void GcodeDispatch::run_mdi(const SerialMessage &msg)
     run_line(msg);
 }
 
-bool GcodeDispatch::run_line(const SerialMessage &msg, bool nested)
+bool GcodeDispatch::run_line(const SerialMessage &msg)
 {
-    return dispatch(msg, nested);
+    return dispatch(msg);
 }
 
-bool GcodeDispatch::run_line(const std::string &line, StreamOutput *stream, bool nested)
+bool GcodeDispatch::run_line(const std::string &line, StreamOutput *stream)
 {
-    return dispatch(SerialMessage{stream, line, 0}, nested);
+    return dispatch(SerialMessage{stream, line, 0});
 }
 
-bool GcodeDispatch::dispatch(const SerialMessage &msg, bool nested)
+bool GcodeDispatch::dispatch(const SerialMessage &msg)
 {
     const string &s= msg.message;
 
@@ -272,7 +274,22 @@ bool GcodeDispatch::dispatch(const SerialMessage &msg, bool nested)
 
     gcode::Line parsed; // local: modules may dispatch console lines while a line executes
     if(!parsed.parse(s.c_str() + i, &params)) return fail(parsed.error_text().c_str());
-    return execute(parsed.words(), s.substr(i), msg.line, nested);
+    return execute(parsed.words(), s.substr(i), msg.line);
+}
+
+void GcodeDispatch::program_end()
+{
+    modal_motion= 0;
+    modal_cycle= 0;
+    cycle_initial= 0;
+}
+
+static float wcs_z()
+{
+    float mpos[3];
+    THEROBOT.get_real_machine_position(mpos);
+    Robot::wcs_t pos= THEROBOT.mcs2wcs(mpos);
+    return THEROBOT.from_millimeters(std::get<Z_AXIS>(pos));
 }
 
 void GcodeDispatch::say(Gcode *gcode)
@@ -312,7 +329,7 @@ bool GcodeDispatch::announce(const string &line, size_t from, unsigned int numbe
     words.push_back(gcode::Word{.letter= 'M', .subcode= 0, .has_value= true, .value= 118.0F});
     Gcode gcode(words, 0, number);
     gcode.text= out;
-    run_mcode(gcode, false);
+    run_mcode(gcode);
     return true;
 }
 
@@ -374,7 +391,7 @@ GcodeDispatch::Gate GcodeDispatch::homed_enough(const gcode::Words &words)
     return PASS;
 }
 
-bool GcodeDispatch::execute(const gcode::Words &words, const string &text, unsigned int line, bool nested)
+bool GcodeDispatch::execute(const gcode::Words &words, const string &text, unsigned int line)
 {
     if(words.empty()) {
         return true;
@@ -427,8 +444,8 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, unsig
     for (size_t k= 0; k < blocks.size(); k++) {
         Blk &b= blocks[k];
         if(b.motion || !(b.mcs || (b.settings_only && (b.axis || b.feed)))) continue;
-        all.push_back(gcode::Word{.letter= 'G', .subcode= 0, .has_value= true,
-                                  .value= float(b.axis || b.mcs ? modal_group_1 : 1)});
+        uint8_t modal= b.axis || b.mcs ? modal_cycle != 0 ? modal_cycle : modal_motion : 1;
+        all.push_back(gcode::Word{.letter= 'G', .subcode= 0, .has_value= true, .value= float(modal)});
         block_of.push_back(k);
         size_t pos= order.size();
         while(pos > 0 && (order[pos - 1].block > k || (order[pos - 1].block == k && order[pos - 1].rank > MOTION))) pos--;
@@ -472,25 +489,33 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, unsig
 
         if(c.rank == MOTION) {
             gcode.mcs= blocks[c.block].mcs;
-            // G80 cancels a canned cycle, so the mode goes back to the last plain motion
-            if(!nested && c.index < words.size() && (gcode.g < 4 || (gcode.g >= 81 && gcode.g <= 89))) modal_group_1= gcode.g;
-            if(!nested && gcode.g == 80) modal_group_1= 0;
+            if(c.index < words.size()) {
+                uint8_t g= gcode.g;
+                if(g < 4) {
+                    modal_motion= g;
+                    modal_cycle= 0;
+                }else if(g == 80) {
+                    modal_cycle= 0;
+                }else if(g >= 81 && g <= 89) {
+                    if(modal_cycle == 0) cycle_initial= wcs_z();
+                    modal_cycle= g;
+                }
+            }
         }
 
         bool claimed= true;
-        if(gcode.has_m) claimed= run_mcode(gcode, nested);
-        else if(c.index >= words.size()) run_gcode(gcode, 0, nested);
-        else run_gcode(gcode, c.rank == MOTION ? 0 : classify(words[c.index]).flags, nested);
+        if(gcode.has_m) claimed= run_mcode(gcode);
+        else if(c.index >= words.size()) run_gcode(gcode, 0);
+        else run_gcode(gcode, c.rank == MOTION ? 0 : classify(words[c.index]).flags);
 
         // a scripted code runs its sub after the modules have seen it, so their handlers still apply;
         // the ok follows when the sub is done, which is the last block of the line by rank
         std::string err;
-        if(scripts != nullptr && !nested && scripts->trigger(gcode, &THEKERNEL->streams, err)) {
+        if(scripts != nullptr && scripts->trigger(gcode, &THEKERNEL->streams, err)) {
             return err.empty() || fail(err.c_str());
         }
 
-        // a macro may claim a code no module does, and a nested line never reaches the trigger
-        if(!claimed && !nested) {
+        if(!claimed) {
             char buf[24];
             snprintf(buf, sizeof(buf), "unsupported M%u", gcode.m);
             return fail(buf);

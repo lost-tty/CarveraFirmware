@@ -111,6 +111,8 @@ bool Scripts::run(const char *sub, const float *args, unsigned nargs, StreamOutp
 
 void Scripts::finish()
 {
+    if(cycle_run) gcode_dispatch.set_modal_state(saved_modal);
+    cycle_run= false;
     machine_task.enforce_keepout();
     atc_handler.set_state(0);
     reply= nullptr;
@@ -125,6 +127,9 @@ void Scripts::halt(int reason)
 // The sub is only pushed here, its first line runs on the next main loop; stream gets the ok when it is done.
 bool Scripts::trigger(const Gcode &gcode, StreamOutput *stream, std::string &err)
 {
+    // while a script runs, only its own lines reach the dispatcher: they keep the codes' built-in
+    // meaning instead of triggering the sub they came from
+    if(runner == nullptr || runner->running()) return false;
     if(!gcode.has_g && !gcode.has_m) return false;
     const Trigger *t= nullptr;
     for (const Trigger &e : TRIGGERS) {
@@ -133,6 +138,9 @@ bool Scripts::trigger(const Gcode &gcode, StreamOutput *stream, std::string &err
     }
     if(t == nullptr || !loaded || macros.program().find_sub(t->sub) < 0) return false; // not scripted, the C++ handler takes it
     if(!run(t->sub, nullptr, 0, stream, err)) return true;
+    // a canned cycle's sub moves in its own group 1; the program's is put back when the sub ends
+    cycle_run= t->letter == 'G' && t->code >= 80 && t->code <= 89;
+    if(cycle_run) saved_modal= gcode_dispatch.modal_state();
     runner->set_local("code", t->code);
     runner->set_local("subcode", gcode.subcode);
     for (const gcode::Word &w : gcode.get_words()) {

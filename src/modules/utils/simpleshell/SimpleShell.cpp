@@ -221,7 +221,7 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
                 {
                     machine_task.unlock(new_message.stream);
                     // issue G28.2 which is force homing cycle
-                    gcode_dispatch.run_line("G28.2", new_message.stream, false);
+                    gcode_dispatch.run_line("G28.2", new_message.stream);
 
                 }
                 break;

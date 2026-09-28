@@ -2,6 +2,7 @@
 #include "Persist.h"
 
 #include "libs/Kernel.h"
+#include "GcodeDispatch.h"
 #include "Robot.h"
 #include "Conveyor.h"
 #include "modules/robot/MachineTask.h"
@@ -106,6 +107,7 @@ static float probe_x(void *) { return probe_axis(0); }
 static float probe_y(void *) { return probe_axis(1); }
 static float probe_z(void *) { return probe_axis(2); }
 static float probe_ok(void *) { return probe_axis(3); }
+static float cycle_initial(void *) { return gcode_dispatch.get_cycle_initial(); }
 
 static constexpr Parameters::Named BUILTIN[] = {
     {"_laser_mode",  laser_mode},
@@ -117,6 +119,7 @@ static constexpr Parameters::Named BUILTIN[] = {
     {"_probe_y",     probe_y},
     {"_probe_z",     probe_z},
     {"_probe_ok",    probe_ok},
+    {"_cycle_initial", cycle_initial},
 };
 
 void Parameters::init()

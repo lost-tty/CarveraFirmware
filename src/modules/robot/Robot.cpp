@@ -904,6 +904,7 @@ void Robot::on_gcode_received(Gcode *argument)
 // M2, M30: end of program, back to the modal state a program starts from
 void Robot::end_of_program(Gcode *gcode)
 {
+    gcode_dispatch.program_end();
     reset_modal_state();
     current_wcs = 0;
     keepout_on = true;

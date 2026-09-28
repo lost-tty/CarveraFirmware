@@ -86,6 +86,7 @@ void SourceStack::clear()
     }
     frozen= 0;
     stopping= false;
+    gcode_dispatch.program_end();
 }
 
 // false: nothing is queued ahead of it, so the caller stops the job itself
