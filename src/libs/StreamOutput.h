@@ -12,6 +12,7 @@
 #include <cstring>
 #include <cstdint>
 #include <stdio.h>
+#include <string>
 
 // This is a base class for all StreamOutput objects.
 
@@ -26,9 +27,19 @@ class StreamOutput {
         virtual int gets(char** buf, int size = 0) { return 0; }
         virtual int puts(const char* buf, int size = 0) = 0;
         virtual bool ready() { return true; };
+
+        static void console_lock();
+        static void console_unlock();
+
+        static void lock_broadcast();
+        static void unlock_broadcast();
+
         // set for the duration of a file transfer, which reads the stream's bytes itself
         virtual void set_transferring(bool) {}
         virtual bool is_transferring() const { return false; }
+        virtual bool accept_event() const { return !is_transferring(); }
+        virtual const std::string &cwd() const;
+        virtual void set_cwd(const std::string &path);
 };
 
 #endif

@@ -47,7 +47,13 @@ void SerialConsole::on_serial_char_received() {
 }
 
 void SerialConsole::on_main_loop(void * argument){
-    decode(rx_raw);
+    while (!transferring && rx_raw.size() > 0) {
+        char chunk[32];
+        size_t n = 0;
+        while (n < sizeof(chunk) && rx_raw.size() > 0) rx_raw.pop_front(chunk[n++]);
+        queue((const uint8_t *)chunk, n);
+    }
+    while (act_key()) { }
     string line;
     if (next_line(line)) SimpleShell::run(line, this);
 }

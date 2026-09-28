@@ -30,6 +30,7 @@
 
 
 #define ATC_AXIS 4
+static_assert(k_max_actuators >= ATC_AXIS + 1, "ATC needs MAX_ROBOT_ACTUATORS >= 5");
 
 #define detector_switch_checksum    CHECKSUM("toolsensor")
 

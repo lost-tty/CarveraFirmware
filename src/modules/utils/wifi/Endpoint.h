@@ -14,6 +14,8 @@ public:
     uint8_t ip[4];      /**< IPv4 address, e.g., {192, 168, 1, 1} */
     uint16_t port;      /**< Port number, e.g., 8080 */
 
+    Endpoint() : ip{0, 0, 0, 0}, port(0) {}
+
     /**
      * @brief Constructor that initializes the Endpoint with an IP address and port.
      *

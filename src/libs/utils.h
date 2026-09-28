@@ -35,7 +35,8 @@ bool file_exists( const std::string file_name );
 
 void system_reset( bool dfu= false );
 
-std::string absolute_from_relative( std::string path );
+class StreamOutput;
+std::string absolute_from_relative( std::string path, const StreamOutput *sink = nullptr );
 std::string change_to_md5_path( std::string origin );
 std::string change_to_lz_path( std::string origin );
 void check_and_make_path( std::string origin );

@@ -22,14 +22,17 @@ using namespace std;
 
 #include "M8266WIFIDrv.h"
 #include "libs/RingBuffer.h"
-#include "modules/communication/FrameConsole.h"
+#include "modules/communication/Session.h"
 #include "libs/Frame.h"
 
 #define WIFI_DATA_MAX_SIZE 1460
 #define WIFI_DATA_TIMEOUT_MS 10
+#define WIFI_TX_RETRIES 50
+#define WIFI_TX_RETRIES_SHORT 5
 #define MAX_WLAN_SIGNALS 8
+#define MAX_SESSIONS 4                   // console clients at once, matching the module's own cap
 
-class WifiProvider : public Module, public FrameConsole
+class WifiProvider : public Module, public StreamOutput
 {
 public:
     std::string scan_wlans();
@@ -39,7 +42,6 @@ public:
     void set_ap_password(const char *password);
     void set_ap_enabled(bool on);
     void on_module_loaded();
-    void on_main_loop( void* argument );
     void on_second_tick(void* argument);
     void service();
 
@@ -48,11 +50,21 @@ public:
     void registerTcpDataCallback(uint8_t link_no, std::function<void(uint8_t*, uint16_t, uint8_t*, uint16_t)> callback);
     bool sendTcpDataToClient(const uint8_t* remote_ip, uint16_t remote_port, uint8_t link_no, const uint8_t* data, uint16_t length);
     bool closeTcpConnection(const uint8_t* remote_ip, uint16_t remote_port, uint8_t link_no);
-    int gets(char** buf, int size = 0);
     int puts(const char*, int size = 0);
-    int putc(int c);
-    int getc(void);
-    bool ready();
+
+    u16 send_to_client(const u8 ip[4], u16 port, u8 link, const u8* data, size_t len,
+                   int retries = WIFI_TX_RETRIES);
+
+    bool read_chunk(bool dispatch);
+    bool held_for(const Session* s) const { return rx_owner == s; }
+    bool take_held(Session* s, char** buf, int* n);
+    void drop_held(const Session* s) { if (rx_owner == s) { rx_owner = nullptr; rx_len = 0; } }
+
+    int stage(Session* s, const uint8_t* data, size_t len);
+    int flush_tx(bool patient = true);
+
+private:
+    int flush_unlocked(bool patient = true);   // caller holds tx_lock
 
 public:
     void configure(const void *cfg);
@@ -79,7 +91,9 @@ private:
     void get_broadcast_from_ip_and_netmask(char *broadcast_addr, char *ip_addr, char *netmask);
 
     void on_pin_rise();
-    void receive_wifi_data();
+
+    Session* session_for(const u8 ip[4], u16 port, bool create);
+    void reap_sessions(const ClientInfo* listed, u8 count);
 
 
     uint8_t getNextLinkNo();
@@ -91,8 +105,15 @@ private:
 
     string test_buffer;
 
-    u8 txData[WIFI_DATA_MAX_SIZE];
-    u8 rxData[WIFI_DATA_MAX_SIZE];
+    Session sessions[MAX_SESSIONS];
+
+    u8 rx_buf[WIFI_DATA_MAX_SIZE];
+    Session* rx_owner = nullptr;   // the session the bytes in rx_buf belong to, if unread
+    u16 rx_len = 0;
+
+    char tx_buf[WIFI_DATA_MAX_SIZE];   // frames staged for one client, flushed as one packet
+    size_t tx_len = 0;
+    Session* tx_owner = nullptr;
 
 
     std::map<u8, std::function<void(u8*, u16, u8*, u16)>> data_callbacks;

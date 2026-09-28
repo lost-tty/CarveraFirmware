@@ -125,7 +125,6 @@ void SimpleShell::on_module_loaded()
 }
 
 SimpleShell::Registered *SimpleShell::registered = nullptr;
-std::string SimpleShell::current_path = "/";
 
 void SimpleShell::add_command(Registered &slot, const char *name, command_fn fn, void *context, const char *help)
 {
@@ -291,7 +290,7 @@ void SimpleShell::ls_command(string parameters, StreamOutput *stream)
         }
     }
 
-    path = absolute_from_relative(path);
+    path = absolute_from_relative(path, stream);
 
     DIR *d;
     struct dirent *p;
@@ -358,19 +357,19 @@ bool SimpleShell::being_played(const string &path, StreamOutput *stream)
 // Delete a file
 void SimpleShell::rm_command( string parameters, StreamOutput *stream )
 {
-    string path = absolute_from_relative(shift_parameter( parameters ));
+    string path = absolute_from_relative(shift_parameter( parameters ), stream);
     if(being_played(path, stream)) return;
     string md5_path = change_to_md5_path(path);
     string lz_path = change_to_lz_path(path);
 
-    string toRemove = absolute_from_relative(path);
+    string toRemove = absolute_from_relative(path, stream);
     int s = remove(toRemove.c_str());
     if (s != 0) {
     	stream->printf("Could not delete %s \r\n", toRemove.c_str());
     	stream->send(Frame::LOAD_ERROR, "ok\r\n", 4);
     } else {
-    	remove(absolute_from_relative(md5_path).c_str());
-    	remove(absolute_from_relative(lz_path).c_str());
+    	remove(absolute_from_relative(md5_path, stream).c_str());
+    	remove(absolute_from_relative(lz_path, stream).c_str());
     	scripts.file_changed(toRemove.c_str());
     	stream->send(Frame::LOAD_FINISH, "ok\r\n", 4);
     }
@@ -379,10 +378,10 @@ void SimpleShell::rm_command( string parameters, StreamOutput *stream )
 // Rename a file
 void SimpleShell::mv_command( string parameters, StreamOutput *stream )
 {
-    string from = absolute_from_relative(shift_parameter( parameters ));
+    string from = absolute_from_relative(shift_parameter( parameters ), stream);
     string md5_from = change_to_md5_path(from);
     string lz_from = change_to_lz_path(from);
-    string to = absolute_from_relative(shift_parameter(parameters));
+    string to = absolute_from_relative(shift_parameter(parameters), stream);
     if(being_played(from, stream) || being_played(to, stream)) return;
     string md5_to = change_to_md5_path(to);
     string lz_to = change_to_lz_path(to);
@@ -404,7 +403,7 @@ void SimpleShell::mv_command( string parameters, StreamOutput *stream )
 // Create a new directory
 void SimpleShell::mkdir_command( string parameters, StreamOutput *stream )
 {
-    string path = absolute_from_relative(shift_parameter( parameters ));
+    string path = absolute_from_relative(shift_parameter( parameters ), stream);
     string md5_path = change_to_md5_path(path);
     string lz_path = change_to_lz_path(path);
 
@@ -423,14 +422,14 @@ void SimpleShell::mkdir_command( string parameters, StreamOutput *stream )
 // Change current absolute path to provided path
 void SimpleShell::cd_command( string parameters, StreamOutput *stream )
 {
-    string folder = absolute_from_relative( parameters );
+    string folder = absolute_from_relative( parameters, stream );
 
     DIR *d;
     d = opendir(folder.c_str());
     if (d == NULL) {
         stream->printf("Could not open directory %s \r\n", folder.c_str() );
     } else {
-        current_path = folder;
+        stream->set_cwd(folder);
         closedir(d);
     }
 }
@@ -438,14 +437,14 @@ void SimpleShell::cd_command( string parameters, StreamOutput *stream )
 // Responds with the present working directory
 void SimpleShell::pwd_command( string parameters, StreamOutput *stream )
 {
-    stream->printf("%s\r\n", current_path.c_str());
+    stream->printf("%s\r\n", stream->cwd().c_str());
 }
 
 // Output the contents of a file, first parameter is the filename, second is the limit ( in number of lines to output )
 void SimpleShell::cat_command( string parameters, StreamOutput *stream )
 {
     // Get parameters ( filename and line limit )
-    string filename = absolute_from_relative(shift_parameter(parameters));
+    string filename = absolute_from_relative(shift_parameter(parameters), stream);
     int limit = -1;
     int delay= 0;
     // parse parameters
@@ -1275,7 +1274,7 @@ void SimpleShell::switch_command( string parameters, StreamOutput *stream)
 
 void SimpleShell::md5sum_command( string parameters, StreamOutput *stream )
 {
-	string filename = absolute_from_relative(parameters);
+	string filename = absolute_from_relative(parameters, stream);
 
 	// Open file
 	FILE *lp = fopen(filename.c_str(), "r");
@@ -1732,27 +1731,20 @@ void SimpleShell::config_default_command( string parameters, StreamOutput *strea
 }
 
 void SimpleShell::upload_command(std::string parameters, StreamOutput* stream) {
-    std::string filename = absolute_from_relative(shift_parameter(parameters));
+    std::string filename = absolute_from_relative(shift_parameter(parameters), stream);
     if(being_played(filename, stream)) return;
 
-    bool ret = transfer.upload(filename, stream);
-
-    if (ret) {
-        stream->printf("Info: upload success: %s.\r\n", filename.c_str());
-    } else {
-        stream->printf("Upload failed for file: %s.\r\n", filename.c_str());
-    }
+    transfer.upload(filename, stream);
 }
 
 void SimpleShell::download_command( string parameters, StreamOutput *stream )
 {
-    std::string filename = absolute_from_relative(shift_parameter(parameters));
+    std::string filename = absolute_from_relative(shift_parameter(parameters), stream);
 
-    bool ret = transfer.download(filename, stream);
+    transfer.download(filename, stream);
+}
 
-    if (ret) {
-        stream->printf("Info: Download success: %s.\r\n", filename.c_str());
-    } else {
-        stream->printf("Download failed for file: %s.\r\n", filename.c_str());
-    }
+void SimpleShell::cancel_transfer(StreamOutput* stream)
+{
+    simpleshell.transfer.cancel_if(stream);
 }

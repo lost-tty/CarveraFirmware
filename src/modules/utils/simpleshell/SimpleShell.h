@@ -47,7 +47,6 @@ public:
     }
 
     typedef void (*command_fn)(void *context, const char *name, std::string args, StreamOutput *stream);
-    static const std::string &cwd() { return current_path; }
 
     struct Registered { const char *name; command_fn command; void *context; const char *help; Registered *next; };
     static void add_command(Registered &slot, const char *name, command_fn fn, void *context, const char *help);
@@ -57,6 +56,9 @@ public:
     SimpleShell() {}
 
     void on_module_loaded();
+
+    void service_transfer() { transfer.service(); }
+    static void cancel_transfer(StreamOutput* s);
     bool parse_command(const char *cmd, string args, StreamOutput *stream);
     void print_mem(StreamOutput *stream) { mem_command("", stream); }
     void version_command(string parameters, StreamOutput *stream );
@@ -133,7 +135,6 @@ private:
     static const ptentry_t commands_table[];
 
     static Registered *registered;
-    static std::string current_path;
 
     FileTransfer transfer;
 };

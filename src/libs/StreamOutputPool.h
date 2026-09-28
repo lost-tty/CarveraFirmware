@@ -18,23 +18,27 @@ public:
     int puts(const char* s, int size)
     {
         int r = 0;
+        StreamOutput::lock_broadcast();
         for(std::set<StreamOutput*>::iterator i = this->streams.begin(); i != this->streams.end(); i++)
         {
-            if ((*i)->is_transferring()) continue; // text would corrupt the transfer
+            if (!(*i)->accept_event()) continue; // text would corrupt the transfer
             int k = (*i)->puts(s, size);
             if (k > r)
                 r = k;
         }
+        StreamOutput::unlock_broadcast();
         return r;
     }
 
     void send(uint8_t type, const void *payload, size_t len)
     {
+        StreamOutput::lock_broadcast();
         for(std::set<StreamOutput*>::iterator i = this->streams.begin(); i != this->streams.end(); i++)
         {
-            if ((*i)->is_transferring()) continue; // text would corrupt the transfer
+            if (!(*i)->accept_event()) continue; // text would corrupt the transfer
             (*i)->send(type, payload, len);
         }
+        StreamOutput::unlock_broadcast();
     }
 
     void append_stream(StreamOutput* stream)

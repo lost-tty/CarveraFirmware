@@ -466,6 +466,7 @@ void Kernel::serve_io()
     watchdog.alive();
     wifi_provider.service();
     wireless_probe.service();
+    simpleshell.service_transfer();
 }
 
 void Kernel::serve_main()

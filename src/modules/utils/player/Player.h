@@ -79,6 +79,7 @@ class Player : public Module, public Source, public Killable {
 
         GcodeFile file;
         std::queue<string> buffered_queue; // console lines queued by "buffer", fed one per loop before the next file line
+        static const int BUFFER_LIMIT = 32; // a remote client must not grow the queue without bound
         TickType_t start_time;
         struct {
             bool playing_file:1;

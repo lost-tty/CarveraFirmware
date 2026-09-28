@@ -155,6 +155,10 @@ void Player::shell(void *self, const char *name, std::string args, StreamOutput 
 
 void Player::buffer_command( string parameters, StreamOutput *stream )
 {
+    if ((int)buffered_queue.size() >= BUFFER_LIMIT) {
+        stream->printf("error:buffer queue full, an abort clears it\r\n");
+        return;
+    }
     buffered_queue.push(parameters);
     stream->printf("Command buffered: %s\r\n", parameters.c_str());
 }
@@ -166,7 +170,7 @@ void Player::play_command( string parameters, StreamOutput *stream )
     // extract any options from the line and terminate the line there
     string options= extract_options(parameters);
     // Get filename which is the entire parameter line upto any options found or entire line
-    this->filename = absolute_from_relative(shift_parameter(parameters));
+    this->filename = absolute_from_relative(shift_parameter(parameters), stream);
 
     if (!sources.empty() || sources.suspended()) {
         stream->printf("Currently printing, abort print first\r\n");

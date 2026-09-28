@@ -8,7 +8,9 @@
 #include "WifiProvider.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "semphr.h"
 #include "SimpleShell.h"
+#include "modules/utils/simpleshell/FileTransfer.h"
 
 #include "brd_cfg.h"
 #include "M8266HostIf.h"
@@ -109,7 +111,6 @@ void WifiProvider::on_module_loaded()
     ADD_MCODE(m482, 482, IMMEDIATE, WifiProvider::query_sta_param);
     ADD_MCODE(m483, 483, IMMEDIATE, WifiProvider::query_ap_param);
     ADD_MCODE(m489, 489, IMMEDIATE, WifiProvider::report_status);
-    this->register_for_event(ON_MAIN_LOOP);
     beacon.start();
 }
 
@@ -118,47 +119,166 @@ void WifiProvider::on_pin_rise()
     has_data_flag = true;
 }
 
-void WifiProvider::receive_wifi_data()
-{
-    u8 link_no;
-    u16 received = 0;
-    u16 status;
-	u8 remote_ip[4];
-	u16 remote_port;
+namespace {
+    StaticSemaphore_t module_lock_store;
+    SemaphoreHandle_t module_lock = xSemaphoreCreateMutexStatic(&module_lock_store);
 
-    while (true) {
-        received = M8266WIFI_SPI_RecvData_ex(rxData, WIFI_DATA_MAX_SIZE, WIFI_DATA_TIMEOUT_MS, &link_no, remote_ip, &remote_port, &status);
+    class ModuleLock {
+    public:
+        ModuleLock() { xSemaphoreTake(module_lock, portMAX_DELAY); }
+        ~ModuleLock() { xSemaphoreGive(module_lock); }
+        ModuleLock(const ModuleLock&) = delete;
+        ModuleLock& operator=(const ModuleLock&) = delete;
+    };
 
-		// Check if there is a callback registered for this link
-        auto it = data_callbacks.find(link_no);
-        if (it != data_callbacks.end()) {
-            // Call the registered callback function
-            it->second(remote_ip, remote_port, rxData, received);
-        } else {
-			if (link_no == udp_link_no) {
-				// Ignore UDP data
-				return;
-			}
-
-			if (link_no == tcp_link_no) {
-				// Data received from the primary TCP connection
-				for (int i = 0; i < received; i++) {
-					if (decoder.feed(rxData[i])) {
-						on_frame();
-					}
-				}
-			}
-		}
-
-		if (received < WIFI_DATA_MAX_SIZE) {
-			return;
-		}
-    }
+    StaticSemaphore_t tx_lock_store;
+    SemaphoreHandle_t tx_lock = xSemaphoreCreateMutexStatic(&tx_lock_store);
 }
 
-bool WifiProvider::ready()
+bool WifiProvider::read_chunk(bool dispatch)
 {
-    return M8266WIFI_SPI_Has_DataReceived();
+    if (rx_owner != nullptr) return false;
+
+    u8 link_no = 0xFF;
+    u8 remote_ip[4]{};
+    u16 remote_port = 0;
+    u16 status = 0;
+    u16 received;
+
+    {
+        ModuleLock lock;
+        received = M8266WIFI_SPI_RecvData_ex(rx_buf, WIFI_DATA_MAX_SIZE, WIFI_DATA_TIMEOUT_MS,
+                                             &link_no, remote_ip, &remote_port, &status);
+    }
+
+    if (link_no == 0xFF || received == 0) return false;   // nothing arrived
+
+    auto it = data_callbacks.find(link_no);
+    if (it != data_callbacks.end()) {
+        it->second(remote_ip, remote_port, rx_buf, received);
+        return received == WIFI_DATA_MAX_SIZE;
+    }
+    if (link_no != tcp_link_no) return received == WIFI_DATA_MAX_SIZE;  // the udp link: not a console
+
+    Session* s = session_for(remote_ip, remote_port, true);
+    if (s == nullptr) return received == WIFI_DATA_MAX_SIZE;   // no room; the module should have refused them
+    s->fresh = true;
+
+    if (s->is_transferring()) {
+        rx_owner = s;
+        rx_len = received;
+        return false;
+    } else if (dispatch) {
+        s->feed(rx_buf, received);
+    } else {
+        s->queue(rx_buf, received);
+    }
+    return received == WIFI_DATA_MAX_SIZE;
+}
+
+bool WifiProvider::take_held(Session* s, char** buf, int* n)
+{
+    if (rx_owner != s || rx_len == 0) return false;
+    rx_owner = nullptr;
+    *buf = (char*)rx_buf;
+    *n = rx_len;
+    rx_len = 0;
+    return true;
+}
+
+int WifiProvider::flush_unlocked(bool patient)
+{
+    if (tx_len == 0 || tx_owner == nullptr) { tx_len = 0; tx_owner = nullptr; return 0; }
+    Session* s = tx_owner;
+    size_t len = tx_len;
+    size_t got = send_to_client(s->who.ip, s->who.port, s->link, (const u8*)tx_buf, len,
+                                patient ? WIFI_TX_RETRIES : WIFI_TX_RETRIES_SHORT);
+    if (got != len) {
+        s->stall = Session::STALL_TICKS;
+        if (!patient) {
+            memmove(tx_buf, tx_buf + got, len - got);   // waits for the next patient flush
+            tx_len = len - got;
+            tx_owner = s;
+            return (int)got;
+        }
+    }
+    tx_len = 0;
+    tx_owner = nullptr;
+    return (int)got;
+}
+
+int WifiProvider::flush_tx(bool patient)
+{
+    xSemaphoreTake(tx_lock, portMAX_DELAY);
+    int r = flush_unlocked(patient);
+    xSemaphoreGive(tx_lock);
+    return r;
+}
+
+int WifiProvider::stage(Session* s, const uint8_t* data, size_t len)
+{
+    xSemaphoreTake(tx_lock, portMAX_DELAY);
+    int r;
+    if (s->is_transferring() || len > WIFI_DATA_MAX_SIZE) {
+        flush_unlocked(false);
+        r = (int)send_to_client(s->who.ip, s->who.port, s->link, data, len);
+    } else if (s->stall != 0) {
+        r = 0;
+    } else {
+        if (tx_len && (tx_owner != s || tx_len + len > WIFI_DATA_MAX_SIZE)) {
+            flush_unlocked(false);
+            if (tx_owner != s) { tx_len = 0; tx_owner = nullptr; }
+        }
+        if (tx_len + len <= WIFI_DATA_MAX_SIZE) {
+            memcpy(tx_buf + tx_len, data, len);
+            tx_len += len;
+            tx_owner = s;
+            r = tx_len >= WIFI_DATA_MAX_SIZE ? flush_unlocked(false) : (int)len;
+        } else {
+            r = 0;
+        }
+    }
+    xSemaphoreGive(tx_lock);
+    return r;
+}
+
+Session* WifiProvider::session_for(const u8 ip[4], u16 port, bool create)
+{
+    Session* free_slot = nullptr;
+    for (Session& s : sessions) {
+        if (!s.live()) {
+            if (free_slot == nullptr) free_slot = &s;
+            continue;
+        }
+        if (s.is(ip, port)) return &s;
+    }
+    if (!create || free_slot == nullptr) return nullptr;
+    xSemaphoreTake(tx_lock, portMAX_DELAY);
+    if (tx_owner == free_slot) { tx_len = 0; tx_owner = nullptr; }
+    xSemaphoreGive(tx_lock);
+    free_slot->bind(this, tcp_link_no, ip, port);
+    return free_slot;
+}
+
+void WifiProvider::reap_sessions(const ClientInfo* listed, u8 count)
+{
+    for (Session& s : sessions) {
+        if (!s.live()) continue;
+        if (s.stall != 0) s.stall--;
+        if (s.fresh) { s.fresh = false; continue; }
+        bool known = false;
+        for (u8 i = 0; i < count && !known; i++) {
+            known = s.is(listed[i].remote_ip, listed[i].remote_port);
+        }
+        if (!known) {
+            printk("wifi: client %u.%u.%u.%u:%u disconnected\n",
+                   s.who.ip[0], s.who.ip[1], s.who.ip[2], s.who.ip[3], s.who.port);
+            xSemaphoreTake(tx_lock, portMAX_DELAY);
+            if (tx_owner == &s) { tx_len = 0; tx_owner = nullptr; }   // the client is gone
+            xSemaphoreGive(tx_lock);
+            s.release();
+        }
+    }
 }
 
 void WifiProvider::get_broadcast_from_ip_and_netmask(char* broadcast_addr, char* ip_addr, char* netmask)
@@ -283,23 +403,28 @@ void WifiProvider::on_second_tick(void*)
     u8 client_num = 0;
     ClientInfo RemoteClients[15];
 
-    if (!wifi_init_ok || is_transferring()) return;
+    if (!wifi_init_ok) return;
 
-    // List clients connected to TCP server
-    M8266WIFI_SPI_List_Clients_On_A_TCP_Server(tcp_link_no, &client_num, RemoteClients, &status);
-
-    // Get STA connection status
-    M8266WIFI_SPI_Get_STA_Connection_Status(&connection_status, &status);
+    bool listed = false;
+    {
+        ModuleLock lock;
+        listed = M8266WIFI_SPI_List_Clients_On_A_TCP_Server(tcp_link_no, &client_num, RemoteClients, &status);
+        M8266WIFI_SPI_Get_STA_Connection_Status(&connection_status, &status);
+    }
+    if (listed) reap_sessions(RemoteClients, client_num);
 
     if (connection_status == 5) {
         // Connected to AP
         // Get IP and netmask
-        M8266WIFI_SPI_Query_STA_Param(STA_PARAM_TYPE_IP_ADDR, (u8*)this->sta_address, &param_len, &status);
-        M8266WIFI_SPI_Query_STA_Param(STA_PARAM_TYPE_NETMASK_ADDR, (u8*)this->sta_netmask, &param_len, &status);
-        // Calculate broadcast address and send UDP data
-        get_broadcast_from_ip_and_netmask(address, this->sta_address, this->sta_netmask);
-        snprintf(udp_buff, sizeof(udp_buff), "%s,%s,%d,%d", this->machine_name, this->sta_address, this->tcp_port, client_num > 0 ? 1 : 0);
-        M8266WIFI_SPI_Send_Udp_Data((u8*)udp_buff, strlen(udp_buff), udp_link_no, address, this->udp_send_port, &status);
+        {
+            ModuleLock lock;
+            M8266WIFI_SPI_Query_STA_Param(STA_PARAM_TYPE_IP_ADDR, (u8*)this->sta_address, &param_len, &status);
+            M8266WIFI_SPI_Query_STA_Param(STA_PARAM_TYPE_NETMASK_ADDR, (u8*)this->sta_netmask, &param_len, &status);
+
+            get_broadcast_from_ip_and_netmask(address, this->sta_address, this->sta_netmask);
+            snprintf(udp_buff, sizeof(udp_buff), "%s,%s,%d,%d", this->machine_name, this->sta_address, this->tcp_port, client_num > 0 ? 1 : 0);
+            M8266WIFI_SPI_Send_Udp_Data((u8*)udp_buff, strlen(udp_buff), udp_link_no, address, this->udp_send_port, &status);
+        }
         connection_fail_count = 0;
     } else if (connection_status == 2 || connection_status == 3 || connection_status == 4) {
         // Connection failed
@@ -319,7 +444,10 @@ void WifiProvider::on_second_tick(void*)
     memset(udp_buff, 0, sizeof(udp_buff));
     get_broadcast_from_ip_and_netmask(address, this->ap_address, this->ap_netmask);
     snprintf(udp_buff, sizeof(udp_buff), "%s,%s,%d,%d", this->machine_name, this->ap_address, this->tcp_port, client_num > 0 ? 1 : 0);
-    M8266WIFI_SPI_Send_Udp_Data((u8*)udp_buff, strlen(udp_buff), udp_link_no, address, this->udp_send_port, &status);
+    {
+        ModuleLock lock;
+        M8266WIFI_SPI_Send_Udp_Data((u8*)udp_buff, strlen(udp_buff), udp_link_no, address, this->udp_send_port, &status);
+    }
 }
 
 void WifiProvider::service()
@@ -329,88 +457,74 @@ void WifiProvider::service()
         on_second_tick(nullptr);
     }
 
-    if (is_transferring()) return; // the transfer reads the TCP data itself
+    bool pending;
+    {
+        ModuleLock lock;
+        pending = M8266WIFI_SPI_Has_DataReceived();
+    }
 
-    // Check for incoming data
-    if (has_data_flag || M8266WIFI_SPI_Has_DataReceived()) {
+    if (has_data_flag || pending) {
         has_data_flag = false;
-        receive_wifi_data();
+        while (read_chunk(true)) { }
+    }
+
+    // every client gets its turn: one client's lines must not wait on another's traffic
+    for (Session& s : sessions) {
+        if (s.live() && s.accept_event()) s.pump();
     }
 }
 
-void WifiProvider::on_main_loop(void* argument)
-{
-    string line;
-    if (next_line(line)) SimpleShell::run(line, this);
-}
-
+// Broadcast: the kernel's pool hands this the frames to put on every console. Sessions are
+// not pool members themselves -- the set is walked from other tasks without a lock.
 int WifiProvider::puts(const char* s, int size)
 {
-    size_t total_length = size == 0 ? strlen(s) : size;
+    xSemaphoreTake(tx_lock, portMAX_DELAY);
+    flush_unlocked(false);   // pending replies first, so the line cannot overtake them; this
+                             // runs off the main loop and must not sit on a stalled client
+    xSemaphoreGive(tx_lock);
+    int r = 0;
+    size_t n = size == 0 ? strlen(s) : size;
+    for (Session& sess : sessions) {
+        // a stalled session dropped this line: keep it out until it reads again, or every
+        // broadcast pays the module's blocked send
+        if (!sess.live() || sess.stall != 0 || !sess.accept_event()) continue;
+        size_t got = send_to_client(sess.who.ip, sess.who.port, sess.link, (const u8*)s, n,
+                                    WIFI_TX_RETRIES_SHORT);
+        if (got != n) sess.stall = Session::STALL_TICKS;
+        if ((int)got > r) r = (int)got;
+    }
+    return r;
+}
+
+u16 WifiProvider::send_to_client(const u8 ip[4], u16 port, u8 link, const u8* data, size_t len,
+                                 int retries)
+{
+    char ip_str[16];
+    snprintf(ip_str, sizeof(ip_str), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+
     size_t sent_index = 0;
     u16 status = 0;
-    u32 sent = 0;
-    u32 to_send = 0;
-
-    while (sent_index < total_length) {
-        // Determine the size of data to send in this chunk
-        to_send = std::min(static_cast<u32>(total_length - sent_index), static_cast<u32>(WIFI_DATA_MAX_SIZE));
-        memcpy(txData, s + sent_index, to_send);
-
-        // Send data directly from the buffer
-        sent = M8266WIFI_SPI_Send_BlockData(
-            txData,
-            to_send,
-            5000,
-            tcp_link_no,
-            NULL,
-            0,
-            &status
-        );
-
-        sent_index += sent;
-
-        if (sent != to_send) {
-            // Error or connection closed
-            break;
+    while (sent_index < len) {
+        u16 to_send = std::min<size_t>(len - sent_index, WIFI_DATA_MAX_SIZE);
+        u16 sent;
+        {
+            ModuleLock lock;
+            sent = M8266WIFI_SPI_Send_Data_to_TcpClient((u8*)(data + sent_index), to_send, link,
+                                                        ip_str, port, &status);
         }
-    }
+        sent_index += sent;
+        if (sent == to_send) continue;
 
+        // 0x11 (waiting for wifi to send) and 0x12 (send buffer full) mean busy: the module
+        // drains by itself, so resend the remainder. Anything else is a dead client, give up.
+        u8 err = status & 0xFF;
+        if ((err == 0x11 || err == 0x12) && retries-- > 0) {
+            taskYIELD();   // let the module drain and other tasks run, but try again now
+            continue;
+        }
+        break;
+    }
     return sent_index;
-}
-
-int WifiProvider::putc(int c)
-{
-    u16 status = 0;
-    u8 to_send = c;
-    if (M8266WIFI_SPI_Send_Data(&to_send, 1, tcp_link_no, &status) == 0) {
-        return 0;
-    } else {
-        return 1;
-    }
-}
-
-int WifiProvider::getc()
-{
-    u16 status;
-    u8 to_recv = 0, link_no;
-    M8266WIFI_SPI_RecvData(&to_recv, 1, WIFI_DATA_TIMEOUT_MS, &link_no, &status);
-    return to_recv;
-}
-
-int WifiProvider::gets(char** buf, int size)
-{
-    u16 status;
-    u8 link_no;
-    u16 received = M8266WIFI_SPI_RecvData(rxData,
-                                          (size == 0 || size > WIFI_DATA_MAX_SIZE) ? WIFI_DATA_MAX_SIZE : size,
-                                          WIFI_DATA_TIMEOUT_MS, &link_no, &status);
-    if (link_no == udp_link_no) {
-        // Ignore UDP data
-        return 0;
-    }
-    *buf = (char*)&rxData;
-    return received;
 }
 
 
@@ -630,6 +744,10 @@ void WifiProvider::init_wifi_module(bool reset)
         printk("M8266WIFI_SPI_Setup_Connection ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
     }
 
+    if (M8266WIFI_SPI_Config_Max_Clients_Allowed_To_A_Tcp_Server(tcp_link_no, MAX_SESSIONS, &status) == 0) {
+        printk("Config_Max_Clients ERROR on link %d, status: %d\n", tcp_link_no, status);
+    }
+
     // Set TCP server auto-disconnect timeout
     if (M8266WIFI_SPI_Set_TcpServer_Auto_Discon_Timeout(tcp_link_no, this->tcp_timeout_s, &status) == 0) {
         printk("M8266WIFI_SPI_Set_TcpServer_Auto_Discon_Timeout ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
@@ -766,51 +884,7 @@ void WifiProvider::registerTcpDataCallback(uint8_t link_no, std::function<void(u
 
 bool WifiProvider::sendTcpDataToClient(const uint8_t* remote_ip, uint16_t remote_port, uint8_t link_no, const uint8_t* data, uint16_t length)
 {
-    uint16_t status = 0;
-    char ip_str[16];
-
-    // Convert remote_ip (uint8_t[4]) to string format
-    snprintf(ip_str, sizeof(ip_str), "%u.%u.%u.%u", remote_ip[0], remote_ip[1], remote_ip[2], remote_ip[3]);
-
-    printk("WifiProvider::sendTcpDataToClient: Starting to send data to %s:%d on link %d, Total length: %d\n", ip_str, remote_port, link_no, length);
-
-    uint32_t sent_index = 0;
-    uint16_t sent = 0;
-    uint16_t to_send = 0;
-
-    while (sent_index < length) {
-        // Determine how much data to send in this chunk
-        to_send = std::min(static_cast<uint16_t>(length - sent_index), static_cast<uint16_t>(WIFI_DATA_MAX_SIZE));
-
-        // Debug statement before sending
-        printk("WifiProvider::sendTcpDataToClient: Attempting to send %d bytes to %s:%d on link %d, sent_index: %ld, status before sending: %d\n", 
-                                    to_send, ip_str, remote_port, link_no, sent_index, status);
-
-        memcpy(txData, data + sent_index, to_send);
-        // Send data directly from the original buffer with a cast to `u8*`
-        sent = M8266WIFI_SPI_Send_Data_to_TcpClient(
-            txData,
-            to_send,
-            link_no,
-            ip_str,
-            remote_port,
-            &status
-        );
-
-        sent_index += sent;
-
-        if (sent != to_send) {
-            // Error or connection closed
-            printk("WifiProvider::sendTcpDataToClient: ERROR on link %d to %s:%d, sent %d of %d bytes, status: %d\n", link_no, ip_str, remote_port, sent, to_send, status);
-            return false;
-        }
-
-        // Debug statement after successful send
-        printk("WifiProvider::sendTcpDataToClient: Successfully sent %d bytes to %s:%d on link %d, Total sent: %ld/%d\n", sent, ip_str, remote_port, link_no, sent_index, length);
-    }
-
-    printk("WifiProvider::sendTcpDataToClient: Completed sending all data to %s:%d on link %d\n", ip_str, remote_port, link_no);
-    return true;
+    return send_to_client(remote_ip, remote_port, link_no, data, length) == length;
 }
 
 bool WifiProvider::closeTcpConnection(const uint8_t* remote_ip, uint16_t remote_port, uint8_t link_no)

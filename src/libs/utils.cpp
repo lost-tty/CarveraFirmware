@@ -200,9 +200,10 @@ void system_reset( bool dfu )
 }
 
 // Convert a path indication ( absolute or relative ) into a path ( absolute )
-std::string absolute_from_relative( std::string path )
+std::string absolute_from_relative( std::string path, const StreamOutput *sink )
 {
-    string cwd = SimpleShell::cwd();
+    const StreamOutput *on = sink ? sink : &THEKERNEL->streams;
+    string cwd = on->cwd();
 
     if ( path.length() > 1 && path.back() == '/' ) {
         path.pop_back();
