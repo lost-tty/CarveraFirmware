@@ -49,7 +49,7 @@ class StepTicker{
 
         float rate() const { return timer_hz; }
 
-        void set_watch(Watch *w) { watch= w; }
+        void set_watch(Watch *w) { watch= w; poll_left= 0; }   // the first step checks it
         bool watching() const { return watch != nullptr; }
 
         struct Limit { Pin pin; uint8_t motor; bool at_end; bool at_max; };
@@ -70,9 +70,6 @@ class StepTicker{
         uint32_t held_path() const;                   // path steps the held block ran
 
         StepStream &steps() { return stream; }
-
-
-        static uint64_t owed_at(uint32_t j, uint32_t ratio);
 
         void step_tick (void);
         // cycles the tick has cost so far, while `prof on` has the counting switched in
@@ -103,6 +100,9 @@ class StepTicker{
         uint32_t period;
         uint32_t last_interval{0};
         std::array<StepperMotor*, k_max_actuators> motor;
+        LPC_GPIO_TypeDef *step_port{nullptr};
+        bool step_inv{false};
+        uint32_t step_bit[k_max_actuators];
         uint32_t unstep;
 
         Watch *watch{nullptr};
@@ -123,11 +123,15 @@ class StepTicker{
         struct {
             uint32_t steps_to_move; // 0: not moving in this block, or done
             uint32_t step_count;
-            uint32_t ratio;
             uint64_t owed_at;
             uint64_t owed_step;     // what owed_at gains per step of this motor
         } state[k_max_actuators];
 
+        int32_t poll_ticks{0};
+        int32_t poll_left{0};
+
+        uint32_t dir_lead_ticks{0};
+        uint32_t dir_lead{0};
 
         void brake(bool may_resume);
         void start_brake();

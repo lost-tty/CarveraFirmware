@@ -37,10 +37,14 @@ StepTicker *StepTicker::instance;
 
 static StepStream step_stream;
 
+static const uint32_t k_min_lead= 8;
+
 StepTicker::StepTicker() : stream(step_stream)
 {
     timer_hz= SystemCoreClock / 4.0F;
     inv_timer_hz2= 1.0F / (timer_hz * timer_hz);
+    poll_ticks= (int32_t)(timer_hz / 10000.0F);
+    dir_lead_ticks= (uint32_t)(timer_hz * 5e-6F);
 }
 
 void StepTicker::init()
@@ -48,7 +52,7 @@ void StepTicker::init()
     instance = this;
     // Configure the timer
     LPC_TIM0->MR0 = 10000000;       // Initial dummy value for Match Register
-    LPC_TIM0->MCR = 3;              // Match on MR0, reset on MR0
+    LPC_TIM0->MCR = 1;              // interrupt on MR0; the count runs on, MR0 is moved ahead of it
     LPC_TIM0->TCR = 0;              // Disable interrupt
 
     LPC_SC->PCONP |= (1 << 2);      // Power Ticker ON
@@ -107,12 +111,27 @@ void StepTicker::start()
     NVIC_EnableIRQ(TIMER0_IRQn);     // Enable interrupt handler
     NVIC_EnableIRQ(TIMER1_IRQn);     // Enable interrupt handler
     current_tick= 0;
+
+    // one port write steps every motor due in a tick, so the pins have to share a port
+    step_port= nullptr;
+    for (uint8_t m = 0; m < num_motors; m++) {
+        step_bit[m]= motor[m]->step_bit();
+        if(step_bit[m] == 0) continue;
+        if(step_port == nullptr) {
+            step_port= motor[m]->step_port();
+            step_inv= motor[m]->step_inverting();
+        } else if(motor[m]->step_port() != step_port || motor[m]->step_inverting() != step_inv) {
+            printk("FATAL: step pins must share one port and polarity, motor %d will not step\n", m);
+            step_bit[m]= 0;
+        }
+    }
 }
 
 void StepTicker::arm(uint32_t ticks)
 {
-    LPC_TIM0->MR0= ticks;
-    LPC_TIM0->TC= 0;
+    uint32_t next= LPC_TIM0->MR0 + ticks;
+    if((int32_t)(next - LPC_TIM0->TC) < (int32_t)k_min_lead) next= LPC_TIM0->TC + k_min_lead;
+    LPC_TIM0->MR0= next;
 }
 
 // Set the base stepping frequency
@@ -140,9 +159,7 @@ void StepTicker::unstep_tick()
 {
     uint32_t bits = this->unstep;
     this->unstep = 0;
-    for (uint8_t i = 0; bits != 0; i++, bits >>= 1) {
-        if(bits & 1) this->motor[i]->unstep();
-    }
+    if(step_inv) step_port->FIOSET= bits; else step_port->FIOCLR= bits;
 }
 
 // The actual interrupt handler where we do all the work
@@ -290,18 +307,6 @@ void StepTicker::release()
     }
 }
 
-uint64_t StepTicker::owed_at(uint32_t j, uint32_t ratio)
-{
-    if(ratio == 0) {
-        return (uint64_t)j << 32; // this motor is the path
-    }
-
-    uint64_t num= ((uint64_t)j << 32) - (1ULL << 31);
-    uint64_t hi= num / ratio;
-    uint64_t rem= num % ratio;
-    return (hi << 32) + ((rem << 32) / ratio);
-}
-
 // at_steps is taken on the first asserted tick, so the hysteresis does not bias it
 StepTicker::Motion StepTicker::check_watch()
 {
@@ -372,6 +377,7 @@ inline uint32_t StepTicker::run_tick (void)
             state_= MOVING;
         }
 
+        if(dir_lead != 0) return dir_lead;
     }
 
     if(motion == IDLE) {
@@ -406,6 +412,11 @@ inline uint32_t StepTicker::run_tick (void)
         return 0;
     }
 
+    if(dir_lead != 0) {
+        if(ticks > dir_lead + 1) ticks-= dir_lead;
+        dir_lead= 0;
+    }
+
     // A brake takes its step from the stream as usual, so the path and the blocks keep their
     // bookkeeping; only the interval is its own. v^2 reaching zero is the stand.
     if(motion == BRAKING && braking_written) {
@@ -428,21 +439,19 @@ inline uint32_t StepTicker::issue_step(uint32_t ticks, Motion motion)
     uint64_t here= (uint64_t)path.step_count << 32;
 
     bool still_moving= false;
+    uint32_t fire= 0;
     for (uint8_t m = 0; m < num_motors; m++) {
         if(state[m].steps_to_move == 0) continue; // not active
 
         if(state[m].owed_at <= here) {
             ++state[m].step_count;
+            fire|= step_bit[m];
 
-            bool ismoving= motor[m]->step(); // returns false if the moving flag was set to false externally (probes, endstops etc)
-            unstep |= 1 << m;
-
+            bool ismoving= motor[m]->count_step(); // false if the moving flag was cleared externally (probes, endstops etc)
             if(!ismoving || state[m].step_count == state[m].steps_to_move) {
                 state[m].steps_to_move = 0;
                 motor[m]->stop_moving();
             }else{
-                // consecutive owed_at values differ by a constant, so the 64-bit divisions
-                // it takes are done once when the block starts
                 state[m].owed_at+= state[m].owed_step;
             }
         }
@@ -452,11 +461,10 @@ inline uint32_t StepTicker::issue_step(uint32_t ticks, Motion motion)
 
     current_tick++;
 
-    // We may have set a pin on in this tick, now we reset the timer to set it off
-    // Note there could be a race here if we run another tick before the unsteps have happened,
-    // right now it takes about 3-4us but if the unstep were near 10uS or greater it would be an issue
-    // also it takes at least 2us to get here so even when set to 1us pulse width it will still be about 3us
-    if(unstep != 0) {
+    // every motor due steps in the one write; TIMER1 takes the pins down again after the pulse
+    if(fire != 0) {
+        if(step_inv) step_port->FIOCLR= fire; else step_port->FIOSET= fire;
+        unstep|= fire;
         LPC_TIM1->TCR = 3;
         LPC_TIM1->TCR = 1;
     }
@@ -474,13 +482,16 @@ inline uint32_t StepTicker::issue_step(uint32_t ticks, Motion motion)
     }
     ring_low= low;
 
-    if(watch != nullptr && !watch->hit) {
-        motion= check_watch();
+    poll_left-= (int32_t)ticks;
+    if(poll_left <= 0) {
+        poll_left= poll_ticks;
+        if(watch != nullptr && !watch->hit) {
+            motion= check_watch();
+        }
+        if(n_limits != 0 && !limit_tripped) {
+            motion= check_limits();
+        }
     }
-    if(n_limits != 0 && !limit_tripped) {
-        motion= check_limits();
-    }
-
 
     // see if any motors are still moving
     if(!still_moving) {
@@ -519,39 +530,18 @@ bool StepTicker::start_next_block()
         state[m].steps_to_move= current_block->steps[m];
         state[m].step_count= 0;
         if(state[m].steps_to_move == 0) continue;
-        state[m].ratio= current_block->ratio[m];
-        state[m].owed_step= (state[m].ratio == 0)
-                            ? ((uint64_t)1 << 32)
-                            : owed_at(2, state[m].ratio) - owed_at(1, state[m].ratio);
-
-        if(from == 0) {
-            state[m].step_count= 0;
-            state[m].owed_at= current_block->first_owed[m];   // worked out by the planner
-        }else{
-            uint32_t owed;
-            if(state[m].ratio == 0) {
-                owed= from;
-            }else{
-                owed= (uint32_t)((((uint64_t)from * state[m].ratio) + (1ULL << 31)) >> 32);
-            }
-            if(owed > state[m].steps_to_move) {
-                owed= state[m].steps_to_move;
-            }
-            state[m].step_count= owed;
-            state[m].owed_at= owed_at(owed + 1, state[m].ratio);
-
-            uint64_t here= (uint64_t)from << 32;
-            while(state[m].owed_at <= here && state[m].step_count < state[m].steps_to_move) {
-                ++state[m].step_count;
-                state[m].owed_at+= state[m].owed_step;
-            }
+        state[m].owed_step= current_block->per_step[m];
+        state[m].step_count= current_block->first_count[m];
+        if(state[m].step_count >= state[m].steps_to_move) {
+            state[m].steps_to_move= 0;   // a resume past this motor's last step
+            continue;
         }
+        state[m].owed_at= (uint64_t)state[m].step_count * state[m].owed_step + (state[m].owed_step >> 1);
 
         ok= true; // mark at least one motor is moving
-        // set direction bit here
-        // NOTE this would be at least 10us before first step pulse.
-        // TODO does this need to be done sooner, if so how without delaying next tick
-        motor[m]->set_direction((current_block->direction_bits >> m) & 1);
+        bool dir= (current_block->direction_bits >> m) & 1;
+        if(motor[m]->which_direction() != dir) dir_lead= dir_lead_ticks;
+        motor[m]->set_direction(dir);
         motor[m]->start_moving(); // also let motor know it is moving now
     }
 

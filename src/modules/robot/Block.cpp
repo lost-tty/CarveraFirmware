@@ -68,10 +68,9 @@ void Block::clear()
     ramp.exit_rate= 0;
     ramp.accel_steps= 0;
     ramp.decel_steps= 0;
-    for(int i = 0; i < n_actuators; ++i) { ratio[i]= 0; first_owed[i]= 0; }
+    for(int i = 0; i < n_actuators; ++i) { per_step[i]= 0; first_count[i]= 0; }
 }
 
-// each motor's share of the longest axis, 0.32 fixed point; 0 marks the longest axis itself
 float Block::remaining_mm() const
 {
     uint32_t total= steps_event_count();
@@ -84,12 +83,19 @@ float Block::remaining_mm() const
     return millimeters * (float)(total - resume_at) / (float)total;
 }
 
-void Block::set_ratios()
+void Block::set_per_step()
 {
     uint32_t longest= steps_event_count();
     for (uint8_t i = 0; i < n_actuators; i++) {
-        ratio[i]= steps[i] == longest ? 0 : (uint32_t)((((uint64_t)steps[i] << 32) + longest / 2) / longest);
-        first_owed[i]= StepTicker::owed_at(1, ratio[i]);
+        per_step[i]= steps[i] == 0 ? 0 : path_per_step(steps[i], longest);
+        first_count[i]= 0;
+    }
+}
+
+void Block::prepare_resume()
+{
+    for (uint8_t i = 0; i < n_actuators; i++) {
+        first_count[i]= steps[i] == 0 ? 0 : steps_before(resume_at, steps[i], per_step[i]);
     }
 }
 

@@ -28,7 +28,21 @@ class Block {
 
         uint32_t resume_at{0};
         float remaining_mm() const;
-        void set_ratios();
+        void set_per_step();
+        void prepare_resume();
+
+        static uint64_t path_per_step(uint32_t steps, uint32_t longest)
+        {
+            return steps == longest ? (1ULL << 32) : ((uint64_t)longest << 32) / steps;
+        }
+
+        static uint32_t steps_before(uint32_t from, uint32_t steps, uint64_t per_step)
+        {
+            uint64_t path= (uint64_t)from << 32;
+            uint64_t n= path / per_step;
+            if(n * per_step + (per_step >> 1) <= path) n++;
+            return n > steps ? steps : (uint32_t)n;
+        }
 
         uint32_t steps_event_count() const; // steps of the longest axis
         float nominal_rate() const { return steps_event_count() * nominal_speed / millimeters; } // steps per second
@@ -60,8 +74,8 @@ class Block {
             uint32_t accel_steps;  // steps spent getting to the plateau
             uint32_t decel_steps;  // steps spent coming off it
         } ramp;
-        uint32_t ratio[k_max_actuators]; // steps[m] / steps_event_count in 0.32 fixed point, 0 for the longest axis
-        uint64_t first_owed[k_max_actuators];
+        uint64_t per_step[k_max_actuators];
+        uint32_t first_count[k_max_actuators];
 
         static uint8_t n_actuators;
 

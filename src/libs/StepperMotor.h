@@ -18,10 +18,10 @@ class StepperMotor : public Killable {
         void set_motor_id(uint8_t id) { motor_id= id; }
         uint8_t get_motor_id() const { return motor_id; }
 
-        // called from step ticker ISR
-        __attribute__((always_inline)) inline bool step() { step_pin.set(1); current_position_steps += (direction?-1:1); return moving; }
-        // called from unstep ISR
-        __attribute__((always_inline)) inline void unstep() { step_pin.set(0); }
+        __attribute__((always_inline)) inline bool count_step() { current_position_steps += (direction?-1:1); return moving; }
+        uint32_t step_bit() const { return step_pin.connected() ? 1u << step_pin.pin : 0; }
+        LPC_GPIO_TypeDef *step_port() const { return step_pin.port; }
+        bool step_inverting() const { return step_pin.is_inverting(); }
         // called from step ticker ISR
         inline void set_direction(bool f) { dir_pin.set(f); direction= f; }
 

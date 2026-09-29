@@ -31,7 +31,7 @@ StepperMotor::StepperMotor(Pin &step, Pin &dir, Pin &en) : step_pin(step), dir_p
     selected= true;
 
     enable(false);
-    unstep(); // initialize step pin
+    step_pin.set(0);
     set_direction(false); // initialize dir pin
 
 }

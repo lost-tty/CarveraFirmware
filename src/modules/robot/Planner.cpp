@@ -150,7 +150,7 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
 
     block->acceleration = acceleration; // save in block
 
-    block->set_ratios();
+    block->set_per_step();
 
     block->millimeters = distance;
     block->nominal_speed = distance > 0.0F ? rate_mm_s : 0.0F; // (mm/s)
@@ -252,6 +252,7 @@ void Planner::resume_held()
     uint32_t at= THEKERNEL->step_ticker.held_path();
     uint32_t total= held->steps_event_count();
     held->resume_at= at > total ? total : at;
+    held->prepare_resume();
     held->entry_speed= held->max_entry_speed= minimum_planner_speed;
     held->recalculate_flag= true;
     held->is_ticking= false;
