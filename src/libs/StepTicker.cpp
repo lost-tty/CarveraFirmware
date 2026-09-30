@@ -37,7 +37,7 @@ StepTicker *StepTicker::instance;
 
 static StepStream step_stream;
 
-static const uint32_t k_min_lead= 8;
+static const uint32_t k_min_lead= 32;
 
 StepTicker::StepTicker() : stream(step_stream)
 {
@@ -132,6 +132,10 @@ void StepTicker::arm(uint32_t ticks)
     uint32_t next= LPC_TIM0->MR0 + ticks;
     if((int32_t)(next - LPC_TIM0->TC) < (int32_t)k_min_lead) next= LPC_TIM0->TC + k_min_lead;
     LPC_TIM0->MR0= next;
+    // MR0 matches TC on equality: a write that lands behind the count fires after the 32-bit wrap
+    while((int32_t)(LPC_TIM0->TC - LPC_TIM0->MR0) > 0 && !(LPC_TIM0->IR & 1)) {
+        LPC_TIM0->MR0= LPC_TIM0->TC + k_min_lead;
+    }
 }
 
 // Set the base stepping frequency
