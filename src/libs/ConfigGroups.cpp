@@ -2,7 +2,7 @@
 #include "ConfigTable.h"
 
 extern const ConfigTable::Group
-    kernel_config_groups[], main_config_groups[], conveyor_config_groups[],
+    kernel_config_groups[], main_config_groups[],
     planner_config_groups[], robot_config_groups[], endstops_config_groups[],
     atc_config_groups[], laser_config_groups[], spindle_maker_config_groups[],
     switch_pool_config_groups[], temperature_control_pool_config_groups[],
@@ -12,7 +12,7 @@ extern const ConfigTable::Group
     wireless_probe_config_groups[], usb_host_config_groups[];
 
 const ConfigTable::Group *const config_groups[] = {
-    kernel_config_groups, main_config_groups, conveyor_config_groups,
+    kernel_config_groups, main_config_groups,
     planner_config_groups, robot_config_groups, endstops_config_groups,
     atc_config_groups, laser_config_groups, spindle_maker_config_groups,
     switch_pool_config_groups, temperature_control_pool_config_groups,

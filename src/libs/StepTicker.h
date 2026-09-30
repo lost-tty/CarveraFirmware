@@ -70,7 +70,8 @@ class StepTicker{
         bool paused() const { return paused_; }
 
         void hold(bool on);   // on: brake, and no block starts until off
-        void stop();          // brake, and the rest is not to be resumed
+        void stop_jog();
+        void set_jog_limit(float b) { jog_limit= b; }
         bool take_held(uint32_t done[], uint8_t n);   // HELD only: what the block ran
         void release();                               // HELD -> IDLE, the queue is sorted out
         uint32_t held_path() const;                   // path steps the held block ran
@@ -139,7 +140,7 @@ class StepTicker{
         uint32_t dir_lead_ticks{0};
         uint32_t dir_lead{0};
 
-        void brake(bool may_resume);
+        void brake(bool may_resume, float scale);
         void stand();
         void start_brake();
         void rescale_brake();
@@ -155,6 +156,8 @@ class StepTicker{
         float brake_dv2{0.0F};
         float brake_c{0.0F};         // the braking interval in ticks, refined a step at a time
         float brake_per_mm{0.0F};    // path steps per mm of the block the brake is in
+        float jog_limit{1.0F};
+        volatile float brake_scale{1.0F};
         float inv_timer_hz2{0.0F};   // 1 / timer_hz^2, for that refinement
 
         uint8_t num_motors;

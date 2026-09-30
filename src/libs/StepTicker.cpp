@@ -238,15 +238,17 @@ StepTicker::Motion StepTicker::check_limits()
     return state_;
 }
 
-void StepTicker::brake(bool may_resume)
+void StepTicker::brake(bool may_resume, float scale)
 {
     if(state_ == BRAKING || state_ == HELD) {
-        if(!may_resume) resumable_= false;   // an approach that hit its switch must not be resumed
+        if(!may_resume) resumable_= false;
+        if(scale > brake_scale) brake_scale= scale;
         return;
     }
     if(state_ != MOVING) return;
 
     resumable_= may_resume;
+    brake_scale= scale;
     state_= BRAKING;
     braking_written= false;
     defer_wake();
@@ -289,15 +291,15 @@ void StepTicker::hold(bool on)
 {
     paused_= on;
     if(on) {
-        brake(true);
+        brake(true, 1.0F);
     }else{
         defer_wake();
     }
 }
 
-void StepTicker::stop()
+void StepTicker::stop_jog()
 {
-    brake(false);
+    brake(false, jog_limit);
 }
 
 // the closed-loop steppers hold the last step: a watch hit needs no brake, and a search is not resumed
@@ -448,7 +450,7 @@ inline uint32_t StepTicker::run_tick (void)
     // A brake takes its step from the stream as usual, so the path and the blocks keep their
     // bookkeeping; only the interval is its own. v^2 reaching zero is the stand.
     if(motion == BRAKING && braking_written) {
-        brake_v2-= brake_dv2;
+        brake_v2-= brake_dv2 * brake_scale;
         if(brake_v2 <= 0.0F) {
             for (uint8_t m = 0; m < num_motors; m++) motor[m]->stop_moving();
             current_tick= 0;

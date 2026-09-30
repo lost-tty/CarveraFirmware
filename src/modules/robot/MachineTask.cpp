@@ -129,7 +129,15 @@ bool MachineTask::post_jog(const float delta[], uint8_t naxis, float scale, bool
     if(xTaskGetCurrentTaskHandle() == handle) return false;
     if(naxis > k_max_actuators || halted) return false;
 
-    if(held && jogging) abort_jog();    // a new direction takes over from the one still down
+    if(held && jogging) {
+        // the same jog posted again while it runs continues it
+        bool same= naxis == jog_running.naxis && scale == jog_running.scale;
+        for (uint8_t i= 0; same && i < naxis; ++i) {
+            same= delta[i] == jog_running.delta[i];
+        }
+        if(same) return true;
+        abort_jog();
+    }
 
     uint8_t slot;
     if(xQueueReceive(free_slots, &slot, 0) != pdTRUE) return false;
@@ -139,7 +147,10 @@ bool MachineTask::post_jog(const float delta[], uint8_t naxis, float scale, bool
     ring[slot].move.naxis= naxis;
     ring[slot].move.scale= scale;
 
-    if(held) jogging= true;
+    if(held) {
+        jog_running= ring[slot].move;
+        jogging= true;
+    }
     publish(slot);
     return true;
 }
@@ -149,7 +160,7 @@ void MachineTask::abort_jog()
 {
     if(!jogging) return;
     jogging= false;
-    if(!THECONVEYOR.is_idle()) THEKERNEL->step_ticker.stop();
+    if(!THECONVEYOR.is_idle()) THEKERNEL->step_ticker.stop_jog();
 }
 
 bool MachineTask::post_move(const float delta[], float rate_mm_s)
@@ -226,6 +237,8 @@ void MachineTask::serve_tickets()
         xQueueSend(free_slots, &slot, 0);   // the copy is ours, the slot can be refilled
 
         if(t.kind == Ticket::JOG_HELD) {
+            // the jog this takes over from is braking, and its flush would take a block queued now
+            THECONVEYOR.wait_for_idle();
             float delta[k_max_actuators];
             if(jogging && (!THEROBOT.jog_travel(t.move.delta, t.move.naxis, delta) ||
                            !THEROBOT.jog_move(delta, t.move.naxis, t.move.scale))) {

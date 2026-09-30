@@ -147,6 +147,7 @@ private:
         float scale;
         uint8_t naxis;
     };
+    Jog jog_running{};
 
     // the line is copied: the dispatcher's is gone by the time this runs. a jog carries a
     // delta instead, to keep out of the modal state a program is using

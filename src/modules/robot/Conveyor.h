@@ -25,8 +25,6 @@ public:
     void init();
     void start(uint8_t n_actuators);
 
-    float brake_limit;
-
     void on_module_loaded(void);
     void kill() override {}
     void cleanup() override;

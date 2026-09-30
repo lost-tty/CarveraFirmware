@@ -17,7 +17,6 @@
 #include "mri.h"
 #include "checksumm.h"
 #include "Logging.h"
-#include "ConfigTable.h"
 #include "Robot.h"
 #include "MachineTask.h"
 #include "StepperMotor.h"
@@ -28,17 +27,6 @@
 
 #include "mbed.h"
 
-#define CONVEYOR_CONFIG(X) \
-    X(float, brake_limit, "brake_limit", 8.0f)
-CONFIG_STRUCT(ConveyorConfig, CONVEYOR_CONFIG);
-CONFIG_KEYS(conveyor_config_keys, ConveyorConfig, CONVEYOR_CONFIG);
-static void conveyor_config_changed(const ConfigTable::Group *, const void *c)
-{
-    float b = ((const ConveyorConfig *)c)->brake_limit;
-    if (b >= 1.0F) THECONVEYOR.brake_limit = b;
-}
-CONFIG_GROUPS(conveyor_config_groups,
-    CFG_GROUP("", conveyor_config_keys, ConveyorConfig, conveyor_config_changed));
 
 
 /*
@@ -77,12 +65,6 @@ void Conveyor::init()
 
 void Conveyor::on_module_loaded()
 {
-    brake_limit = ConfigTable::config<ConveyorConfig>(conveyor_config_groups).brake_limit;
-    if(brake_limit < 1.0F) {
-        printk("FATAL: brake_limit must be >= 1.0, got %f\n", brake_limit);
-        return;
-    }
-
     initialized= true;
 }
 
@@ -156,7 +138,7 @@ void Conveyor::feed_stream()
             int32_t decel= 0;
             if(b->millimeters > 0.0F) {
                 float per_mm= (float)whole / b->millimeters;
-                decel= (int32_t)(b->acceleration * brake_limit * per_mm);
+                decel= (int32_t)(b->acceleration * per_mm);
             }
             if(decel < 1) decel= 1;
             if(!ticker.steps().push_mark(fed_i, decel)) {

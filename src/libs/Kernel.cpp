@@ -62,6 +62,7 @@
 #define KERNEL_CONFIG(X) \
     X(float, base_stepping_frequency, "base_stepping_frequency", 100000.0f) \
     X(float, microseconds_per_step_pulse, "microseconds_per_step_pulse", 1.0f) \
+    X(float, jog_brake_limit, "jog_brake_limit", 3.0f) \
     X(bool, leds_disable, "leds_disable", false) \
     X(bool, enable_feed_hold, "enable_feed_hold", true)
 CONFIG_STRUCT(KernelConfig, KERNEL_CONFIG);
@@ -78,6 +79,7 @@ void Kernel::configure(const void *cfg)
 {
     const KernelConfig &c = *(const KernelConfig *)cfg;
     this->enable_feed_hold = c.enable_feed_hold;
+    step_ticker.set_jog_limit(c.jog_brake_limit);
     this->use_leds = !c.leds_disable;
 }
 
