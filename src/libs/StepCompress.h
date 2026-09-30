@@ -8,18 +8,75 @@
 #pragma once
 
 #include <stdint.h>
+#include <math.h>
 
 class StepStream;
 
+// Every ramp is a cubic in time with zero acceleration at its ends, run across the blocks that
+// continue it: a constant-acceleration ramp jolts the frame at every phase change and block
+// boundary. Its peak is 3/2 of the mean the planner plans distances with.
 class StepCompress
 {
 public:
+    static constexpr float k_peak_over_mean= 1.5F;
+
     static void configure(float timer_hz, float tolerance);
-    static uint32_t ramp(StepStream &out, float from, float to, uint32_t steps, uint32_t done= 0);
-    static uint32_t plateau(StepStream &out, float rate, uint32_t steps);
-    static float interval_at(float from, float to, uint32_t steps, uint32_t k);
+    static void rewind();
+
+    // mm per path step, the three spans in steps, speeds in mm/s
+    struct Span {
+        float ds;
+        uint32_t up, flat, down;
+        float v_entry, v_flat, v_exit;
+        float v_max_entry, accel;
+    };
+    enum Kind { ACCEL, DECEL };
+    struct Target { float v1; float d; };
+
+    // next(j, s) fills the j-th block after `first`, false where the plan ends
+    template<class F>
+    static Target target(Kind kind, uint32_t at, const Span &first, F next)
+    {
+        Target t;
+        Span prev= first;
+        if(kind == ACCEL) {
+            t.d= (float)(first.up - at) * first.ds;
+            if(first.flat + first.down != 0) { t.v1= first.v_flat; return t; }
+        } else {
+            t.d= (float)(first.up + first.flat + first.down - at) * first.ds;
+        }
+        t.v1= first.v_exit;
+        for (uint8_t j = 1; ; j++) {
+            Span s;
+            if(!next(j, s) || !mergeable(prev, s)) return t;
+            if(kind == ACCEL) {
+                if(s.up == 0) return t;
+                t.d+= (float)s.up * s.ds;
+                if(s.flat + s.down != 0) { t.v1= s.v_flat; return t; }
+            } else {
+                if(s.up + s.flat != 0) return t;
+                t.d+= (float)s.down * s.ds;
+            }
+            t.v1= s.v_exit;
+            prev= s;
+        }
+    }
+
+    static uint32_t ramp(StepStream &out, const Target &t, float ds, uint32_t steps, uint32_t done);
+    static uint32_t plateau(StepStream &out, float v, float ds, uint32_t steps);
+
+    static float profile_v();
+    static float profile_a();
 
 private:
+    // The cubic runs faster than the planner's constant-acceleration ramp through the second
+    // half of a leg, so a junction inside a leg needs slack below its limit; and a leg has one
+    // acceleration, so the blocks in it have to agree on theirs
+    static bool mergeable(const Span &a, const Span &b)
+    {
+        return b.v_entry * 1.2F <= b.v_max_entry && fabsf(b.accel - a.accel) <= 0.1F * a.accel;
+    }
+
     static float timer_hz_;
     static float tolerance_;
 };

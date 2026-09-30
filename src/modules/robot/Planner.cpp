@@ -17,6 +17,7 @@ using namespace std;
 #include "Planner.h"
 #include "libs/Profile.h"
 #include "Conveyor.h"
+#include "libs/StepCompress.h"
 #include "StepperMotor.h"
 #include "checksumm.h"
 #include "Robot.h"
@@ -64,6 +65,8 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
 // bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors, float rate_mm_s, float distance, float *unit_vec, float acceleration, float *s_values, int s_count, bool cutting, unsigned int _line)
 {
     PROFILE("append_block");
+    acceleration/= StepCompress::k_peak_over_mean;
+
     // Create ( recycle ) a new block
     Block* block = THECONVEYOR.queue.head_ref();
     block->line = _line;

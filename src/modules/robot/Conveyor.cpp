@@ -88,11 +88,30 @@ void Conveyor::cleanup()
 void Conveyor::rewind_feed()
 {
     THEKERNEL->step_ticker.steps().clear();
+    StepCompress::rewind();
     for (unsigned int i = queue.isr_tail_i; i != queue.head_i; i= queue.next(i)) {
         queue.item_ref(i)->is_ticking= false;
     }
     fed_i= queue.isr_tail_i;
     fed_steps= 0;
+}
+
+// false for a block with nothing left to step
+static bool span_of(const Block *b, StepCompress::Span &s)
+{
+    uint32_t whole= b->steps_event_count();
+    uint32_t total= whole > b->resume_at ? whole - b->resume_at : 0;
+    if(total == 0 || b->millimeters <= 0.0F) return false;
+    s.ds= b->millimeters / (float)whole;
+    s.up= b->ramp.accel_steps;
+    s.down= b->ramp.decel_steps;
+    s.flat= total - s.up - s.down;
+    s.v_entry= b->ramp.entry_rate * s.ds;
+    s.v_flat= b->ramp.plateau_rate * s.ds;
+    s.v_exit= b->ramp.exit_rate * s.ds;
+    s.v_max_entry= b->max_entry_speed;
+    s.accel= b->acceleration;
+    return true;
 }
 
 void Conveyor::feed_stream()
@@ -109,37 +128,32 @@ void Conveyor::feed_stream()
             break;
         }
 
-        if(fed_steps == 0 && !ticker.steps().empty()) {
-            float hz= ticker.rate();
-            if(hz > 0.0F && ticker.steps().ticks_queued() >= (uint32_t)(hz * k_feed_ahead_ms / 1000.0F)) {
-                break;
-            }
-        }
-
-        uint32_t whole= b->steps_event_count();
-        uint32_t total= whole > b->resume_at ? whole - b->resume_at : 0;
-        if(total == 0) {
+        StepCompress::Span s;
+        if(!span_of(b, s)) {
             fed_i= queue.next(fed_i);
             fed_steps= 0;
             continue;
+        }
+        uint32_t total= s.up + s.flat + s.down;
+
+        // enough queued to brake from the block's speed with margin: a late machine task then
+        // costs a controlled stop at worst, never a stand at speed
+        if(fed_steps == 0 && !ticker.steps().empty()) {
+            float hz= ticker.rate();
+            float ahead= k_feed_ahead_ms / 1000.0F;
+            if(b->acceleration > 0.0F) ahead+= 1.5F * s.v_flat / (b->acceleration * StepCompress::k_peak_over_mean);
+            if(hz > 0.0F && ticker.steps().ticks_queued() >= (uint32_t)(hz * ahead)) {
+                break;
+            }
         }
 
         if(ticker.steps().full()) {
             break;
         }
 
-        uint32_t up= b->ramp.accel_steps;
-        uint32_t down= b->ramp.decel_steps;
-        if(up > total) up= total;
-        if(down > total - up) down= total - up;
-        uint32_t plateau_end= total - down;
-
         if(fed_steps == 0) {
-            int32_t decel= 0;
-            if(b->millimeters > 0.0F) {
-                float per_mm= (float)whole / b->millimeters;
-                decel= (int32_t)(b->acceleration * per_mm);
-            }
+            // the planner's acceleration is the mean; a brake decelerates at the profile's peak
+            int32_t decel= (int32_t)(b->acceleration * StepCompress::k_peak_over_mean / s.ds);
             if(decel < 1) decel= 1;
             if(!ticker.steps().push_mark(fed_i, decel)) {
                 break;
@@ -147,22 +161,34 @@ void Conveyor::feed_stream()
             b->is_ticking= true;
         }
 
+        auto next= [&](uint8_t j, StepCompress::Span &out) {
+            unsigned int i= fed_i;
+            for (uint8_t n = 0; n < j; n++) {
+                i= queue.next(i);
+                if(i == queue.head_i) return false;
+            }
+            const Block *p= queue.item_ref(i);
+            return p->is_ready && !p->locked && span_of(p, out);
+        };
+
+        uint32_t up= s.up;
+        uint32_t plateau_end= s.up + s.flat;
+
         if(fed_steps < up) {
-            fed_steps= StepCompress::ramp(ticker.steps(), b->ramp.entry_rate,
-                                          b->ramp.plateau_rate, up, fed_steps);
+            StepCompress::Target t= StepCompress::target(StepCompress::ACCEL, fed_steps, s, next);
+            fed_steps= StepCompress::ramp(ticker.steps(), t, s.ds, up, fed_steps);
             if(fed_steps < up) {
                 break;                   // the ring filled inside the ramp
             }
         }
 
         if(fed_steps >= up && fed_steps < plateau_end) {
-            fed_steps+= StepCompress::plateau(ticker.steps(), b->ramp.plateau_rate,
-                                              plateau_end - fed_steps);
+            fed_steps+= StepCompress::plateau(ticker.steps(), s.v_flat, s.ds, plateau_end - fed_steps);
         }
 
         if(fed_steps >= plateau_end && fed_steps < total) {
-            uint32_t into= StepCompress::ramp(ticker.steps(), b->ramp.plateau_rate,
-                                              b->ramp.exit_rate, down, fed_steps - plateau_end);
+            StepCompress::Target t= StepCompress::target(StepCompress::DECEL, fed_steps, s, next);
+            uint32_t into= StepCompress::ramp(ticker.steps(), t, s.ds, s.down, fed_steps - plateau_end);
             fed_steps= plateau_end + into;
         }
 
@@ -187,6 +213,9 @@ void Conveyor::service()
     if(flush && queue.is_empty()) {
         pending_actions.clear();
         flush= false;
+        fed_i= queue.head_i;
+        fed_steps= 0;
+        StepCompress::rewind();
         // the dropped blocks never went through block_finished: everything queued is over now,
         // or a later refusal waits on a mark that is never reached
         finished= queued;
@@ -216,6 +245,7 @@ void Conveyor::collect()
         }
         fed_i= queue.isr_tail_i;
         fed_steps= 0;
+        StepCompress::rewind();
     }
 
     // an action handler reaches the conveyor again through its own calls; it must not recurse here
@@ -373,9 +403,7 @@ void Conveyor::drop_queue()
 {
     if(flush) {
         THEKERNEL->step_ticker.steps().clear();
-        queue.isr_tail_i= queue.head_i;
-        fed_i= queue.head_i;
-        fed_steps= 0;
+        queue.isr_tail_i= queue.head_i;   // the feeder's own place is reset when the flush completes
     }
 }
 
