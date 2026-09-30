@@ -34,6 +34,9 @@ uint32_t us_ticker_read(void);
 #define configUSE_RECURSIVE_MUTEXES     0
 #define configCHECK_FOR_STACK_OVERFLOW  2
 
+#define configSAVED_PC(top)             ((unsigned long)(top)[14])
+#define configSAVED_LR(top)             ((unsigned long)(top)[13])
+
 // without this every internal check is off, and a bad handle or index runs on until something
 // unrelated crashes
 #ifdef __cplusplus

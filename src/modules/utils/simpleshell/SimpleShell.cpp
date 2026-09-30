@@ -639,6 +639,11 @@ void SimpleShell::task_command(string parameters, StreamOutput *stream)
         stream->printf("    Handle: %p\r\n", taskStatus->xHandle);
         stream->printf("    Stack: %p\r\n", taskStatus->pxStackBase);
         stream->printf("    Stack High Water Mark (Unused): %lu bytes\r\n", (unsigned long)taskStatus->usStackHighWaterMark * sizeof(StackType_t));
+        if(taskStatus->eCurrentState != eRunning) {
+            const uint32_t *top= *(const uint32_t * const *)taskStatus->xHandle;
+            unsigned long pc= configSAVED_PC(top), lr= configSAVED_LR(top);
+            if(pc != 0) stream->printf("    Blocked at pc 0x%08lx lr 0x%08lx\r\n", pc, lr);
+        }
         uint32_t n= taskStatus->xTaskNumber;
         uint32_t ran= taskStatus->ulRunTimeCounter;
         if(n < 8) {
