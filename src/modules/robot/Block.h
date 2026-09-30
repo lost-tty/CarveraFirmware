@@ -21,13 +21,21 @@ class Block {
         void ready() { is_ready= true; }
         void clear();
 
-        void set_shares();
-
-        // 0.32 fraction, rounded up so the last step is never short; 0 is the longest axis
+        // 0.32 fraction, rounded up so the last step is never short; 0 is the longest axis.
+        // A byte at a time, so the interrupt gets by on the core's 32-bit divide
         static uint32_t share_of(uint32_t steps, uint32_t longest)
         {
             if(steps >= longest) return 0;
-            return (uint32_t)((((uint64_t)steps << 32) + longest - 1) / longest);
+            if(longest >= (1UL << 24)) {
+                return (uint32_t)((((uint64_t)steps << 32) + longest - 1) / longest);
+            }
+            uint32_t rem= steps, q= 0;
+            for (uint8_t i = 0; i < 4; i++) {
+                rem<<= 8;
+                q= (q << 8) | (rem / longest);
+                rem%= longest;
+            }
+            return rem != 0 ? q + 1 : q;
         }
 
         uint32_t steps_event_count() const; // steps of the longest axis
@@ -45,7 +53,6 @@ class Block {
 
         uint8_t direction_bits;   // one bit per motor
 
-        uint32_t share[k_max_actuators];
 
         static uint8_t n_actuators;
 

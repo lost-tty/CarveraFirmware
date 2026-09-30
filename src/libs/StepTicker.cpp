@@ -567,12 +567,13 @@ bool StepTicker::start_next_block()
     bool ok= false;
     bool resume= current_block == held_block;
     held_block= nullptr;
+    uint32_t longest= resume ? 0 : current_block->steps_event_count();
 
     for (uint8_t m = 0; m < num_motors; m++) {
         if(!resume) {
             state[m].steps_to_move= current_block->steps[m];
             state[m].step_count= 0;
-            state[m].share= current_block->share[m];
+            state[m].share= Block::share_of(current_block->steps[m], longest);
             state[m].acc= 0x80000000UL;   // half a step in
         }
         if(state[m].steps_to_move == 0) continue;

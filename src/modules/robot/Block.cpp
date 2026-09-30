@@ -56,15 +56,6 @@ void Block::clear()
     cutting             = false;
     s_value             = 0;
 
-    for(int i = 0; i < n_actuators; ++i) share[i]= 0;
-}
-
-void Block::set_shares()
-{
-    uint32_t longest= steps_event_count();
-    for (uint8_t i = 0; i < n_actuators; i++) {
-        share[i]= steps[i] == 0 ? 0 : share_of(steps[i], longest);
-    }
 }
 
 uint32_t Block::steps_event_count() const

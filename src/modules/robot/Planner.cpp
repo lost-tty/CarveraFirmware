@@ -150,8 +150,6 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
 
     block->acceleration = acceleration; // save in block
 
-    block->set_shares();
-
     block->millimeters = distance;
     block->nominal_speed = distance > 0.0F ? rate_mm_s : 0.0F; // (mm/s)
 
