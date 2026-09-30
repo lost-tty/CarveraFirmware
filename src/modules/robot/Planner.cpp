@@ -254,6 +254,7 @@ void Planner::resume_held()
     held->resume_at= at > total ? total : at;
     held->prepare_resume();
     held->entry_speed= held->max_entry_speed= minimum_planner_speed;
+    held->nominal_length_flag= false;
     held->recalculate_flag= true;
     held->is_ticking= false;
 
