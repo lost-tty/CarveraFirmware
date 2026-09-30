@@ -292,6 +292,11 @@ void Player::list(StreamOutput *stream, unsigned around)
 // the file ended, was aborted or the machine halted: queued motion finishes, then spindle and coolant go off as after M2
 void Player::abort()
 {
+    if (this->playing_file) {
+        unsigned long secs = calculate_elapsed_secs();
+        printk("%s ran for %02lu:%02lu:%02lu\n", this->filename.c_str(),
+               secs / 3600, (secs % 3600) / 60, secs % 60);
+    }
     this->playing_file = false;
     this->suspend_pending = false;
     this->m1_stops = false;
@@ -352,6 +357,7 @@ Source::Result Player::next(SerialMessage &msg)
         return LINE;
     }
 
+    if (!machine_task.idle()) return WAIT;
     abort();
     return DONE;
 }
