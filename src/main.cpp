@@ -300,7 +300,7 @@ void vTaskMainLoop(void *pvParameters) {
 }
 
 #ifndef MAINLOOP_STACK_SIZE
-#define MAINLOOP_STACK_SIZE 1024
+#define MAINLOOP_STACK_SIZE 768
 #endif
 
 StackType_t mainLoopStackBuffer[MAINLOOP_STACK_SIZE] __attribute__((section("AHBSRAM")));
