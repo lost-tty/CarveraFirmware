@@ -156,6 +156,8 @@ class StepTicker{
         float brake_dv2{0.0F};
         float brake_c{0.0F};         // the braking interval in ticks, refined a step at a time
         float brake_per_mm{0.0F};    // path steps per mm of the block the brake is in
+        float brake_t{0.0F};
+        float brake_inv_T{0.0F};
         float jog_limit{1.0F};
         volatile float brake_scale{1.0F};
         float inv_timer_hz2{0.0F};   // 1 / timer_hz^2, for that refinement

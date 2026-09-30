@@ -271,6 +271,11 @@ void StepTicker::start_brake()
     brake_c= (float)last_interval;   // what the Newton step refines from
     brake_dv2= 2.0F * (float)path_decel;
     brake_per_mm= path_per_mm(current_block);
+    // the brake is the profile's leg to rest: its deceleration follows 16 t^2 (1 - t)^2 of the
+    // peak over its time T = v / mean, so it starts and ends without a jerk step
+    float T= v * StepCompress::k_peak_over_mean / ((float)path_decel * brake_scale) * timer_hz;
+    brake_t= 0.0F;
+    brake_inv_T= T > 1.0F ? 1.0F / T : 1.0F;
 }
 
 // a brake that runs into the next block keeps its physical deceleration: the speed and the
@@ -450,8 +455,11 @@ inline uint32_t StepTicker::run_tick (void)
     // A brake takes its step from the stream as usual, so the path and the blocks keep their
     // bookkeeping; only the interval is its own. v^2 reaching zero is the stand.
     if(motion == BRAKING && braking_written) {
-        brake_v2-= brake_dv2 * brake_scale;
-        if(brake_v2 <= 0.0F) {
+        brake_t+= (float)ticks;
+        float tau= brake_t * brake_inv_T;
+        float w= tau * (1.0F - tau);
+        brake_v2-= brake_dv2 * brake_scale * 16.0F * w * w;
+        if(brake_v2 <= 0.0F || tau >= 1.0F) {
             for (uint8_t m = 0; m < num_motors; m++) motor[m]->stop_moving();
             current_tick= 0;
             state_= HELD;
