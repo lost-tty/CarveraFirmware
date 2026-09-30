@@ -61,9 +61,9 @@ static const ConfigTable::Override keepout_2_ov[] = {
     CFG_SET(RobotActuatorConfigT, en_pin, en), \
     CFG_SET(RobotActuatorConfigT, steps_per_mm, spm), \
     CFG_SET(RobotActuatorConfigT, max_rate, rate)
-static const ConfigTable::Override alpha_ov[] = { ACTUATOR("1.28", "1.29", "nc", 200.0f, 3000.0f) };
-static const ConfigTable::Override beta_ov[] = { ACTUATOR("1.26", "1.27", "nc", 200.0f, 3000.0f) };
-static const ConfigTable::Override gamma_ov[] = { ACTUATOR("1.24", "1.25", "nc", 200.0f, 2000.0f) };
+static const ConfigTable::Override alpha_ov[] = { ACTUATOR("1.28", "1.29", "nc", 200.0f, 4000.0f) };
+static const ConfigTable::Override beta_ov[] = { ACTUATOR("1.26", "1.27", "nc", 200.0f, 4000.0f) };
+static const ConfigTable::Override gamma_ov[] = { ACTUATOR("1.24", "1.25", "nc", 200.0f, 4000.0f) };
 static const ConfigTable::Override delta_ov[] = {
     ACTUATOR("1.18", "1.20!", "3.26", 26.666667f, 10800.0f),
     CFG_SET(RobotActuatorConfigT, acceleration, 360.0f),

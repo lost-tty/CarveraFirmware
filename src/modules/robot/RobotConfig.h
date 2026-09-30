@@ -13,7 +13,7 @@
     X(int,   arc_correction,            "arc_correction",            5) \
     X(float, x_axis_max_speed,          "x_axis_max_speed",          4000.0f) \
     X(float, y_axis_max_speed,          "y_axis_max_speed",          4000.0f) \
-    X(float, z_axis_max_speed,          "z_axis_max_speed",          3000.0f) \
+    X(float, z_axis_max_speed,          "z_axis_max_speed",          4000.0f) \
     X(float, max_speed,                 "max_speed",                 -60.0f) \
     X(bool,  segment_z_moves,           "segment_z_moves",           true) \
     X(bool,  save_g92,                  "save_g92",                  false) \

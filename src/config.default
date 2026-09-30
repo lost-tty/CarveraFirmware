@@ -36,26 +36,26 @@ junction_deviation							0.01			#
 # Cartesian axis speed limits
 x_axis_max_speed							4000			# Maximum speed in mm/min
 y_axis_max_speed							4000			# Maximum speed in mm/min
-z_axis_max_speed							3000			# Maximum speed in mm/min
+z_axis_max_speed							4000			# Maximum speed in mm/min
 
 # Stepper module configuration
 # Pins are defined as  ports, and pin numbers, appending "!" to the number will invert a pin
 alpha_step_pin								1.28			# Pin for alpha stepper step signal
 alpha_dir_pin								1.29			# Pin for alpha stepper direction, add '!' to reverse direction
 alpha_en_pin								nc				# Pin for alpha enable pin
-#alpha_max_rate								3000.0			# Maximum rate in mm/min
+#alpha_max_rate								4000.0			# Maximum rate in mm/min
 alpha_steps_per_mm							200				# Steps per mm for alpha ( X ) stepper
 
 beta_step_pin								1.26			# Pin for beta stepper step signal
 beta_dir_pin								1.27			# Pin for beta stepper direction, add '!' to reverse direction
 beta_en_pin									nc				# Pin for beta enable
-#beta_max_rate								3000.0			# Maxmimum rate in mm/min
+#beta_max_rate								4000.0			# Maxmimum rate in mm/min
 beta_steps_per_mm							200				# Steps per mm for beta ( Y ) stepper
 
 gamma_step_pin								1.24			# Pin for gamma stepper step signal
 gamma_dir_pin								1.25			# Pin for gamma stepper direction, add '!' to reverse direction
 gamma_en_pin								nc				# Pin for gamma enable
-#gamma_max_rate								2000.0			# Maximum rate in mm/min
+#gamma_max_rate								4000.0			# Maximum rate in mm/min
 gamma_steps_per_mm							200				# Steps per mm for gamma ( Z ) stepper
 
 # A axis
@@ -399,9 +399,9 @@ keepout.tool_z		-72.625				# the tool_z the zones above were measured with
 default_feed_rate 1000					# Feed rate when F parameter is not set (mm/min)
 default_seek_rate 3000					# Feed rate for G0 rapid mode (mm/min)
 
-alpha_max_rate 3000.0					# Max feed rate for X axis (mm/min)
-beta_max_rate 3000.0					# Max feed rate for Y axis (mm/min)
-gamma_max_rate 2000.0					# Max feed rate for Z axis (mm/min)
+alpha_max_rate 4000.0					# Max feed rate for X axis (mm/min)
+beta_max_rate 4000.0					# Max feed rate for Y axis (mm/min)
+gamma_max_rate 4000.0					# Max feed rate for Z axis (mm/min)
 delta_max_rate 10800.0 					# Max rotation speed rate for A axis (degree/min)
 epsilon_max_rate 100.0					# Max feed rate for auto tool changer (mm/min)
 
