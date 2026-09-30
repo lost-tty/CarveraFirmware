@@ -85,6 +85,13 @@ void Conveyor::cleanup()
     flush_queue();
 }
 
+bool Conveyor::can_blend() const
+{
+    if(queue.is_empty() || fed_i == queue.head_i) return false;
+    if(fed_i == queue.prev(queue.head_i) && fed_started) return false;
+    return !pending_actions.waiting_after(queued);
+}
+
 void Conveyor::resume_held()
 {
     StepTicker &ticker= THEKERNEL->step_ticker;
@@ -99,17 +106,39 @@ void Conveyor::resume_held()
     entry2= 0.0F;
 }
 
-static bool span_of(const Block *b, uint32_t from, float entry2, float &exit2, StepCompress::Span &s)
+static float step_length(const Block *b)
 {
+    return b->millimeters / (float)b->steps_event_count();
+}
+
+bool Conveyor::span_of(unsigned int i, uint32_t from, float entry2, float &exit2,
+                       StepCompress::Span &s) const
+{
+    const Block *b= queue.item_ref(i);
     uint32_t whole= b->steps_event_count();
     uint32_t total= whole > from ? whole - from : 0;
     if(total == 0 || b->millimeters <= 0.0F) return false;
-    s.ds= b->millimeters / (float)whole;
+    s.ds= step_length(b);
     s.v_max_entry= b->max_entry_speed;
     s.accel= b->acceleration;
 
+    s.at0= from;
+    s.whole= whole;
+    s.in= 0;
+    s.out= 0;
+    // once collected, the block before is gone: the rest of its corner runs at this step length
+    if(b->blend_in != 0 && i != queue.tail_i) {
+        s.in= b->blend_in;
+        s.ds_in= 0.5F * (step_length(queue.item_ref(queue.prev(i))) + s.ds);
+    }
+    if(b->blend_out != 0) {
+        s.out= b->blend_out;
+        s.ds_out= 0.5F * (s.ds + step_length(queue.item_ref(queue.next(i))));
+    }
+
     float a2= 2.0F * b->acceleration;
-    float d= (float)total * s.ds;
+    float d= s.dist(0, total);
+    float per_step= d / (float)total;
     float nominal2= b->nominal_speed * b->nominal_speed;
     if(entry2 > nominal2) entry2= nominal2;
     if(exit2 > nominal2) exit2= nominal2;
@@ -121,8 +150,8 @@ static bool span_of(const Block *b, uint32_t from, float entry2, float &exit2, S
     if(peak2 > nominal2) peak2= nominal2;
     if(peak2 < entry2) peak2= entry2;
     if(peak2 < exit2) peak2= exit2;
-    uint32_t up= (uint32_t)((peak2 - entry2) / (a2 * s.ds) + 0.5F);
-    uint32_t down= (uint32_t)((peak2 - exit2) / (a2 * s.ds) + 0.5F);
+    uint32_t up= (uint32_t)((peak2 - entry2) / (a2 * per_step) + 0.5F);
+    uint32_t down= (uint32_t)((peak2 - exit2) / (a2 * per_step) + 0.5F);
     if(up > total) up= total;
     if(down > total - up) down= total - up;
     s.up= up;
@@ -130,8 +159,10 @@ static bool span_of(const Block *b, uint32_t from, float entry2, float &exit2, S
     s.flat= total - up - down;
 
     // plateau
-    if(up != 0 && entry2 + a2 * (float)up * s.ds < peak2) peak2= entry2 + a2 * (float)up * s.ds;
-    if(down != 0 && exit2 + a2 * (float)down * s.ds < peak2) peak2= exit2 + a2 * (float)down * s.ds;
+    float reach2= entry2 + a2 * (float)up * per_step;
+    if(up != 0 && reach2 < peak2) peak2= reach2;
+    reach2= exit2 + a2 * (float)down * per_step;
+    if(down != 0 && reach2 < peak2) peak2= reach2;
 
     s.v_entry= sqrtf(entry2);
     s.v_flat= sqrtf(peak2);
@@ -177,7 +208,7 @@ void Conveyor::feed_stream()
         if(!fed_started) {
             unsigned int n= queue.next(fed_i);
             fed_exit2= n == queue.head_i ? rest2 : limit2[n];
-            if(!span_of(b, fed_from, entry2, fed_exit2, fed)) {
+            if(!span_of(fed_i, fed_from, entry2, fed_exit2, fed)) {
                 fed_i= n;
                 fed_from= 0;
                 continue;
@@ -223,11 +254,10 @@ void Conveyor::feed_stream()
             while(chain_j < j) {
                 chain_i= queue.next(chain_i);
                 if(chain_i == queue.head_i) return false;
-                const Block *p= queue.item_ref(chain_i);
-                if(!p->is_ready) return false;
+                if(!queue.item_ref(chain_i)->is_ready) return false;
                 unsigned int after= queue.next(chain_i);
                 float exit2= after == queue.head_i ? rest2 : limit2[after];
-                if(!span_of(p, 0, chain_exit2, exit2, out)) return false;
+                if(!span_of(chain_i, 0, chain_exit2, exit2, out)) return false;
                 chain_exit2= exit2;
                 chain_j++;
             }
@@ -239,19 +269,21 @@ void Conveyor::feed_stream()
 
         if(fed_steps < up) {
             StepCompress::Target t= StepCompress::target(StepCompress::ACCEL, fed_steps, s, next);
-            fed_steps= StepCompress::ramp(ticker.steps(), t, s.ds, up, fed_steps);
+            fed_steps= StepCompress::ramp(ticker.steps(), t, s, 0, up, fed_steps);
             if(fed_steps < up) {
                 break;                   // the ring filled inside the ramp
             }
         }
 
         if(fed_steps >= up && fed_steps < plateau_end) {
-            fed_steps+= StepCompress::plateau(ticker.steps(), s.v_flat, s.ds, plateau_end - fed_steps);
+            fed_steps+= StepCompress::plateau(ticker.steps(), s.v_flat, s, fed_steps,
+                                              plateau_end - fed_steps);
         }
 
         if(fed_steps >= plateau_end && fed_steps < total) {
             StepCompress::Target t= StepCompress::target(StepCompress::DECEL, fed_steps, s, next);
-            uint32_t into= StepCompress::ramp(ticker.steps(), t, s.ds, s.down, fed_steps - plateau_end);
+            uint32_t into= StepCompress::ramp(ticker.steps(), t, s, plateau_end, s.down,
+                                              fed_steps - plateau_end);
             fed_steps= plateau_end + into;
         }
 

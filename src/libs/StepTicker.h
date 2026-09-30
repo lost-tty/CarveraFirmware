@@ -20,6 +20,7 @@
 #include "Pin.h"
 #include "TSRingBuffer.h"
 #include "StepStream.h"
+#include "StepMix.h"
 
 class StepperMotor;
 class Block;
@@ -72,7 +73,6 @@ class StepTicker{
         void hold(bool on);   // on: brake, and no block starts until off
         void stop_jog();
         void set_jog_limit(float b) { jog_limit= b; }
-        bool take_held(uint32_t done[], uint8_t n);   // HELD only: what the block ran
         void release(bool resume);                    // HELD -> IDLE
         uint32_t held_path() const;                   // path steps the held block ran
 
@@ -99,6 +99,9 @@ class StepTicker{
         void arm(uint32_t ticks);
         __attribute__((always_inline)) inline uint32_t run_tick(void);
         __attribute__((always_inline)) inline uint32_t issue_step(uint32_t ticks, Motion motion);
+        __attribute__((always_inline)) inline void pulse(StepMix::Player *p);
+        void end_block(Motion motion);
+        bool played_out() const { return mix.pos >= mix.lead.total && !stream.at_mark() && mix.idle(); }
         Motion check_watch();
         Motion check_limits();
 
@@ -124,15 +127,7 @@ class StepTicker{
         uint32_t current_tick{0};
 
         StepStream &stream;
-        struct {
-            uint32_t step_count;
-        } path;
-        struct {
-            uint32_t steps_to_move; // 0: not moving in this block, or done
-            uint32_t step_count;
-            uint32_t acc;
-            uint32_t share;
-        } state[k_max_actuators];
+        StepMix mix;
         const Block *held_block{nullptr};
 
         int32_t poll_ticks{0};

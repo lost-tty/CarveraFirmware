@@ -96,6 +96,7 @@ class Robot : public Module {
         uint8_t get_units_code() const { return inch_mode ? 20 : 21; }
         uint8_t get_distance_code() const { return absolute_mode ? 90 : 91; }
         uint8_t get_stroke_code() const { return keepout_on ? 22 : 23; }
+        uint8_t get_path_code() const;
         void set_keepout(bool on) { keepout_on= on; }
         wcs_t get_wcs_offset(uint8_t wcs) const { return wcs_offsets[wcs < MAX_WCS ? wcs : 0]; }
         wcs_t get_g92_offset() const { return g92_offset; }

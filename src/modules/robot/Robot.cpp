@@ -502,6 +502,11 @@ int32_t Robot::motor_step(uint8_t i) const        { return i < n_motors ? actuat
 float Robot::motor_steps_per_mm(uint8_t i) const  { return i < n_motors ? actuators[i]->get_steps_per_mm() : 0.0F; }
 float Robot::motor_max_rate(uint8_t i) const      { return i < n_motors ? actuators[i]->get_max_rate() : 0.0F; }
 
+uint8_t Robot::get_path_code() const
+{
+    return THEKERNEL->planner.tolerance > 0.0F ? 64 : 61;
+}
+
 void Robot::stop_motor(uint8_t i)
 {
     if(i < n_motors) actuators[i]->stop_moving();
@@ -809,6 +814,15 @@ void Robot::on_gcode_received(Gcode *argument)
                 break;
             }
             case 23: keepout_on= false; break;
+
+            case 61: THEKERNEL->planner.tolerance = 0.0F; break;
+            case 64:
+                if(gcode->has_letter('P')) {
+                    THEKERNEL->planner.tolerance = to_millimeters(gcode->get_value('P'));
+                } else {
+                    THEKERNEL->planner.tolerance = THEKERNEL->planner.default_tolerance;
+                }
+                break;
 
             case 90: if(gcode->subcode == 0) this->absolute_mode = true; else if(gcode->subcode == 1) this->absolute_arc_centre = true; break;
             case 91: if(gcode->subcode == 0) this->absolute_mode = false; else if(gcode->subcode == 1) this->absolute_arc_centre = false; break;

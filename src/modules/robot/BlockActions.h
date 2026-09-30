@@ -24,6 +24,11 @@ public:
     void run_upto(uint32_t finished_block);
     void clear() { count= 0; taken= 0; }
     bool empty() const { return count == 0; }
+    bool waiting_after(uint32_t block) const
+    {
+        for (uint8_t i = 0; i < count; i++) if(pending[i].after_block == block) return true;
+        return false;
+    }
 
 private:
     // the words are copied out of the line: the line is gone by the time this runs

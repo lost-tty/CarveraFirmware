@@ -30,6 +30,45 @@ public:
         uint32_t up, flat, down;
         float v_entry, v_flat, v_exit;
         float v_max_entry, accel;
+
+        // ds runs linearly from ds_in over the block's first `in` steps and to ds_out over its
+        // last `out`; the span starts at step at0 of the block's `whole`
+        uint32_t at0{0}, whole{0};
+        uint32_t in{0}, out{0};
+        float ds_in{0.0F}, ds_out{0.0F};
+
+        float step(uint32_t k) const
+        {
+            uint32_t K= k + at0;
+            if(K < in) return ds_in + (ds - ds_in) * ((float)K + 0.5F) / (float)in;
+            if(out != 0 && K >= whole - out) {
+                return ds + (ds_out - ds) * ((float)(K - (whole - out)) + 0.5F) / (float)out;
+            }
+            return ds;
+        }
+
+        // steps from k, at most n, over which the length stays linear
+        uint32_t stretch(uint32_t k, uint32_t n) const
+        {
+            uint32_t K= k + at0;
+            uint32_t end= K < in ? in : (out != 0 && K < whole - out ? whole - out : K + n);
+            return end - K < n ? end - K : n;
+        }
+
+        float dist(uint32_t a, uint32_t b) const
+        {
+            float d= (float)(b - a) * ds;
+            uint32_t A= a + at0, B= b + at0;
+            if(A < in) {
+                uint32_t q= B < in ? B : in;
+                d+= (ds_in - ds) * (float)(q - A) * (1.0F - 0.5F * (float)(A + q) / (float)in);
+            }
+            if(out != 0 && B > whole - out) {
+                uint32_t p= A > whole - out ? A - (whole - out) : 0, q= B - (whole - out);
+                d+= (ds_out - ds) * (float)(q - p) * 0.5F * (float)(p + q) / (float)out;
+            }
+            return d;
+        }
     };
     enum Kind { ACCEL, DECEL };
     struct Target { float v1; float d; };
@@ -41,10 +80,10 @@ public:
         Target t;
         Span prev= first;
         if(kind == ACCEL) {
-            t.d= (float)(first.up - at) * first.ds;
+            t.d= first.dist(at, first.up);
             if(first.flat + first.down != 0) { t.v1= first.v_flat; return t; }
         } else {
-            t.d= (float)(first.up + first.flat + first.down - at) * first.ds;
+            t.d= first.dist(at, first.up + first.flat + first.down);
         }
         t.v1= first.v_exit;
         for (uint8_t j = 1; ; j++) {
@@ -52,19 +91,21 @@ public:
             if(!next(j, s) || !mergeable(prev, s)) return t;
             if(kind == ACCEL) {
                 if(s.up == 0) return t;
-                t.d+= (float)s.up * s.ds;
+                t.d+= s.dist(0, s.up);
                 if(s.flat + s.down != 0) { t.v1= s.v_flat; return t; }
             } else {
                 if(s.up + s.flat != 0) return t;
-                t.d+= (float)s.down * s.ds;
+                t.d+= s.dist(0, s.down);
             }
             t.v1= s.v_exit;
             prev= s;
         }
     }
 
-    static uint32_t ramp(StepStream &out, const Target &t, float ds, uint32_t steps, uint32_t done);
-    static uint32_t plateau(StepStream &out, float v, float ds, uint32_t steps);
+    // `steps` of the span from its step `offset` on, `done` of them already written
+    static uint32_t ramp(StepStream &out, const Target &t, const Span &s, uint32_t offset,
+                         uint32_t steps, uint32_t done);
+    static uint32_t plateau(StepStream &out, float v, const Span &s, uint32_t offset, uint32_t steps);
 
     static float profile_v();
     static float profile_a();

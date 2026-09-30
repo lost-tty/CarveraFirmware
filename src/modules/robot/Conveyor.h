@@ -39,6 +39,8 @@ public:
     bool wait_for_idle(bool wait_for_motors=true); // false when a halt cut the wait short
 
     Block *take_block(unsigned int i);
+    Block *next_block() { return queue.item_ref(queue.next(queue.isr_tail_i)); }
+    bool can_blend() const;   // the newest queued block can still take a blend at its end
     void block_finished();
     void wake_server();
 
@@ -106,6 +108,8 @@ private:
     float entry2{0.0F};
     float limit2[BLOCK_QUEUE_LENGTH];
     void sweep();
+    bool span_of(unsigned int i, uint32_t from, float entry2, float &exit2,
+                 StepCompress::Span &s) const;
 
 
     bool initialized{false};

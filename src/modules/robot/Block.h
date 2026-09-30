@@ -52,6 +52,7 @@ class Block {
         unsigned int line;
 
         uint8_t direction_bits;   // one bit per motor
+        uint16_t blend_in, blend_out;   // path steps of this block the corners at its ends take
 
 
         static uint8_t n_actuators;

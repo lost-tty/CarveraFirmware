@@ -319,17 +319,9 @@ void StepTicker::stand()
 }
 
 
-bool StepTicker::take_held(uint32_t done[], uint8_t n)
-{
-    if(state_ != HELD) return false;
-
-    for (uint8_t m = 0; m < n && m < num_motors; m++) done[m]= state[m].step_count;
-    return true;
-}
-
 uint32_t StepTicker::held_path() const
 {
-    return state_ == HELD ? path.step_count : 0;
+    return state_ == HELD ? mix.pos : 0;
 }
 
 void StepTicker::release(bool resume)
@@ -344,11 +336,7 @@ void StepTicker::release(bool resume)
     held_block= resume ? current_block : nullptr;
     current_block= nullptr;
     if(!resume) {
-        path.step_count= 0;
-        for (uint8_t m = 0; m < num_motors; m++) {
-            state[m].steps_to_move= 0;
-            state[m].step_count= 0;
-        }
+        mix.reset();
     }
 
     state_= IDLE;
@@ -387,6 +375,7 @@ inline uint32_t StepTicker::run_tick (void)
         stream.clear();
         current_block= nullptr;
         held_block= nullptr;
+        mix.reset();
         current_tick= 0;
         state_= IDLE;
         THECONVEYOR.drop_queue();
@@ -413,6 +402,7 @@ inline uint32_t StepTicker::run_tick (void)
 
     if(stream.at_mark()) {
         if(paused_ && motion == IDLE) return 0;
+        if(current_block != nullptr) THECONVEYOR.block_finished();
         current_block= THECONVEYOR.take_block(stream.mark());
         path_decel= stream.mark_decel();
         stream.take_mark();
@@ -438,6 +428,8 @@ inline uint32_t StepTicker::run_tick (void)
     uint32_t ticks= stream.take();
 
     if(ticks == 0) {
+        if(mix.owing()) pulse(nullptr);
+        if(current_block != nullptr && played_out()) end_block(motion);
         if(!ring_low) {
             defer_wake();
             ring_low= true;
@@ -475,32 +467,20 @@ inline uint32_t StepTicker::run_tick (void)
     return issue_step(ticks, motion);
 }
 
-inline uint32_t StepTicker::issue_step(uint32_t ticks, Motion motion)
+inline void StepTicker::pulse(StepMix::Player *p)
 {
-    ++path.step_count;
-
-    bool still_moving= false;
     uint32_t fire= 0;
     for (uint8_t m = 0; m < num_motors; m++) {
-        if(state[m].steps_to_move == 0) continue; // not active
-
-        uint32_t was= state[m].acc;
-        state[m].acc+= state[m].share;
-        if(state[m].share == 0 || state[m].acc < was) {
-            ++state[m].step_count;
-            fire|= step_bit[m];
-
-            bool ismoving= motor[m]->count_step(); // false if the moving flag was cleared externally (probes, endstops etc)
-            if(!ismoving || state[m].step_count == state[m].steps_to_move) {
-                state[m].steps_to_move = 0;
-                motor[m]->stop_moving();
-            }
+        uint8_t does= mix.motor(p, m);
+        if(does == 0) continue;
+        if(does == StepMix::TURNED) {
+            motor[m]->set_direction((mix.pin_dirs >> m) & 1);
+            continue;
         }
-
-        if(motor[m]->is_moving()) still_moving= true;
+        fire|= step_bit[m];
+        if(!motor[m]->count_step()) mix.drop(m);   // its moving flag was cleared from outside
+        if(!mix.busy(m)) motor[m]->stop_moving();
     }
-
-    current_tick++;
 
     // every motor due steps in the one write; TIMER1 takes the pins down again after the pulse
     if(fire != 0) {
@@ -509,6 +489,31 @@ inline uint32_t StepTicker::issue_step(uint32_t ticks, Motion motion)
         LPC_TIM1->TCR = 3;
         LPC_TIM1->TCR = 1;
     }
+}
+
+void StepTicker::end_block(Motion motion)
+{
+    // steps that cancelled across a corner end a motor without a pulse
+    for (uint8_t m = 0; m < num_motors; m++) motor[m]->stop_moving();
+    current_tick= 0;
+    if(current_block != nullptr) THECONVEYOR.block_finished();
+    current_block= nullptr;
+    state_= motion == BRAKING ? HELD : IDLE;
+    defer_wake();
+}
+
+inline uint32_t StepTicker::issue_step(uint32_t ticks, Motion motion)
+{
+    StepMix::Player *p= mix.tick();
+    if(mix.wants_next()) {
+        mix.open(*THECONVEYOR.next_block());
+        for (uint8_t m = 0; m < num_motors; m++) {
+            if(mix.other.left[m] != 0) motor[m]->start_moving();
+        }
+    }
+    pulse(p);
+
+    current_tick++;
 
     if(motion == BRAKING && braking_written) {
         brake_c*= (3.0F - brake_v2 * brake_c * brake_c * inv_timer_hz2) * 0.5F;
@@ -534,27 +539,7 @@ inline uint32_t StepTicker::issue_step(uint32_t ticks, Motion motion)
         }
     }
 
-    // see if any motors are still moving
-    if(!still_moving) {
-        //SET_STEPTICKER_DEBUG_PIN(0);
-        current_tick = 0;
-
-        if(current_block != nullptr) {
-            THECONVEYOR.block_finished();
-            current_block= nullptr;
-        }
-
-        if(stream.at_mark()) {
-            return ticks;
-        }
-
-        if(motion == BRAKING) {
-            state_= HELD;
-        }else{
-            state_= IDLE;
-        }
-        defer_wake();
-    }
+    if(played_out()) end_block(motion);
 
     return stream.empty() ? 0 : ticks;
 }
@@ -564,41 +549,41 @@ bool StepTicker::start_next_block()
 {
     if(current_block == nullptr) return false;
 
-    bool ok= false;
     bool resume= current_block == held_block;
     held_block= nullptr;
-    uint32_t longest= resume ? 0 : current_block->steps_event_count();
 
-    for (uint8_t m = 0; m < num_motors; m++) {
-        if(!resume) {
-            state[m].steps_to_move= current_block->steps[m];
-            state[m].step_count= 0;
-            state[m].share= Block::share_of(current_block->steps[m], longest);
-            state[m].acc= 0x80000000UL;   // half a step in
+    if(!resume && mix.two && mix.first_half) {
+        mix.swap_at_mark();
+    } else if(!resume) {
+        mix.n= num_motors;
+        mix.start(*current_block);
+        uint8_t pins= 0;
+        for (uint8_t m = 0; m < num_motors; m++) {
+            if(mix.lead.left[m] != 0) {
+                bool dir= (current_block->direction_bits >> m) & 1;
+                if(motor[m]->which_direction() != dir) dir_lead= dir_lead_ticks;
+                motor[m]->set_direction(dir);
+            }
+            if(motor[m]->which_direction()) pins|= 1 << m;
         }
-        if(state[m].steps_to_move == 0) continue;
-
-        ok= true; // mark at least one motor is moving
-        bool dir= (current_block->direction_bits >> m) & 1;
-        if(motor[m]->which_direction() != dir) dir_lead= dir_lead_ticks;
-        motor[m]->set_direction(dir);
-        motor[m]->start_moving(); // also let motor know it is moving now
+        mix.pin_dirs= pins;
     }
 
-    if(!resume) path.step_count= 0;
+    bool ok= false;
+    for (uint8_t m = 0; m < num_motors; m++) {
+        if(!mix.busy(m)) continue;
+        ok= true;
+        motor[m]->start_moving();
+    }
     current_tick= 0;
 
     if(ok) {
-        //SET_STEPTICKER_DEBUG_PIN(1);
         return true;
-
-    }else{
-        // this is an edge condition that should never happen, but we need to discard this block if it ever does
-        // basically it is a block that has zero steps for all motors
-        THECONVEYOR.block_finished();
-        current_block= nullptr;
     }
 
+    // a block with no steps for any motor
+    THECONVEYOR.block_finished();
+    current_block= nullptr;
     return false;
 }
 
