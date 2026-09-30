@@ -34,7 +34,6 @@ public:
     void service();
     void wake_on_block(TaskHandle_t t) { server= t; }
     bool wait_for_idle(bool wait_for_motors=true); // false when a halt cut the wait short
-    bool stop_soon();
 
     Block *take_block(unsigned int i);
     void block_finished();

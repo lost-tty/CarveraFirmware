@@ -115,6 +115,8 @@ public:
 private:
     // every wait on this task goes through here, so there is one place that sleeps
     void tick();
+    void set_hold(bool on);
+    void stop_motion();
     friend class Conveyor;   // waits for a block by running a pass of this task's loop
 
 

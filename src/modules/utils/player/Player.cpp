@@ -317,7 +317,6 @@ void Player::abort_command( string parameters, StreamOutput *stream )
 
     if (parameters.empty()) {
         if(machine_task.post_stop()) tool_head.stop_all();
-        machine_task.hold(false);   // after the stop: lifted before it, the held block would resume
         stream->printf(file ? "Aborted playing or paused file. \r\n" : "Stopped\r\n");
     }
 }

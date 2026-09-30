@@ -330,6 +330,27 @@ void MachineTask::abort(uint8_t why, const char *what)
 void MachineTask::hold(bool on)
 {
     if(!THEKERNEL->is_feed_hold_enabled()) return;
+    set_hold(on);
+}
+
+void MachineTask::stop_motion()
+{
+    StepTicker &ticker= THEKERNEL->step_ticker;
+    set_hold(true);
+    while(!halted && (ticker.motion() == StepTicker::MOVING ||
+                      ticker.motion() == StepTicker::BRAKING)) {
+        tick();
+    }
+    if(halted) return;
+
+    THECONVEYOR.flush_queue();
+    ticker.release();
+    THECONVEYOR.wait_for_idle();
+    set_hold(false);
+}
+
+void MachineTask::set_hold(bool on)
+{
     THEKERNEL->set_feed_hold(on);
     THEKERNEL->step_ticker.hold(on);
     if(tracing) {
@@ -403,8 +424,8 @@ void MachineTask::loop()
 
         // jobs posted ahead of the stop would run after it: they go the way they do on a halt
         if(stop) {
-            THECONVEYOR.stop_soon();
             drop_all();
+            stop_motion();
         }
         else if(drain) THECONVEYOR.wait_for_idle();
 

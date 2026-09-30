@@ -380,13 +380,6 @@ bool Conveyor::hold_action(const McodeRegistry::Mcode *code, const Gcode &gcode)
     return pending_actions.hold(code, gcode, queued);
 }
 
-bool Conveyor::stop_soon()
-{
-    flush_queue();
-    THEKERNEL->step_ticker.stop();   // brakes if it moves; the flush lands once it stands
-    return wait_for_idle();
-}
-
 // the blocks are dropped, not run, so there is nothing to wait for
 void Conveyor::flush_queue()
 {
