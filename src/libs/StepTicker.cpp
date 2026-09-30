@@ -525,7 +525,7 @@ inline uint32_t StepTicker::issue_step(uint32_t ticks, Motion motion)
         }
 
         if(stream.at_mark()) {
-            return 0;
+            return ticks;
         }
 
         if(motion == BRAKING) {
