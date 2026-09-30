@@ -246,9 +246,14 @@ void StepTicker::brake(bool may_resume)
     defer_wake();
 }
 
+static float path_per_mm(const Block *b)
+{
+    return b->millimeters > 0.0F ? (float)b->steps_event_count() / b->millimeters : 0.0F;
+}
+
 void StepTicker::start_brake()
 {
-    if(last_interval == 0 || path_decel <= 0) {
+    if(last_interval == 0 || path_decel <= 0 || current_block == nullptr) {
         return;
     }
     braking_written= true;
@@ -256,6 +261,21 @@ void StepTicker::start_brake()
     float v= timer_hz / (float)last_interval;
     brake_v2= v * v;
     brake_c= (float)last_interval;   // what the Newton step refines from
+    brake_dv2= 2.0F * (float)path_decel;
+    brake_per_mm= path_per_mm(current_block);
+}
+
+// a brake that runs into the next block keeps its physical deceleration: the speed and the
+// interval are in path steps, and the next block's path step may be another length
+void StepTicker::rescale_brake()
+{
+    float k= path_per_mm(current_block);
+    if(k > 0.0F && brake_per_mm > 0.0F) {
+        float r= k / brake_per_mm;
+        brake_v2*= r * r;
+        brake_c/= r;
+        brake_per_mm= k;
+    }
     brake_dv2= 2.0F * (float)path_decel;
 }
 
@@ -372,6 +392,7 @@ inline uint32_t StepTicker::run_tick (void)
         stream.take_mark();
         if(!start_next_block()) return 0;
 
+        if(motion == BRAKING && braking_written) rescale_brake();
         if(motion != BRAKING) {
             motion= MOVING;
             state_= MOVING;

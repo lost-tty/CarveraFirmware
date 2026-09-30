@@ -135,6 +135,7 @@ class StepTicker{
 
         void brake(bool may_resume);
         void start_brake();
+        void rescale_brake();
 
         volatile Motion state_{IDLE};
         volatile bool resumable_{true};
@@ -146,6 +147,7 @@ class StepTicker{
         float brake_v2{0.0F};
         float brake_dv2{0.0F};
         float brake_c{0.0F};         // the braking interval in ticks, refined a step at a time
+        float brake_per_mm{0.0F};    // path steps per mm of the block the brake is in
         float inv_timer_hz2{0.0F};   // 1 / timer_hz^2, for that refinement
 
         uint8_t num_motors;
