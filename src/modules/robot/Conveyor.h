@@ -11,11 +11,16 @@
 #include "libs/Killable.h"
 #include "BlockActions.h"
 #include "BlockQueue.h"
+#include "libs/StepCompress.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
 
 class Block;
+
+#ifndef BLOCK_QUEUE_LENGTH
+#define BLOCK_QUEUE_LENGTH 64
+#endif
 
 extern "C" void RIT_IRQHandler(void);
 
@@ -39,7 +44,7 @@ public:
 
     void flush_queue(void);
 
-    void rewind_feed();
+    void resume_held();
     void drop_queue(void);   // ISR, while standing: the flushed queue goes in one move
     bool flushing() const { return flush; }
     void force_queue();   // a jog runs now, not after the pre-load wait
@@ -83,7 +88,7 @@ private:
     static const UBaseType_t k_notify_index = 1;
     bool wait_for_block(bool &halted);
 
-    using Queue_t = BlockQueue<32>;
+    using Queue_t = BlockQueue<BLOCK_QUEUE_LENGTH>;
     Queue_t queue; // Queue of Blocks
 
     volatile TaskHandle_t server{nullptr};   // the machine task, woken when a block ends
@@ -94,6 +99,13 @@ private:
     volatile uint32_t finished{0};
     unsigned int fed_i{0};
     uint32_t fed_steps{0};
+    bool fed_started{false};
+    uint32_t fed_from{0};
+    StepCompress::Span fed;
+    float fed_exit2{0.0F};
+    float entry2{0.0F};
+    float limit2[BLOCK_QUEUE_LENGTH];
+    void sweep();
 
 
     bool initialized{false};

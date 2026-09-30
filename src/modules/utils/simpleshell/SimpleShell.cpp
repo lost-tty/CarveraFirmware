@@ -97,7 +97,7 @@ const SimpleShell::ptentry_t SimpleShell::commands_table[] = {
     {"ftype",     &SimpleShell::ftype_command,     "ftype file - display file type"},
     {"version",   &SimpleShell::version_command,   "version - display firmware version"},
     {"motion",    &SimpleShell::motion_command,    "motion [on|off] - trace the step ticker's state changes"},
-    {"prof",      &SimpleShell::prof_command,      "prof [on|off|bench] - planner timings since the last prof"},
+    {"prof",      &SimpleShell::prof_command,      "prof [on|off] - planner timings since the last prof"},
     {"model",     &SimpleShell::model_command,     "model - display machine model"},
     {"mem",       &SimpleShell::mem_command,       "mem [-v] - display memory usage"},
     {"task",      &SimpleShell::task_command,      "task - display task information"},
@@ -860,21 +860,6 @@ void SimpleShell::ftype_command( string parameters, StreamOutput *stream )
 // print out build version
 void SimpleShell::prof_command( string parameters, StreamOutput *stream )
 {
-    if(parameters.find("bench") != string::npos) {
-        static Block b;
-        b.clear();
-        b.steps[0]= 113; b.steps[1]= 61; b.steps[2]= 9;   // a 0.57 mm arc segment
-        b.millimeters= 0.566F;
-        b.nominal_speed= 50.0F;
-        b.acceleration= 150.0F;
-        b.entry_speed= 47.0F;
-        b.exit_speed= 45.0F;
-        uint32_t t0= us_ticker_read();
-        for (int i = 0; i < 1000; i++) b.calculate_trapezoid(47.0F, 45.0F - (i & 1));
-        uint32_t dt= us_ticker_read() - t0;
-        stream->printf("calculate_trapezoid: %lu us each, standing still\n", (unsigned long)(dt / 1000));
-        return;
-    }
     if(parameters.find("on") != string::npos || parameters.find("off") != string::npos) {
         bool on= parameters.find("off") == string::npos;
         THEKERNEL->step_ticker.count(on);

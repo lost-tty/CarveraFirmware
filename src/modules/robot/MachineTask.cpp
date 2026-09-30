@@ -278,12 +278,10 @@ void MachineTask::trace()
         printk("[motion] +%lums %s feed_hold=%d paused=%d slots=%d\n", (unsigned long)ms, names[m], hold, t.paused(), used);
         return;
     }
-    uint32_t steps= b->steps_event_count();
     float cap= t.path_rate(); // steps/s, longest axis
-    float plateau= steps ? b->ramp.plateau_rate * b->millimeters / steps : 0.f;
-    printk("[motion] +%lums %s feed_hold=%d paused=%d resumable=%d slots=%d cap=%.0f | %.3fmm entry=%.2f plateau=%.2f exit=%.2f\n",
+    printk("[motion] +%lums %s feed_hold=%d paused=%d resumable=%d slots=%d cap=%.0f | %.3fmm feed=%.2f junction=%.2f\n",
            (unsigned long)ms, names[m], hold, t.paused(), t.resumable(), used, cap,
-           b->millimeters, b->entry_speed, plateau, b->exit_speed);
+           b->millimeters, b->nominal_speed, b->max_entry_speed);
 }
 
 void MachineTask::tick()
@@ -297,10 +295,10 @@ void MachineTask::tick()
     if(ticker.motion() == StepTicker::HELD) {
         if(!ticker.resumable()) {
             THECONVEYOR.flush_queue();
-            ticker.release();
+            ticker.release(false);
         } else if(!THEKERNEL->get_feed_hold()) {
-            THEKERNEL->planner.resume_held();
-            ticker.release();
+            THECONVEYOR.resume_held();
+            ticker.release(true);
         }
     }
 
@@ -366,7 +364,7 @@ void MachineTask::stop_motion()
     if(halted) return;
 
     THECONVEYOR.flush_queue();
-    ticker.release();
+    ticker.release(false);
     THECONVEYOR.wait_for_idle();
     set_hold(false);
 }

@@ -73,7 +73,7 @@ class StepTicker{
         void stop_jog();
         void set_jog_limit(float b) { jog_limit= b; }
         bool take_held(uint32_t done[], uint8_t n);   // HELD only: what the block ran
-        void release();                               // HELD -> IDLE, the queue is sorted out
+        void release(bool resume);                    // HELD -> IDLE
         uint32_t held_path() const;                   // path steps the held block ran
 
         StepStream &steps() { return stream; }
@@ -130,9 +130,10 @@ class StepTicker{
         struct {
             uint32_t steps_to_move; // 0: not moving in this block, or done
             uint32_t step_count;
-            uint64_t owed_at;
-            uint64_t owed_step;     // what owed_at gains per step of this motor
+            uint32_t acc;
+            uint32_t share;
         } state[k_max_actuators];
+        const Block *held_block{nullptr};
 
         int32_t poll_ticks{0};
         int32_t poll_left{0};

@@ -15,9 +15,8 @@ class Planner
 {
 public:
     void init();
-    float max_allowable_speed( float acceleration, float target_velocity, float distance);
 
-    void resume_held();
+    float rest_speed() const { return minimum_planner_speed; }
     void config_load(const void *cfg);
 
     friend class Robot; // for acceleration, junction deviation, minimum_planner_speed
@@ -26,8 +25,6 @@ private:
     bool append_block(ActuatorCoordinates &target, uint8_t n_motors, float rate_mm_s, float distance, float unit_vec[], float accleration, float s_value, bool cutting, unsigned int _line);
     // 2024
     // bool append_block(ActuatorCoordinates &target, uint8_t n_motors, float rate_mm_s, float distance, float unit_vec[], float accleration, float *s_values, int s_count, bool cutting, unsigned int _line);
-    void recalculate();                    // the block being appended is the newest
-    void recalculate(unsigned int newest);
     float previous_unit_vec[N_PRIMARY_AXIS];
     float junction_deviation;    // Setting
     float z_junction_deviation;  // Setting

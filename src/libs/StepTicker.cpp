@@ -332,7 +332,7 @@ uint32_t StepTicker::held_path() const
     return state_ == HELD ? path.step_count : 0;
 }
 
-void StepTicker::release()
+void StepTicker::release(bool resume)
 {
     if(state_ != HELD) {
         return;
@@ -341,11 +341,14 @@ void StepTicker::release()
     resumable_= true;
     braking_written= false;
 
+    held_block= resume ? current_block : nullptr;
     current_block= nullptr;
-    path.step_count= 0;
-    for (uint8_t m = 0; m < num_motors; m++) {
-        state[m].steps_to_move= 0;
-        state[m].step_count= 0;
+    if(!resume) {
+        path.step_count= 0;
+        for (uint8_t m = 0; m < num_motors; m++) {
+            state[m].steps_to_move= 0;
+            state[m].step_count= 0;
+        }
     }
 
     state_= IDLE;
@@ -383,6 +386,7 @@ inline uint32_t StepTicker::run_tick (void)
     if(machine_task.is_halted()) {
         stream.clear();
         current_block= nullptr;
+        held_block= nullptr;
         current_tick= 0;
         state_= IDLE;
         THECONVEYOR.drop_queue();
@@ -474,14 +478,15 @@ inline uint32_t StepTicker::run_tick (void)
 inline uint32_t StepTicker::issue_step(uint32_t ticks, Motion motion)
 {
     ++path.step_count;
-    uint64_t here= (uint64_t)path.step_count << 32;
 
     bool still_moving= false;
     uint32_t fire= 0;
     for (uint8_t m = 0; m < num_motors; m++) {
         if(state[m].steps_to_move == 0) continue; // not active
 
-        if(state[m].owed_at <= here) {
+        uint32_t was= state[m].acc;
+        state[m].acc+= state[m].share;
+        if(state[m].share == 0 || state[m].acc < was) {
             ++state[m].step_count;
             fire|= step_bit[m];
 
@@ -489,8 +494,6 @@ inline uint32_t StepTicker::issue_step(uint32_t ticks, Motion motion)
             if(!ismoving || state[m].step_count == state[m].steps_to_move) {
                 state[m].steps_to_move = 0;
                 motor[m]->stop_moving();
-            }else{
-                state[m].owed_at+= state[m].owed_step;
             }
         }
 
@@ -562,19 +565,17 @@ bool StepTicker::start_next_block()
     if(current_block == nullptr) return false;
 
     bool ok= false;
-    uint32_t from= current_block->resume_at;
+    bool resume= current_block == held_block;
+    held_block= nullptr;
 
     for (uint8_t m = 0; m < num_motors; m++) {
-        state[m].steps_to_move= current_block->steps[m];
-        state[m].step_count= 0;
-        if(state[m].steps_to_move == 0) continue;
-        state[m].owed_step= current_block->per_step[m];
-        state[m].step_count= current_block->first_count[m];
-        if(state[m].step_count >= state[m].steps_to_move) {
-            state[m].steps_to_move= 0;   // a resume past this motor's last step
-            continue;
+        if(!resume) {
+            state[m].steps_to_move= current_block->steps[m];
+            state[m].step_count= 0;
+            state[m].share= current_block->share[m];
+            state[m].acc= 0x80000000UL;   // half a step in
         }
-        state[m].owed_at= (uint64_t)state[m].step_count * state[m].owed_step + (state[m].owed_step >> 1);
+        if(state[m].steps_to_move == 0) continue;
 
         ok= true; // mark at least one motor is moving
         bool dir= (current_block->direction_bits >> m) & 1;
@@ -583,7 +584,7 @@ bool StepTicker::start_next_block()
         motor[m]->start_moving(); // also let motor know it is moving now
     }
 
-    path.step_count= from;
+    if(!resume) path.step_count= 0;
     current_tick= 0;
 
     if(ok) {

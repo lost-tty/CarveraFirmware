@@ -17,48 +17,27 @@ class Block {
 
         static void init(uint8_t);
 
-        void calculate_trapezoid( float entry_speed, float exit_speed );
-
-        float reverse_pass(float exit_speed);
-        float forward_pass(float next_entry_speed);
-        float max_exit_speed();
         void debug() const;
         void ready() { is_ready= true; }
         void clear();
 
-        uint32_t resume_at{0};
-        float remaining_mm() const;
-        void set_per_step();
-        void prepare_resume();
+        void set_shares();
 
-        static uint64_t path_per_step(uint32_t steps, uint32_t longest)
+        // 0.32 fraction, rounded up so the last step is never short; 0 is the longest axis
+        static uint32_t share_of(uint32_t steps, uint32_t longest)
         {
-            return steps == longest ? (1ULL << 32) : ((uint64_t)longest << 32) / steps;
-        }
-
-        static uint32_t steps_before(uint32_t from, uint32_t steps, uint64_t per_step)
-        {
-            uint64_t path= (uint64_t)from << 32;
-            uint64_t n= path / per_step;
-            if(n * per_step + (per_step >> 1) <= path) n++;
-            return n > steps ? steps : (uint32_t)n;
+            if(steps >= longest) return 0;
+            return (uint32_t)((((uint64_t)steps << 32) + longest - 1) / longest);
         }
 
         uint32_t steps_event_count() const; // steps of the longest axis
         float nominal_rate() const { return steps_event_count() * nominal_speed / millimeters; } // steps per second
 
 
-    private:
-        float max_allowable_speed( float acceleration, float target_velocity, float distance);
-        void prepare(float initial_rate, float maximum_rate, float final_rate, float accel_distance, float decel_distance);
-
-
     public:
         std::array<uint32_t, k_max_actuators> steps; // Number of steps for each axis for this block
         float nominal_speed;      // Nominal speed in mm per second
         float millimeters;        // Distance for this move
-        float entry_speed;
-        float exit_speed;
         float acceleration;       // the acceleration for this block
 
         float max_entry_speed;
@@ -66,29 +45,16 @@ class Block {
 
         uint8_t direction_bits;   // one bit per motor
 
-        // the trapezoid of the longest axis, in steps/s
-        struct {
-            float entry_rate;      // steps/s at the start
-            float plateau_rate;    // steps/s once it is up to speed
-            float exit_rate;       // steps/s at the end
-            uint32_t accel_steps;  // steps spent getting to the plateau
-            uint32_t decel_steps;  // steps spent coming off it
-        } ramp;
-        uint64_t per_step[k_max_actuators];
-        uint32_t first_count[k_max_actuators];
+        uint32_t share[k_max_actuators];
 
         static uint8_t n_actuators;
 
         struct {
-            bool recalculate_flag:1;             // Planner flag to recalculate trapezoids on entry junction
-            bool nominal_length_flag:1;          // Planner flag for nominal speed always reached
             bool is_ready:1;
             bool primary_axis:1;                 // set if this move is a primary axis
             bool cutting:1;                      // G1/G2/G3: the laser fires only on these
 
             uint16_t s_value:12;                 // for laser 1.11 Fixed point
         };
-        volatile bool is_ticking;
-        volatile bool locked;
 };
 #pragma pack(pop)
