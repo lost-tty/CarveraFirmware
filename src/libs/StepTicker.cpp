@@ -213,10 +213,12 @@ StepTicker::Motion StepTicker::check_limits()
     if(!limit_seen || closing != limit_idx) {
         limit_seen= true;
         limit_idx= closing;
-        limit_at_step= motor[limits[closing].motor]->get_current_step();
+        int32_t now[k_max_actuators];
+        for (uint8_t m = 0; m < num_motors; m++) now[m]= motor[m]->get_current_step();
+        latch_.take(now, num_motors);
     }
     const Limit &l= limits[limit_idx];
-    int32_t into= motor[l.motor]->get_current_step() - limit_at_step;
+    int32_t into= motor[l.motor]->get_current_step() - latch_.steps[l.motor];
     if(!l.at_end) {
         into= abs(into);
     } else if(!l.at_max) {
@@ -226,7 +228,7 @@ StepTicker::Motion StepTicker::check_limits()
     if(into < limit_hysteresis)
         return state_;
 
-    stop();
+    latch_.trigger();
     limit_tripped= true;
     machine_task.halt(HARD_LIMIT, "hard limit");
     return state_;
@@ -294,6 +296,17 @@ void StepTicker::stop()
     brake(false);
 }
 
+// the closed-loop steppers hold the last step: a watch hit needs no brake, and a search is not resumed
+void StepTicker::stand()
+{
+    if(state_ != MOVING && state_ != BRAKING) return;
+    for (uint8_t m = 0; m < num_motors; m++) motor[m]->stop_moving();
+    resumable_= false;
+    current_tick= 0;
+    state_= HELD;
+    defer_wake();
+}
+
 
 bool StepTicker::take_held(uint32_t done[], uint8_t n)
 {
@@ -327,28 +340,16 @@ void StepTicker::release()
     state_= IDLE;
 }
 
-// at_steps is taken on the first asserted tick, so the hysteresis does not bias it
 StepTicker::Motion StepTicker::check_watch()
 {
-    if(!watch->inputs.any()) {
-        watch->seen= false;
-        return state_;
-    }
+    bool asserted= watch->inputs.any();
+    if(asserted && !watch->seen) watch->witnessed= watch->witness.any();
 
-    if(!watch->seen) {
-        watch->seen= true;
-        watch->witnessed= watch->witness.any();
-        for (uint8_t m = 0; m < num_motors; m++) watch->at_steps[m]= motor[m]->get_current_step();
-    }
+    int32_t now[k_max_actuators];
+    for (uint8_t m = 0; m < num_motors; m++) now[m]= motor[m]->get_current_step();
+    if(!watch->sample(asserted, now, num_motors, latch_)) return state_;
 
-    bool travelled= false;
-    for (uint8_t m = 0; m < num_motors; m++) {
-        if((watch->motors & (1 << m)) && abs(motor[m]->get_current_step() - watch->at_steps[m]) >= watch->hysteresis) travelled= true;
-    }
-    if(!travelled) return state_;
-
-    watch->hit= true;
-    if(!watch->observe) stop();
+    if(!watch->observe) stand();
     return state_;
 }
 

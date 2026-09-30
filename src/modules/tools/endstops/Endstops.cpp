@@ -306,7 +306,9 @@ bool Endstops::approach(uint8_t axis, float distance, float rate)
     approach_watch.witness.clear();
     approach_watch.inputs.add(h.pin_info->pin);
     approach_watch.motors= 1 << axis;
-    approach_watch.hysteresis= hysteresis_steps(axis);
+    // first contact is the hit: an axis that starts on its switch must not travel into the frame
+    // first, and the retract and second touch measure anyway
+    approach_watch.hysteresis= 0;
 
     arm_limits(h.pin_info);
 
@@ -316,7 +318,7 @@ bool Endstops::approach(uint8_t axis, float distance, float rate)
     bool ok= THEROBOT.delta_move_watch(delta, rate, homing_axis.size(), approach_watch);
     bool hit= approach_watch.hit;
     float steps_per_mm= THEROBOT.motor_steps_per_mm(axis);
-    h.past_edge= hit && steps_per_mm != 0 ? (THEROBOT.motor_step(axis) - approach_watch.at_steps[axis]) / steps_per_mm : 0;
+    h.past_edge= hit && steps_per_mm != 0 ? (THEROBOT.motor_step(axis) - THEKERNEL->step_ticker.latch().steps[axis]) / steps_per_mm : 0;
     approach_watch.inputs.clear();
     arm_limits();
     return ok && hit;

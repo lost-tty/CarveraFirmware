@@ -142,7 +142,7 @@ bool ZProbe::run_probe(float& mm, float feedrate, float max_dist, bool reverse)
     delta[Z_AXIS]= dir ? -maxz : maxz;
     if(!THEROBOT.delta_move_watch(delta, feedrate, 3, probe_watch)) return false;
 
-    int32_t at= probe_watch.hit ? probe_watch.at_steps[Z_AXIS] : THEROBOT.motor_step(Z_AXIS);
+    int32_t at= probe_watch.hit ? THEKERNEL->step_ticker.latch().steps[Z_AXIS] : THEROBOT.motor_step(Z_AXIS);
     mm = (z_start_steps - at) / THEROBOT.motor_steps_per_mm(Z_AXIS);
 
     THEROBOT.set_last_probe_position(std::make_tuple(0, 0, mm, probe_watch.hit ? 1:0));

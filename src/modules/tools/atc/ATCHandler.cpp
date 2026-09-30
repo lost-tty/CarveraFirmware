@@ -179,8 +179,7 @@ void ATCHandler::home_clamp()
     	THEROBOT.reset_position_from_current_actuator_position();
     }
 
-    // the retract is measured from the switch edge, not from where the braking ended
-	float past_edge = (THEROBOT.motor_step(ATC_AXIS) - atc_watch.at_steps[ATC_AXIS]) / steps_per_mm;
+	float past_edge = (THEROBOT.motor_step(ATC_AXIS) - THEKERNEL->step_ticker.latch().steps[ATC_AXIS]) / steps_per_mm;
 	delta[ATC_AXIS] = -atc_config.homing_retract_mm - past_edge;
 	if(!THEROBOT.delta_move_sync(delta, atc_config.homing_rate_mm_s, ATC_AXIS + 1)) return;
 

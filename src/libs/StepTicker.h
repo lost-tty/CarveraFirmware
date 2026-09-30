@@ -49,8 +49,14 @@ class StepTicker{
 
         float rate() const { return timer_hz; }
 
-        void set_watch(Watch *w) { watch= w; poll_left= 0; }   // the first step checks it
+        void set_watch(Watch *w)   // the first step checks it
+        {
+            watch= w;
+            poll_left= 0;
+            if(w != nullptr) latch_.arm();
+        }
         bool watching() const { return watch != nullptr; }
+        ProbeLatch &latch() { return latch_; }
 
         struct Limit { Pin pin; uint8_t motor; bool at_end; bool at_max; };
         void set_limits(const Limit *l, uint8_t count, uint16_t hyst);
@@ -106,12 +112,12 @@ class StepTicker{
         uint32_t unstep;
 
         Watch *watch{nullptr};
+        ProbeLatch latch_;
         Limit    limits[k_max_actuators * 2];
         uint8_t  n_limits{0};
         uint16_t limit_hysteresis{0};
         bool     limit_seen{false};
         uint8_t  limit_idx{0};
-        int32_t  limit_at_step{0};
         volatile bool limit_tripped{false};
         Block *current_block;
         uint32_t current_tick{0};
@@ -134,6 +140,7 @@ class StepTicker{
         uint32_t dir_lead{0};
 
         void brake(bool may_resume);
+        void stand();
         void start_brake();
         void rescale_brake();
 
