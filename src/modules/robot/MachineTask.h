@@ -130,6 +130,7 @@ private:
     void serve_tickets();
     void finish_clear();
     volatile bool jogging{false};
+    volatile bool position_lost{false};
 
     static const uint16_t k_stack_words = 384;
     static const UBaseType_t k_priority = 2;

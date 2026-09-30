@@ -37,6 +37,7 @@ class Endstops : public Module{
         void set_home_offset_here(Gcode *);
         bool is_homing() const;
         bool is_homed(uint8_t axis) const { return homing_axis[axis].homed; }
+        void unhome_all();
         bool cover_closed() const { return cover_endstop_pin.get(); }
         void get_endstop_states(char *data) const;
         const float *get_g28_position() const { return g28_position; }

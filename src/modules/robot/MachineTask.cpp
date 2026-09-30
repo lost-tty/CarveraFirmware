@@ -7,6 +7,7 @@ uint8_t Profile::used= 0;
 
 #include "Conveyor.h"
 #include "Robot.h"
+#include "Endstops.h"
 #include "Scripts.h"
 #include "libs/Kernel.h"
 #include "libs/StepTicker.h"
@@ -301,6 +302,10 @@ void MachineTask::halt(uint8_t why, const char *what)
         reason= why;
         strncpy(msg, what != nullptr ? what : "halted", sizeof(msg) - 1);
         msg[sizeof(msg) - 1]= '\0';
+        // a halt mid-move cuts the drivers at speed; a limit, e-stop or driver fault means the position is unknown
+        StepTicker::Motion m= THEKERNEL->step_ticker.motion();
+        bool fault= why == HARD_LIMIT || why == E_STOP || (why >= MOTOR_ERROR_X && why <= MOTOR_ERROR_Z);
+        position_lost= fault || m == StepTicker::MOVING || m == StepTicker::BRAKING;
     }
     halted= true;
     jogging= false;
@@ -319,6 +324,10 @@ void MachineTask::dispatch_halt()
 
     printk("ALARM: %s\n", msg);
     Killable::cleanup_all();
+    if(position_lost) {
+        endstops.unhome_all();
+        printk("position lost: $H before an absolute move; G53 and G91 moves stay allowed\n");
+    }
 }
 
 // not a ticket: a stop must work from any task, and with the ring full

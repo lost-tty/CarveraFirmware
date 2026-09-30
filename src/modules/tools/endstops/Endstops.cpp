@@ -287,6 +287,11 @@ void Endstops::arm_limits(const endstop_info_t *approaching)
     THEKERNEL->step_ticker.set_limits(l, n, steps);
 }
 
+void Endstops::unhome_all()
+{
+    for (auto &p : homing_axis) p.homed= false;
+}
+
 uint16_t Endstops::hysteresis_steps(uint8_t axis) const
 {
     return (uint16_t)(hysteresis_mm * THEROBOT.motor_steps_per_mm(axis));
