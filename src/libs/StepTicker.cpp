@@ -314,8 +314,6 @@ void StepTicker::release()
         return;
     }
 
-    state_= IDLE;
-
     resumable_= true;
     braking_written= false;
 
@@ -325,6 +323,8 @@ void StepTicker::release()
         state[m].steps_to_move= 0;
         state[m].step_count= 0;
     }
+
+    state_= IDLE;
 }
 
 // at_steps is taken on the first asserted tick, so the hysteresis does not bias it
@@ -367,6 +367,16 @@ inline uint32_t StepTicker::run_tick (void)
 {
     //SET_STEPTICKER_DEBUG_PIN(state_ != IDLE ? 1 : 0);
 
+    // a halt clears the ticker from any state; the unlock's flush still needs the queue dropped here
+    if(machine_task.is_halted()) {
+        stream.clear();
+        current_block= nullptr;
+        current_tick= 0;
+        state_= IDLE;
+        THECONVEYOR.drop_queue();
+        return 0;
+    }
+
     Motion motion= state_;
 
     // BRAKING with nothing left to play is already a stand: report it as HELD
@@ -405,14 +415,6 @@ inline uint32_t StepTicker::run_tick (void)
         if(current_block == nullptr) return 0;
         motion= MOVING;
         state_= MOVING;
-    }
-
-    if(machine_task.is_halted()) {
-        stream.clear();
-        state_= IDLE;
-        current_tick = 0;
-        current_block= nullptr;
-        return 0;
     }
 
     // 0 is the stream saying it has nothing: a real interval is never 0, take() floors it at
