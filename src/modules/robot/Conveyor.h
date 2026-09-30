@@ -40,7 +40,8 @@ public:
 
     Block *take_block(unsigned int i);
     Block *next_block() { return queue.item_ref(queue.next(queue.isr_tail_i)); }
-    bool can_blend() const;   // the newest queued block can still take a blend at its end
+    // true if the newest queued block can still get a blend window of w steps at its end
+    bool can_blend(uint32_t w) const;
     void block_finished();
     void wake_server();
 
@@ -85,6 +86,7 @@ private:
     void queue_head_block(void);
 
     static const uint32_t k_feed_ahead_ms= 60;
+    static const uint32_t k_written_ahead_s= 20;   // far below the 171 s a 32-bit tick count covers
     void feed_stream();
 
     static const UBaseType_t k_notify_index = 1;
@@ -110,6 +112,7 @@ private:
     void sweep();
     bool span_of(unsigned int i, uint32_t from, float entry2, float &exit2,
                  StepCompress::Span &s) const;
+    void window_out(unsigned int i, StepCompress::Span &s) const;
 
 
     bool initialized{false};

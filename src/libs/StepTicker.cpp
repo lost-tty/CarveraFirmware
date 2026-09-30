@@ -505,8 +505,9 @@ void StepTicker::end_block(Motion motion)
 inline uint32_t StepTicker::issue_step(uint32_t ticks, Motion motion)
 {
     StepMix::Player *p= mix.tick();
-    if(mix.wants_next()) {
-        mix.open(*THECONVEYOR.next_block());
+    uint32_t w= current_block != nullptr ? current_block->blend_out : 0;
+    if(mix.wants_next(w)) {
+        mix.open(*THECONVEYOR.next_block(), w);
         for (uint8_t m = 0; m < num_motors; m++) {
             if(mix.other.left[m] != 0) motor[m]->start_moving();
         }

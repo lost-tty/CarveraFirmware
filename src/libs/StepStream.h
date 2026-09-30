@@ -36,7 +36,7 @@ public:
         }
         ring[head]= Entry{interval, count, add};
         if(count != k_mark) {
-            pushed_ticks+= (uint32_t)span(ring[head]);
+            pushed_ticks+= span(ring[head]);
             pushed_steps+= count;
         }
         head= next(head);
@@ -60,6 +60,7 @@ public:
             scaled= (int64_t)e.interval << k_add_shift;
             add= e.add;
             left= e.count;
+            run_end+= span(e);
             tail= next(tail);
         }
 
@@ -67,7 +68,8 @@ public:
         scaled+= add;
         left--;
         if(ticks < 1) ticks= 1;
-        played_ticks+= ticks;
+        // at the end of a run, use the total it was pushed with, so both counters stay in step
+        played_ticks= left != 0 ? played_ticks + ticks : run_end;
         played_steps++;
         return ticks;
     }
@@ -76,10 +78,11 @@ public:
     {
         head= tail= 0;
         left= 0;
-        pushed_ticks= played_ticks= 0;
+        pushed_ticks= played_ticks= run_end= 0;
         pushed_steps= played_steps= 0;
     }
 
+    // valid while fewer than 2^32 ticks are queued
     uint32_t ticks_queued() const { return pushed_ticks - played_ticks; }
     uint32_t queued_steps() const { return pushed_steps - played_steps; }
 
@@ -87,14 +90,12 @@ public:
 private:
     static uint16_t next(uint16_t i) { return (uint16_t)((i + 1) % k_entries); }
 
-    static const uint32_t k_span_max= 1u << 30;
     static uint32_t span(const Entry &e)
     {
         int64_t mid= (int64_t)((uint64_t)e.interval << k_add_shift)
                    + ((int64_t)e.add * (int64_t)(e.count - 1)) / 2;
         if(mid < (1 << k_add_shift)) mid= 1 << k_add_shift;
-        uint64_t t= ((uint64_t)mid * e.count) >> k_add_shift;
-        return t > k_span_max ? k_span_max : (uint32_t)t;
+        return (uint32_t)(((uint64_t)mid * e.count) >> k_add_shift);
     }
 
 
@@ -105,6 +106,7 @@ private:
     int64_t scaled{0};
     int32_t add{0};
     uint32_t left{0};
+    uint32_t run_end{0};   // value of played_ticks when the current run ends
 
     uint32_t pushed_ticks{0}, pushed_steps{0};              // the producer writes these
     volatile uint32_t played_ticks{0}, played_steps{0};     // the interrupt writes these

@@ -60,7 +60,7 @@ void Planner::config_load(const void *cfg)
 
 bool Planner::blend(Block *prev, Block *block, float cos_theta, float &speed)
 {
-    if(!prev->cutting || !block->cutting || !THECONVEYOR.can_blend()) return false;
+    if(!prev->cutting || !block->cutting) return false;
     for (uint8_t i = Z_AXIS + 1; i < k_max_actuators; ++i) {
         if(prev->steps[i] != 0 || block->steps[i] != 0) return false;
     }
@@ -78,7 +78,7 @@ bool Planner::blend(Block *prev, Block *block, float cos_theta, float &speed)
     float steps= 2.0F * tolerance / (s * longer);
     uint32_t most= std::min(std::min(n_prev, n) / 2, (uint32_t)65535);
     uint32_t w= steps < (float)most ? (uint32_t)steps : most;
-    if(w == 0) return false;
+    if(w == 0 || !THECONVEYOR.can_blend(w)) return false;
     prev->blend_out= w;
     block->blend_in= w;
 

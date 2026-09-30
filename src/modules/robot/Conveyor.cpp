@@ -85,11 +85,14 @@ void Conveyor::cleanup()
     flush_queue();
 }
 
-bool Conveyor::can_blend() const
+bool Conveyor::can_blend(uint32_t w) const
 {
     if(queue.is_empty() || fed_i == queue.head_i) return false;
-    if(fed_i == queue.prev(queue.head_i) && fed_started) return false;
-    return !pending_actions.waiting_after(queued);
+    if(pending_actions.waiting_after(queued)) return false;
+    if(fed_i != queue.prev(queue.head_i)) return true;
+    // a block being fed can still blend while in its plateau, with the window not yet written
+    if(fed_started && (fed_steps < fed.up || fed_steps >= fed.up + fed.flat)) return false;
+    return fed_from + fed_steps + w <= queue.item_ref(fed_i)->steps_event_count();
 }
 
 void Conveyor::resume_held()
@@ -111,31 +114,10 @@ static float step_length(const Block *b)
     return b->millimeters / (float)b->steps_event_count();
 }
 
-bool Conveyor::span_of(unsigned int i, uint32_t from, float entry2, float &exit2,
-                       StepCompress::Span &s) const
+// plans the speeds for the rest of the block, from step at0 to its end
+static void plan(const Block *b, float entry2, float &exit2, StepCompress::Span &s)
 {
-    const Block *b= queue.item_ref(i);
-    uint32_t whole= b->steps_event_count();
-    uint32_t total= whole > from ? whole - from : 0;
-    if(total == 0 || b->millimeters <= 0.0F) return false;
-    s.ds= step_length(b);
-    s.v_max_entry= b->max_entry_speed;
-    s.accel= b->acceleration;
-
-    s.at0= from;
-    s.whole= whole;
-    s.in= 0;
-    s.out= 0;
-    // once collected, the block before is gone: the rest of its corner runs at this step length
-    if(b->blend_in != 0 && i != queue.tail_i) {
-        s.in= b->blend_in;
-        s.ds_in= 0.5F * (step_length(queue.item_ref(queue.prev(i))) + s.ds);
-    }
-    if(b->blend_out != 0) {
-        s.out= b->blend_out;
-        s.ds_out= 0.5F * (s.ds + step_length(queue.item_ref(queue.next(i))));
-    }
-
+    uint32_t total= s.whole - s.at0;
     float a2= 2.0F * b->acceleration;
     float d= s.dist(0, total);
     float per_step= d / (float)total;
@@ -167,7 +149,36 @@ bool Conveyor::span_of(unsigned int i, uint32_t from, float entry2, float &exit2
     s.v_entry= sqrtf(entry2);
     s.v_flat= sqrtf(peak2);
     s.v_exit= sqrtf(exit2);
+}
+
+bool Conveyor::span_of(unsigned int i, uint32_t from, float entry2, float &exit2,
+                       StepCompress::Span &s) const
+{
+    const Block *b= queue.item_ref(i);
+    uint32_t whole= b->steps_event_count();
+    if(whole <= from || b->millimeters <= 0.0F) return false;
+    s.ds= step_length(b);
+    s.v_max_entry= b->max_entry_speed;
+    s.accel= b->acceleration;
+
+    s.at0= from;
+    s.whole= whole;
+    s.in= 0;
+    // the previous block may already be freed: the rest of its corner then uses this step length
+    if(b->blend_in != 0 && i != queue.tail_i) {
+        s.in= b->blend_in;
+        s.ds_in= 0.5F * (step_length(queue.item_ref(queue.prev(i))) + s.ds);
+    }
+    window_out(i, s);
+
+    plan(b, entry2, exit2, s);
     return true;
+}
+
+void Conveyor::window_out(unsigned int i, StepCompress::Span &s) const
+{
+    s.out= queue.item_ref(i)->blend_out;
+    if(s.out != 0) s.ds_out= 0.5F * (s.ds + step_length(queue.item_ref(queue.next(i))));
 }
 
 // reverse pass, in squared speeds
@@ -205,13 +216,26 @@ void Conveyor::feed_stream()
             break;
         }
 
+        unsigned int n= queue.next(fed_i);
+        float exit2= n == queue.head_i ? rest2 : limit2[n];
         if(!fed_started) {
-            unsigned int n= queue.next(fed_i);
-            fed_exit2= n == queue.head_i ? rest2 : limit2[n];
+            fed_exit2= exit2;
             if(!span_of(fed_i, fed_from, entry2, fed_exit2, fed)) {
                 fed_i= n;
                 fed_from= 0;
                 continue;
+            }
+        } else if(fed_steps >= fed.up && fed_steps < fed.up + fed.flat) {
+            // replan the unwritten plateau when the exit speed has risen or a blend was added
+            float nominal2= b->nominal_speed * b->nominal_speed;
+            if(exit2 > nominal2) exit2= nominal2;
+            if(exit2 > fed_exit2 || b->blend_out != fed.out) {
+                fed_from+= fed_steps;
+                fed_steps= 0;
+                fed_exit2= exit2;
+                fed.at0= fed_from;
+                window_out(fed_i, fed);
+                plan(b, fed.v_flat * fed.v_flat, fed_exit2, fed);
             }
         }
         const StepCompress::Span &s= fed;
@@ -219,13 +243,14 @@ void Conveyor::feed_stream()
 
         // enough queued to brake from the block's speed with margin: a late machine task then
         // costs a controlled stop at worst, never a stand at speed
-        if(!fed_started && !ticker.steps().empty()) {
-            float hz= ticker.rate();
-            float ahead= k_feed_ahead_ms / 1000.0F;
-            if(b->acceleration > 0.0F) ahead+= 1.5F * s.v_flat / (b->acceleration * StepCompress::k_peak_over_mean);
-            if(hz > 0.0F && ticker.steps().ticks_queued() >= (uint32_t)(hz * ahead)) {
-                break;
-            }
+        float hz= ticker.rate();
+        float ahead= k_feed_ahead_ms / 1000.0F;
+        if(b->acceleration > 0.0F) {
+            ahead+= 1.5F * s.v_flat / (b->acceleration * StepCompress::k_peak_over_mean);
+        }
+        uint32_t margin= (uint32_t)(hz * ahead);
+        if(!fed_started && ticker.steps().ticks_queued() >= margin) {
+            break;
         }
 
         if(ticker.steps().full()) {
@@ -276,8 +301,22 @@ void Conveyor::feed_stream()
         }
 
         if(fed_steps >= up && fed_steps < plateau_end) {
-            fed_steps+= StepCompress::plateau(ticker.steps(), s.v_flat, s, fed_steps,
-                                              plateau_end - fed_steps);
+            uint32_t steps= plateau_end - fed_steps;
+            float cap2= b->nominal_speed * b->nominal_speed;
+            if(n != queue.head_i) {
+                float junction= queue.item_ref(n)->max_entry_speed;
+                if(junction * junction < cap2) cap2= junction * junction;
+            }
+            // while the exit speed can still rise, write only the margin ahead
+            bool open= n == queue.head_i || fed_exit2 < cap2;
+            uint32_t most= open ? margin : (uint32_t)(hz * k_written_ahead_s);
+            uint32_t queued= ticker.steps().ticks_queued();
+            if(queued >= most) {
+                break;
+            }
+            float room= (float)(most - queued) * s.v_flat / (hz * s.ds);
+            if(room < (float)steps) steps= (uint32_t)room + 1;
+            fed_steps+= StepCompress::plateau(ticker.steps(), s.v_flat, s, fed_steps, steps);
         }
 
         if(fed_steps >= plateau_end && fed_steps < total) {

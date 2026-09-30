@@ -12,7 +12,6 @@ struct StepMix {
         uint32_t acc[k_max_actuators];
         uint32_t share[k_max_actuators];
         uint32_t own, total;        // path steps of its block: made, in all
-        uint16_t blend_in, blend_out;
         uint8_t dirs;
     };
     enum { FIRE= 1, TURNED= 2 };
@@ -20,7 +19,7 @@ struct StepMix {
     Player lead, other;             // the stream's block, and the other one of a window
     bool two{false};
     bool first_half{false};         // other is the block coming in
-    uint32_t win_left{0};
+    uint32_t window{0}, win_left{0};
     uint32_t pick{0}, weight{0}, gain{0};   // 0.32: the incoming block's weight, summed
     uint32_t pos{0};                // path steps of the lead's block played
     int8_t owed[k_max_actuators]{}; // steps made but not pulsed yet, signed
@@ -30,7 +29,6 @@ struct StepMix {
     void reset()
     {
         lead.total= lead.own= 0;
-        lead.blend_in= lead.blend_out= 0;
         for (uint8_t m = 0; m < k_max_actuators; m++) {
             lead.left[m]= 0;
             owed[m]= 0;
@@ -50,8 +48,6 @@ struct StepMix {
         }
         p.own= 0;
         p.total= longest;
-        p.blend_in= b.blend_in;
-        p.blend_out= b.blend_out;
         p.dirs= b.direction_bits;
     }
 
@@ -82,21 +78,23 @@ struct StepMix {
         pos= 0;
     }
 
-    bool wants_next() const
+    // w is read from the block each step, because it can still be set after the block has started
+    bool wants_next(uint32_t w) const
     {
-        return !two && lead.blend_out != 0 && pos + lead.blend_out == lead.total;
+        return !two && w != 0 && pos + w == lead.total;
     }
 
     // the window is as many path steps in the block coming in as in the one going out
-    void open(const Block &next)
+    void open(const Block &next, uint32_t w)
     {
         load(other, next);
-        gain= 0x80000000UL / lead.blend_out;
+        gain= 0x80000000UL / w;
         weight= gain >> 1;
         pick= 0x80000000UL;
         two= true;
         first_half= true;
-        win_left= lead.blend_out;
+        window= w;
+        win_left= w;
     }
 
     void swap_at_mark()
@@ -105,7 +103,7 @@ struct StepMix {
         lead= other;
         other= t;
         first_half= false;
-        win_left= lead.blend_in;
+        win_left= window;
         pos= 0;
     }
 
