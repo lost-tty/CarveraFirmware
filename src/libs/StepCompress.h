@@ -12,13 +12,14 @@
 
 class StepStream;
 
-// Every ramp is a cubic in time with zero acceleration at its ends, run across the blocks that
-// continue it: a constant-acceleration ramp jolts the frame at every phase change and block
-// boundary. Its peak is 3/2 of the mean the planner plans distances with.
+// Every ramp is a quintic in time with zero acceleration and zero jerk at its ends, run across
+// the blocks that continue it: a constant-acceleration ramp jolts the frame at every phase
+// change and block boundary, and a leg with finite jerk at its ends rings it at every stop.
+// Its peak is 15/8 of the mean the planner plans distances with.
 class StepCompress
 {
 public:
-    static constexpr float k_peak_over_mean= 1.5F;
+    static constexpr float k_peak_over_mean= 1.875F;
 
     static void configure(float timer_hz, float tolerance);
     static void rewind();
@@ -69,12 +70,12 @@ public:
     static float profile_a();
 
 private:
-    // The cubic runs faster than the planner's constant-acceleration ramp through the second
-    // half of a leg, so a junction inside a leg needs slack below its limit; and a leg has one
-    // acceleration, so the blocks in it have to agree on theirs
+    // The quintic runs up to 1.3x faster than the planner's constant-acceleration ramp through
+    // the second half of a leg, so a junction inside a leg needs that slack below its limit;
+    // and a leg has one acceleration, so the blocks in it have to agree on theirs
     static bool mergeable(const Span &a, const Span &b)
     {
-        return b.v_entry * 1.2F <= b.v_max_entry && fabsf(b.accel - a.accel) <= 0.1F * a.accel;
+        return b.v_entry * 1.35F <= b.v_max_entry && fabsf(b.accel - a.accel) <= 0.1F * a.accel;
     }
 
     static float timer_hz_;

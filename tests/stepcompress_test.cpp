@@ -1,16 +1,16 @@
 // The speed profile along the path, compressed into step intervals and played back the way
 // the interrupt plays them.
 //
-// Every leg is a cubic in time: acceleration zero at both ends, 3/2 of the planner's mean in
-// the middle, same distance and time as the constant-acceleration ramp. A leg runs to the next
-// point where the plan changes phase, across as many blocks as keep the phase.
+// Every leg is a quintic in time: acceleration and jerk zero at both ends, 15/8 of the
+// planner's mean in the middle, same distance and time as the constant-acceleration ramp. A
+// leg runs to the next point where the plan changes phase, across as many blocks as keep it.
 //
 // What has to hold, or the axis loses steps, arrives at the wrong time, or jolts:
 //   - the step count is exactly what the spans ask for
 //   - a single leg takes the planner's 2 d / (v0 + v1), starts at v0 and ends at v1
-//   - its acceleration never exceeds 3/2 of the mean and is near zero at both ends
+//   - its acceleration never exceeds 15/8 of the mean and is near zero at both ends
 //   - a ramp down is the ramp up in reverse
-//   - a ramp from rest starts, with a first step at the constant-jerk time
+//   - a ramp from rest starts, with a first step at the constant-snap time
 //   - a chain of short blocks that accelerate together is one leg: one peak, no dip between
 //     the blocks, whatever their step lengths
 //   - a leg whose end moves while it is being written stays continuous in speed and acceleration
@@ -141,12 +141,12 @@ static void check_single(float v0, float v1, uint32_t steps)
     printf("  %6.1f -> %6.1f mm/s over %5u: peak %.2fx mean, ends %.2fx %.2fx\n", v0, v1, steps,
            peak / mean, a.front() / mean, a.back() / mean);
     if (steps >= 50) {
-        CHECK(peak < 1.5 * mean * 1.05);
-        CHECK(peak > 1.5 * mean * 0.9);
-        // an end at rest is left out: its last 2% of the distance is a quarter of the leg's
-        // time under constant jerk, and the first-step check covers it
-        if (v0 > 0.1F * top) CHECK(a.front() < 0.35 * mean);
-        if (v1 > 0.1F * top) CHECK(a.back() < 0.35 * mean);
+        CHECK(peak < 1.875 * mean * 1.05);
+        CHECK(peak > 1.875 * mean * 0.9);
+        // an end at rest is left out: its last 2% of the distance is a third of the leg's
+        // time under constant snap, and the first-step check covers it
+        if (v0 > 0.1F * top) CHECK(a.front() < 0.25 * mean);
+        if (v1 > 0.1F * top) CHECK(a.back() < 0.25 * mean);
     }
 }
 
@@ -182,14 +182,15 @@ int main()
         printf("symmetry: ok (worst %.4f)\n", worst);
     }
 
-    // 3. from rest: the first step comes at the constant-jerk time, (T^2 ds / dv)^(1/3)
+    // 3. from rest: the first step comes at the constant-snap time. s = snap d^4 / 24 with
+    //    snap = 60 dv / T^3, so d = (0.4 T^3 ds / dv)^(1/4)
     {
         Plan p;
         p.spans.push_back(ramp_span(ds, 3000, 0.0F, V, 1.0F));
         StepCompress::rewind();
         p.run();
         double T = 2.0 * 3000 * ds / V;
-        double first = cbrt(T * T * ds / V);
+        double first = pow(0.4 * T * T * T * ds / V, 0.25);
         CHECK(fabs(p.dt[0] - first) < 0.1 * first);
         printf("from rest: first step at %.1f ms, expected %.1f ms\n", p.dt[0] * 1e3, first * 1e3);
     }
@@ -225,7 +226,7 @@ int main()
             vs.push_back(p.spans[b].ds / p.dt[i]);
         }
         // acceleration over 40-step windows: one rise and one fall, nothing in between. A
-        // cubic per chord would dip to zero 29 times
+        // leg per chord would dip to zero 29 times
         std::vector<double> a;
         for (size_t i = 0; i + 40 < chain; i++) {
             double t_w = 0;
@@ -246,8 +247,8 @@ int main()
                peak / a_mean, at * 100 / a.size(), dips, v_end, v);
         CHECK(fabs(v_end - v) < 0.02 * v);
         CHECK(dips == 0);
-        CHECK(peak < 1.5 * a_mean * 1.15);
-        CHECK(peak > 1.5 * a_mean * 0.85);
+        CHECK(peak < 1.875 * a_mean * 1.15);
+        CHECK(peak > 1.875 * a_mean * 0.85);
     }
 
     // 5. a junction without slack ends the leg: the same chain with one tight corner

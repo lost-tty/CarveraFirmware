@@ -22,13 +22,15 @@ namespace {
 struct Point {
     float v{0.0F};
     float a{0.0F};
+    float j{0.0F};
 };
 
-// v(t) = v0 + a0 t + c2 t^2 + c3 t^3, reaching v1 at zero acceleration after distance D. Steps
-// are marched from the last one, so the step after the previous call's costs one solve
+// v(t) = v0 + a0 t + j0 t^2/2 + c3 t^3 + c4 t^4 + c5 t^5, reaching v1 at zero acceleration and
+// zero jerk after distance D. Steps are marched from the last one, so the step after the
+// previous call's costs one solve
 struct Leg {
     bool valid{false};
-    float v0, a0, v1, D, T, c2, c3;
+    float v0, a0, j0, v1, D, T, c3, c4, c5;
     double t;          // summed over every step of the leg: a float loses the last step
     double s;
     uint32_t k;
@@ -36,29 +38,56 @@ struct Leg {
     float dt;
     bool solved;
 
-    float v_at(float tt) const { return v0 + (a0 + (c2 + c3 * tt) * tt) * tt; }
-    float a_at(float tt) const { return a0 + (2.0F * c2 + 3.0F * c3 * tt) * tt; }
+    float v_at(float tt) const
+    {
+        return v0 + (a0 + (0.5F * j0 + (c3 + (c4 + c5 * tt) * tt) * tt) * tt) * tt;
+    }
+    float a_at(float tt) const
+    {
+        return a0 + (j0 + (3.0F * c3 + (4.0F * c4 + 5.0F * c5 * tt) * tt) * tt) * tt;
+    }
+    float j_at(float tt) const
+    {
+        return j0 + (6.0F * c3 + (12.0F * c4 + 20.0F * c5 * tt) * tt) * tt;
+    }
     bool at_end() const { return s >= D - 1e-6; }
 
-    // T from D = T (v0 + v1) / 2 + a0 T^2 / 12
+    // T from D = T (v0 + v1) / 2 + a0 T^2 / 10 + j0 T^3 / 120
     void derive(const Point &p, const StepCompress::Target &tg)
     {
         v0= p.v;
         a0= p.a;
+        j0= p.j;
         v1= tg.v1;
         D= tg.d;
         float B= 0.5F * (v0 + v1);
         if(B < 1e-3F) B= 1e-3F;
-        float disc= B * B + a0 * D / 3.0F;
-        if(disc < 0.0F) {
-            // a0 too negative for D leaves no real T: the start bends to the limit
-            disc= 0.0F;
-            a0= -3.0F * B * B / D;
+        T= D / B;
+        bool ok= false;
+        for (uint8_t i = 0; i < 8 && T > 0.0F; i++) {
+            float f= (B + (a0 / 10.0F + j0 / 120.0F * T) * T) * T - D;
+            float df= B + (a0 / 5.0F + j0 / 40.0F * T) * T;
+            if(df <= 0.0F) break;
+            T-= f / df;
+            ok= fabsf(f) <= 1e-6F * D;
+            if(ok) break;
         }
-        T= 2.0F * D / (B + sqrtf(disc));
+        if(!ok || T <= 0.0F) {
+            // no real T with this jerk: drop it, and if the acceleration alone leaves none
+            // either, bend the start to the limit
+            j0= 0.0F;
+            float disc= B * B + 0.4F * a0 * D;
+            if(disc < 0.0F) {
+                disc= 0.0F;
+                a0= -2.5F * B * B / D;
+            }
+            T= 2.0F * D / (B + sqrtf(disc));
+        }
         float dv= v1 - v0;
-        c2= (3.0F * dv - 2.0F * a0 * T) / (T * T);
-        c3= (-2.0F * dv + a0 * T) / (T * T * T);
+        float T2= T * T, T3= T2 * T;
+        c3= (10.0F * dv - 6.0F * a0 * T - 1.5F * j0 * T2) / T3;
+        c4= (-15.0F * dv + 8.0F * a0 * T + 1.5F * j0 * T2) / (T3 * T);
+        c5= (6.0F * dv - 3.0F * a0 * T - 0.5F * j0 * T2) / (T3 * T2);
         t= 0.0;
         s= 0.0;
         k= 0;
@@ -70,29 +99,37 @@ struct Leg {
     {
         ds= step;
         solved= true;
-        if(s + step >= D - 0.5 * step) {
-            // the last step lands on T exactly; a leg to rest has v1 = 0 to divide by
+        if(s + step >= D - 0.5 * step && v1 < 1e-3F) {
+            // a leg to rest ends flat: its last step is what is left of T, not a solve at v = 0
             float rest= T - (float)t;
-            dt= rest > 0.0F ? rest : step / (v1 > 1e-3F ? v1 : 1e-3F);
+            dt= rest > 0.0F ? rest : step / 1e-3F;
             return;
         }
 
         float tt= (float)t;
         float v= v_at(tt);
         float a= a_at(tt);
-        float j= 2.0F * c2 + 6.0F * c3 * tt;
-        float s4= 6.0F * c3;
+        float j= j_at(tt);
+        float s4= 6.0F * c3 + (24.0F * c4 + 60.0F * c5 * tt) * tt;
+        float s5= 24.0F * c4 + 120.0F * c5 * tt;
+        float s6= 120.0F * c5;
         if(v < 0.0F) v= 0.0F;
 
-        // step/v is no seed where the speed is too small to carry the step: use the constant-jerk time
+        // where the speed is too small to carry the step, the jerk's or the snap's own time
+        // seeds the solve instead of step/v
         float d= v > 1e-3F ? step / v : 1.0F;
-        if(j > 0.0F && v * v * v < j * step * step) {
+        if(j > 0.0F) {
             float dj= cbrtf(6.0F * step / j);
             if(dj < d) d= dj;
         }
+        if(s4 > 0.0F) {
+            float dsn= sqrtf(sqrtf(24.0F * step / s4));
+            if(dsn < d) d= dsn;
+        }
         for (uint8_t i = 0; i < 8; i++) {
-            float g= (((s4 / 24.0F * d + j / 6.0F) * d + a * 0.5F) * d + v) * d - step;
-            float dg= ((s4 / 6.0F * d + j * 0.5F) * d + a) * d + v;
+            float g= (((((s6 / 720.0F * d + s5 / 120.0F) * d + s4 / 24.0F) * d + j / 6.0F) * d
+                       + a * 0.5F) * d + v) * d - step;
+            float dg= ((((s6 / 120.0F * d + s5 / 24.0F) * d + s4 / 6.0F) * d + j * 0.5F) * d + a) * d + v;
             if(dg <= 0.0F) break;
             float move= g / dg;
             d-= move;
@@ -126,9 +163,11 @@ struct Leg {
         if(at_end()) {
             p.v= v1;
             p.a= 0.0F;
+            p.j= 0.0F;
         } else {
             p.v= v_at((float)t);
             p.a= a_at((float)t);
+            p.j= j_at((float)t);
         }
         return p;
     }
@@ -155,6 +194,7 @@ uint32_t StepCompress::plateau(StepStream &out, float v, float ds, uint32_t step
     }
     point.v= v;
     point.a= 0.0F;
+    point.j= 0.0F;
     leg.valid= false;
 
     uint32_t interval= (uint32_t)(timer_hz_ * ds / v + 0.5F);
