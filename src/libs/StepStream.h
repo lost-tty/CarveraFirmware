@@ -45,6 +45,7 @@ public:
 
     bool at_mark() const { return !empty() && left == 0 && ring[tail].count == k_mark; }
     uint32_t mark() const { return ring[tail].interval; }
+    int32_t slope() const { return add; }
     int32_t mark_decel() const { return ring[tail].add; }
     void take_mark() { if(at_mark()) tail= next(tail); }
 

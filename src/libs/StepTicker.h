@@ -150,6 +150,7 @@ class StepTicker{
         bool ring_low{false};
         float brake_v2{0.0F};
         float brake_dv2{0.0F};
+        float brake_d0{0.0F};
         float brake_c{0.0F};         // the braking interval in ticks, refined a step at a time
         float brake_per_mm{0.0F};    // path steps per mm of the block the brake is in
         float brake_t{0.0F};

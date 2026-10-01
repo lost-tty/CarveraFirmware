@@ -273,7 +273,13 @@ void StepTicker::start_brake()
     brake_per_mm= path_per_mm(current_block);
     // the brake is the profile's leg to rest: its deceleration follows 16 t^2 (1 - t)^2 of the
     // peak over its time T = v / mean, so it starts and ends without a jerk step
-    float T= v * StepCompress::k_peak_over_mean / ((float)path_decel * brake_scale) * timer_hz;
+    // a stream already slowing keeps that deceleration as the floor, or the hold would let go first
+    float peak= (float)path_decel * brake_scale;
+    float d0= brake_v2 * (float)stream.slope() / ((float)(1 << StepStream::k_add_shift) * brake_c);
+    if(d0 < 0.0F) d0= 0.0F;
+    if(d0 > peak) d0= peak;
+    brake_d0= 2.0F * d0;
+    float T= v / (d0 + (peak - d0) / StepCompress::k_peak_over_mean) * timer_hz;
     brake_t= 0.0F;
     brake_inv_T= T > 1.0F ? 1.0F / T : 1.0F;
 }
@@ -287,6 +293,7 @@ void StepTicker::rescale_brake()
         float r= k / brake_per_mm;
         brake_v2*= r * r;
         brake_c/= r;
+        brake_d0*= r;
         brake_per_mm= k;
     }
     brake_dv2= 2.0F * (float)path_decel;
@@ -454,7 +461,7 @@ inline uint32_t StepTicker::run_tick (void)
         brake_t+= (float)ticks;
         float tau= brake_t * brake_inv_T;
         float w= tau * (1.0F - tau);
-        brake_v2-= brake_dv2 * brake_scale * 16.0F * w * w;
+        brake_v2-= brake_d0 + (brake_dv2 * brake_scale - brake_d0) * 16.0F * w * w;
         if(brake_v2 <= 0.0F || tau >= 1.0F) {
             for (uint8_t m = 0; m < num_motors; m++) motor[m]->stop_moving();
             current_tick= 0;
