@@ -25,6 +25,7 @@ public:
     void sub_trace(std::string args, StreamOutput *stream);
     SimpleShell::Registered shell_slot;
     bool trigger(const Gcode &gcode, StreamOutput *stream, std::string &err) override;
+    bool call(const std::string &line, StreamOutput *stream, std::string &err) override;
     Source::Result next(SerialMessage &msg) override;
     void abort() override;
     void list(StreamOutput *stream, unsigned around) override;
@@ -35,6 +36,8 @@ public:
 private:
     bool load();
     bool run(const char *sub, const float *args, unsigned nargs, StreamOutput *reply, std::string &err);
+    bool can_start(std::string &err) const;
+    void started(const std::string &sub, StreamOutput *reply);
     void finish();
     void halt(int reason);
 

@@ -151,11 +151,6 @@ static unsigned trim(std::string &s)
     return b == std::string::npos ? 0 : b;
 }
 
-static bool is_control(const std::string &s)
-{
-    return s.size() > 1 && (s[0] == 'o' || s[0] == 'O') && (s[1] == '<' || isdigit((unsigned char)s[1]));
-}
-
 static const char *KEYWORDS[] = {"sub", "endsub", "call", "return", "abort", "if", "elseif", "else", "endif",
                                  "while", "endwhile", "break", "continue", "repeat", "endrepeat"};
 
@@ -248,8 +243,9 @@ bool Program::load(Source &src, std::string &err)
     unsigned count = 0; // o-word lines, so the table is allocated once at its final size
     std::string text;
     for (unsigned at = 0, next; src.line_at(at, text, next); at = next) {
-        size_t b = text.find_first_not_of(" \t");
-        if (b != std::string::npos && b + 1 < text.size() && (text[b] == 'o' || text[b] == 'O') && (text[b + 1] == '<' || isdigit((unsigned char)text[b + 1]))) count++;
+        const char *p = text.c_str();
+        skip_space(p);
+        if (is_control(p)) count++;
     }
     controls.reserve(count);
 
@@ -272,7 +268,7 @@ bool Program::load(Source &src, std::string &err)
         error_offset = at;
         if (text.empty() || text[0] == ';') continue;
 
-        if (!is_control(text)) {
+        if (!is_control(text.c_str())) {
             gcode::Line l;
             bool ok = text[0] == '#' ? gcode::assign(text.c_str(), permissive, e) : l.parse(text.c_str(), &permissive);
             if (!ok) {
@@ -367,15 +363,13 @@ bool Program::load(Source &src, std::string &err)
     }
     for (Control &c : controls) {
         if (c.kind != CALL) continue;
-        int sub = find_sub(label_text(labels[c.label]).c_str());
-        if (sub < 0) {
+        if (find_sub(label_text(labels[c.label]).c_str()) < 0) {
             char buf[24];
             error_offset = c.offset;
             snprintf(buf, sizeof(buf), "line %u: ", src.line_of(c.offset));
             err = buf + std::string("call to unknown sub ") + label_text(labels[c.label]);
             return false;
         }
-        c.match = sub;
     }
     labels.shrink_to_fit();
     src.release();
@@ -417,6 +411,7 @@ Runner::Named *Runner::find_named(const char *name, uint8_t depth)
 bool Runner::Store::get(int n, float &v) const
 {
     if (n >= 1 && n <= (int)MAX_ARGS) {
+        if (r.frames.empty()) return false;
         const Frame &f = r.frames.back();
         if (!(f.has_arg & (1u << (n - 1)))) return false;
         v = r.args[f.base + n - 1];
@@ -498,18 +493,29 @@ void Runner::pop()
     frames.pop_back();
 }
 
+bool Runner::start_call(const char *line, std::string &sub, std::string &err)
+{
+    std::string text = line;
+    trim(text);
+    reset();
+    return call(text, sub, err);
+}
+
 bool Runner::start(const char *sub, const float *args, unsigned nargs, std::string &err)
 {
-    stop();
-    silent_steps = 0;
-    abort_reason = 0;
+    reset();
+    if (nargs > MAX_ARGS) {
+        err = "too many arguments";
+        return false;
+    }
+    return enter(sub, args, nargs, err);
+}
+
+bool Runner::enter(const char *sub, const float *args, unsigned nargs, std::string &err)
+{
     int index = -1;
     if (sub != nullptr && (index = program.find_sub(sub)) < 0) {
         err = std::string("no sub ") + sub;
-        return false;
-    }
-    if (nargs > MAX_ARGS) {
-        err = "too many arguments";
         return false;
     }
     return push(index, args, nargs, err);
@@ -536,9 +542,27 @@ bool Runner::arguments(const char *p, float *out, unsigned &n, std::string &err)
     return parse_args(p, out, n, &store, err);
 }
 
-// leaves the frame on the next line to look at
-bool Runner::control(const Control &c, const char *rest, std::string &err)
+bool Runner::call(const std::string &text, std::string &sub, std::string &err)
 {
+    const char *label;
+    size_t length;
+    Kind kind;
+    uint8_t arg;
+    if (!split_control(text, label, length, kind, arg, err)) return false;
+    if (kind != CALL) {
+        err = "only a call runs from here";
+        return false;
+    }
+    sub.assign(label, length);
+    float v[MAX_ARGS];
+    unsigned n;
+    return arguments(text.c_str() + arg, v, n, err) && enter(sub.c_str(), v, n, err);
+}
+
+// leaves the frame on the next line to look at
+bool Runner::control(const Control &c, const std::string &text, std::string &err)
+{
+    const char *rest = text.c_str() + c.arg;
     Frame &f = frames.back();
     float v[MAX_ARGS];
     unsigned n;
@@ -560,9 +584,9 @@ bool Runner::control(const Control &c, const char *rest, std::string &err)
             stop();
             return true;
         case CALL: {
-            if (!arguments(rest, v, n, err)) return false;
             unsigned caller = frames.size() - 1;
-            if (!push(c.match, v, n, err)) return false;
+            std::string sub;
+            if (!call(text, sub, err)) return false;
             frames[caller].at = program.after(c); // by index: push may reallocate
             return true;
         }
@@ -738,7 +762,7 @@ Runner::Result Runner::step(std::string &out, std::string &err)
         if (text.empty() || text[0] == ';') {
             f.at = next;
         } else if (const Control *c = program.control_at(at)) {
-            if (!control(*c, text.c_str() + c->arg, e)) return fail(err, e);
+            if (!control(*c, text, e)) return fail(err, e);
         } else if (text[0] == '#') {
             if (!gcode::assign(text.c_str(), store, e)) return fail(err, e);
             f.at = next;

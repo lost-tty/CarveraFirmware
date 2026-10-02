@@ -187,7 +187,8 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
     }
     // ?, !, ~ and friends act the moment they arrive, from any console
     if(possible_command.find_first_not_of(" \t", i + 1) == string::npos && control_char(possible_command[i], stream)) return;
-    if(!islower(possible_command[i]) && possible_command[i] != '$') {
+    if((!islower(possible_command[i]) && possible_command[i] != '$')
+       || script::is_control(possible_command.c_str() + i)) {
         gcode_dispatch.run_mdi(new_message);
         return;
     }

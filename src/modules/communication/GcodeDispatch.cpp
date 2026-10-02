@@ -19,6 +19,7 @@
 #include "checksumm.h"
 #include "Source.h"
 #include "BlockActions.h"
+#include "Script.h"
 
 #include <cctype>
 #include <cstdlib>
@@ -219,12 +220,15 @@ void GcodeDispatch::run_mdi(const SerialMessage &msg)
 
     if(sources.active()) {
         // without the parameters: reading #5021 drains the queue, and the letters decide this
+        const char *text= msg.message.c_str();
+        gcode::skip_space(text);
+        bool call= script::is_control(text);
         gcode::Line parsed;
-        if(!parsed.parse(msg.message.c_str(), nullptr)) {
+        if(!call && !parsed.parse(text, nullptr)) {
             printk("error:%s, and parameters are not read while a job runs\r\n", parsed.error_text().c_str());
             return;
         }
-        if(!safe_while_running(parsed.words())) {
+        if(call || !safe_while_running(parsed.words())) {
             printk("error:busy, a job or script is running\r\n");
             return;
         }
@@ -242,7 +246,7 @@ bool GcodeDispatch::run_line(const SerialMessage &msg)
     }
 
     char c= s[i];
-    if(c == '$' || islower((unsigned char)c)) return true; // simpleshell command
+    if(c == '$' || (islower((unsigned char)c) && !script::is_control(s.c_str() + i))) return true; // simpleshell command
 
     size_t j= i;
     if(c == 'N') {
@@ -251,6 +255,16 @@ bool GcodeDispatch::run_line(const SerialMessage &msg)
         while(j < s.size() && s[j] == ' ') j++;
     }
     if(j < s.size() && s[j] == '#') return parameter_statement(s.c_str() + j);
+
+    if(script::is_control(s.c_str() + j)) {
+        if(machine_task.is_halted()) {
+            printk("error:Alarm lock\n");
+            return false;
+        }
+        std::string err= "no scripts";
+        if(scripts == nullptr || !scripts->call(s.substr(j), msg.stream, err)) return fail(err.c_str());
+        return true;
+    }
 
     // M118 carries free text
     if(s.size() - j >= 4 && memcmp(s.data() + j, "M118", 4) == 0

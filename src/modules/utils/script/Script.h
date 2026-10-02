@@ -54,10 +54,15 @@ struct Control {
     uint8_t arg;     // offset of the argument text in the trimmed line
     uint16_t label;  // index into the label list
     uint16_t match;  // sub<->endsub, if/elseif/else->next branch or endif, while<->endwhile, repeat<->endrepeat,
-                     // break/continue->loop, call->sub
+                     // break/continue->loop
 };
 
 struct Label { uint16_t offset, length; }; // the name as written in the source; numeric labels compare by value
+
+inline bool is_control(const char *p)
+{
+    return (p[0] == 'o' || p[0] == 'O') && (p[1] == '<' || (p[1] >= '0' && p[1] <= '9'));
+}
 
 // A validated script: control words with their pairing. Everything else is checked to tokenize.
 class Program {
@@ -82,6 +87,7 @@ class Runner {
 public:
     Runner(const Program &program, gcode::ParamStore &machine);
     bool start(const char *sub, const float *args, unsigned nargs, std::string &err); // sub null: the main body
+    bool start_call(const char *line, std::string &sub, std::string &err);
     bool set_local(const char *name, float v); // a #<name> for the sub just started, e.g. a G-code block's words
     enum Result { LINE, MESSAGE, DONE, ERROR }; // MESSAGE: a (MSG,..) (DEBUG,..) or (PRINT,..) comment, text in out
     Result step(std::string &out, std::string &err);
@@ -125,7 +131,10 @@ private:
     };
 
     Result fail(std::string &err, const std::string &msg);
-    bool control(const Control &c, const char *rest, std::string &err);
+    void reset() { stop(); silent_steps = 0; abort_reason = 0; }
+    bool enter(const char *sub, const float *args, unsigned nargs, std::string &err);
+    bool call(const std::string &text, std::string &sub, std::string &err);
+    bool control(const Control &c, const std::string &text, std::string &err);
     void jump(unsigned offset) { frames.back().at = offset; }
     bool arguments(const char *p, float *out, unsigned &n, std::string &err);
     bool substitute(const std::string &text, std::string &out, std::string &err);

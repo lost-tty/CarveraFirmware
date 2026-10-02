@@ -26,6 +26,7 @@ class Gcode;
 class ScriptHook {
 public:
     virtual bool trigger(const Gcode &gcode, StreamOutput *stream, std::string &err) = 0;
+    virtual bool call(const std::string &line, StreamOutput *stream, std::string &err) = 0;
 };
 
 class GcodeDispatch : public Module

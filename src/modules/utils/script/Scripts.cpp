@@ -92,20 +92,25 @@ void Scripts::list(StreamOutput *stream, unsigned around)
     src.release();
 }
 
-bool Scripts::run(const char *sub, const float *args, unsigned nargs, StreamOutput *stream, std::string &err)
+bool Scripts::can_start(std::string &err) const
 {
-    if(!loaded) {
-        err= "no scripts";
-        return false;
-    }
-    if(runner->running()) {
-        err= "script running";
-        return false;
-    }
-    if(!runner->start(sub, args, nargs, err)) return false;
+    if(!loaded) err= "no scripts";
+    else if(runner->running()) err= "script running";
+    else return true;
+    return false;
+}
+
+void Scripts::started(const std::string &sub, StreamOutput *stream)
+{
     name= sub;
     reply= stream;
     sources.push(this);
+}
+
+bool Scripts::run(const char *sub, const float *args, unsigned nargs, StreamOutput *stream, std::string &err)
+{
+    if(!can_start(err) || !runner->start(sub, args, nargs, err)) return false;
+    started(sub, stream);
     return true;
 }
 
@@ -147,6 +152,14 @@ bool Scripts::trigger(const Gcode &gcode, StreamOutput *stream, std::string &err
         char local[2]= {(char)tolower(w.letter), 0};
         if(w.letter != 'G' && w.letter != 'M') runner->set_local(local, w.value);
     }
+    return true;
+}
+
+bool Scripts::call(const std::string &line, StreamOutput *stream, std::string &err)
+{
+    std::string sub;
+    if(!can_start(err) || !runner->start_call(line.c_str(), sub, err)) return false;
+    started(sub, stream);
     return true;
 }
 
