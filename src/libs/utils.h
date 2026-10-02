@@ -43,6 +43,7 @@ void check_and_make_path( std::string origin );
 
 int append_parameters(char *buf, std::vector<std::pair<char,float>> params, size_t bufsize);
 std::string wcs2gcode(int wcs);
+std::string plain_number(float v);
 
 #define confine(value, min, max) (((value) < (min))?(min):(((value) > (max))?(max):(value)))
 #define delay_ms(ms) vTaskDelay(pdMS_TO_TICKS(ms))

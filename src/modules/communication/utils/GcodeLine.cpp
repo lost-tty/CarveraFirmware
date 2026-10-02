@@ -287,6 +287,11 @@ static bool expr(const char *&p, float &out, const ParamStore *params, std::stri
     }
 }
 
+bool operand(const char *&p, float &out, const ParamStore *params, std::string &err)
+{
+    return primary(p, out, params, err, 0);
+}
+
 bool eval(const char *&p, float &out, const ParamStore *params, std::string &err)
 {
     if (!expr(p, out, params, err, 0, 0)) return false;

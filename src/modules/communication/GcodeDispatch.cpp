@@ -306,6 +306,15 @@ bool GcodeDispatch::announce(const string &line, size_t from, unsigned int numbe
             while(i < line.size() && line[i] != ')') i++;
             continue;
         }
+        if(c == '[') {
+            const char *p= line.c_str() + i;
+            float v;
+            string err;
+            if(!gcode::operand(p, v, &params, err)) return fail(err.c_str());
+            out+= plain_number(v);
+            i= (p - line.c_str()) - 1;
+            continue;
+        }
         out+= c;
     }
 

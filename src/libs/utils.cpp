@@ -352,6 +352,16 @@ int append_parameters(char *buf, std::vector<std::pair<char,float>> params, size
     return n;
 }
 
+string plain_number(float v)
+{
+    char buf[48];   // FLT_MAX in %.4f
+    int len= snprintf(buf, sizeof(buf), "%.4f", v);
+    while(buf[len - 1] == '0') len--;
+    if(buf[len - 1] == '.') len--;
+    if(len == 2 && buf[0] == '-') return "0";
+    return string(buf, len);
+}
+
 string wcs2gcode(int wcs) {
     string str= "G5";
     str.append(1, std::min(wcs, 5) + '4');

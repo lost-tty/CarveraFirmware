@@ -62,6 +62,8 @@ inline void skip_space(const char *&p) { while (*p == ' ' || *p == '\t') p++; }
 // with LinuxCNC precedence and unary sign. Advances p.
 bool eval(const char *&p, float &out, const ParamStore *params, std::string &err);
 
+bool operand(const char *&p, float &out, const ParamStore *params, std::string &err);
+
 // reads a #<name> at p (p on '<'), returns false if malformed
 bool named_param(const char *&p, std::string &name, std::string &err);
 
