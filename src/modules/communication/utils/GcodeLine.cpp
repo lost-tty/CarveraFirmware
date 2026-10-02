@@ -145,7 +145,7 @@ static bool function(const char *name, const char *&p, float &out, const ParamSt
             err = "missing ]";
             return false;
         }
-        out = params != nullptr && params->exists_named(pname.c_str()) ? 1 : 0;
+        out = params != nullptr && params->has_named(pname.c_str()) ? 1 : 0;
         return true;
     }
     float a;

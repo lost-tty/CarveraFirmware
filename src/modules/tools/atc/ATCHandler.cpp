@@ -361,9 +361,9 @@ void ATCHandler::sub_rack(std::string, StreamOutput *stream)
 void ATCHandler::register_params()
 {
     static constexpr Parameters::Named rows[] = {
-        {"_clamp_state", &ATCHandler::param_clamp_state},
-        {"_tool_detected", &ATCHandler::param_tool_detected},
-        {"_active_tool", &ATCHandler::param_active_tool},
+        {"_clamp_state", &ATCHandler::param_clamp_state, true},
+        {"_tool_detected", &ATCHandler::param_tool_detected, true},
+        {"_active_tool", &ATCHandler::param_active_tool, true},
         {"_anchor1_x", &config_param<&ATCConfigT::anchor1_x>},
         {"_anchor1_y", &config_param<&ATCConfigT::anchor1_y>},
         {"_anchor2_offset_x", &config_param<&ATCConfigT::anchor2_offset_x>},

@@ -53,7 +53,7 @@ public:
     virtual bool set(int n, float v) = 0;
     virtual bool get_named(const char *name, float &v) const { (void)name; (void)v; return false; } // #<name>, scripts only
     virtual bool set_named(const char *name, float v, std::string &err) { (void)name; (void)v; (void)err; return false; }
-    bool exists_named(const char *name) const { float v; return get_named(name, v); }
+    virtual bool has_named(const char *name) const { float v; return get_named(name, v); }
 };
 
 inline void skip_space(const char *&p) { while (*p == ' ' || *p == '\t') p++; }

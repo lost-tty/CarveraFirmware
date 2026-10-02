@@ -119,6 +119,7 @@ private:
         bool get(int n, float &v) const override;
         bool set(int n, float v) override;
         bool get_named(const char *name, float &v) const override;
+        bool has_named(const char *name) const override;
         bool set_named(const char *name, float v, std::string &err) override;
         Runner &r;
     };

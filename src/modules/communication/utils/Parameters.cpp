@@ -21,6 +21,17 @@ static void machine_position(float *mpos)
     THEROBOT.get_real_machine_position(mpos);
 }
 
+static bool settle()
+{
+    if(machine_task.on_task()) return THECONVEYOR.wait_for_idle();
+    return machine_task.post_drain();
+}
+
+static bool machine_state(int n)
+{
+    return n == 2000 || n == 3026 || n == 3027 || (n >= 5021 && n <= 5044);
+}
+
 bool Parameters::get(int n, float &v) const
 {
     if (n >= 101 && n <= 120) {
@@ -32,8 +43,7 @@ bool Parameters::get(int n, float &v) const
         return !std::isnan(v); // blank EEPROM reads as NaN
     }
 
-    // the queue has to run out first, or this reads the planned position
-    if (n >= 5021 && n <= 5044) machine_task.post_drain();
+    if (machine_state(n) && !settle()) return false;
     float mpos[3];
     switch (n) {
         case 2000: v = persist.tool_length(); return true;
@@ -110,16 +120,16 @@ static float probe_ok(void *) { return probe_axis(3); }
 static float cycle_initial(void *) { return gcode_dispatch.get_cycle_initial(); }
 
 static constexpr Parameters::Named BUILTIN[] = {
-    {"_laser_mode",  laser_mode},
-    {"_homed",       homed},
-    {"_spindle_on",  spindle_is_on},
-    {"_playing",     playing},
-    {"_tlo",         tlo},
-    {"_probe_x",     probe_x},
-    {"_probe_y",     probe_y},
-    {"_probe_z",     probe_z},
-    {"_probe_ok",    probe_ok},
-    {"_cycle_initial", cycle_initial},
+    {"_laser_mode",  laser_mode,    true},
+    {"_homed",       homed,         true},
+    {"_spindle_on",  spindle_is_on, true},
+    {"_playing",     playing,       false},
+    {"_tlo",         tlo,           true},
+    {"_probe_x",     probe_x,       true},
+    {"_probe_y",     probe_y,       true},
+    {"_probe_z",     probe_z,       true},
+    {"_probe_ok",    probe_ok,      true},
+    {"_cycle_initial", cycle_initial, false},
 };
 
 void Parameters::init()
@@ -145,8 +155,15 @@ bool Parameters::get_named(const char *name, float &v) const
     void *context;
     const Named *p = find(name, context);
     if (p == nullptr) return false;
+    if (p->machine && !settle()) return false;
     v = p->get(context);
     return true;
+}
+
+bool Parameters::has_named(const char *name) const
+{
+    void *context;
+    return find(name, context) != nullptr;
 }
 
 void Parameters::list_named(StreamOutput *stream)

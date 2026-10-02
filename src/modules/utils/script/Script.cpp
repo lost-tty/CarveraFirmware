@@ -446,12 +446,17 @@ bool Runner::Store::get_named(const char *name, float &v) const
     return true;
 }
 
+bool Runner::Store::has_named(const char *name) const
+{
+    if (name[0] == '_' && r.machine.has_named(name)) return true;
+    return r.find_named(name, name[0] == '_' ? GLOBAL : r.frames.size() - 1) != nullptr;
+}
+
 bool Runner::Store::set_named(const char *name, float v, std::string &err)
 {
     if (name[0] == '_') {
         if (r.machine.set_named(name, v, err)) return true;
-        float ignored;
-        if (r.machine.get_named(name, ignored)) return false; // the machine owns it: not a script global
+        if (r.machine.has_named(name)) return false;
     }
     uint8_t depth = name[0] == '_' ? GLOBAL : r.frames.size() - 1;
     if (Named *n = r.find_named(name, depth)) {
