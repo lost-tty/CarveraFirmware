@@ -1578,7 +1578,7 @@ void SimpleShell::config_command(string parameters, StreamOutput *stream)
         return;
     }
     if (sub != "list") {
-        stream->printf("Usage: config list | config get <key> | config set <key> <value> | "
+        stream->printf("Usage: config list [prefix] | config get <key> | config set <key> <value> | "
                        "config reset <key>\r\n");
         return;
     }
@@ -1586,12 +1586,13 @@ void SimpleShell::config_command(string parameters, StreamOutput *stream)
         stream->printf("error:out of memory\n");
         return;
     }
-    ConfigTable::for_each(list_key, stream);
+    ConfigTable::for_each(list_key, stream, key.c_str());
     ConfigTable::release();
-    each_file_line(config_path, [&](const char *key, const char *value) {
+    each_file_line(config_path, [&](const char *name, const char *value) {
+        if (strncmp(name, key.c_str(), key.size()) != 0) return;
         const ConfigTable::Group *g; const ConfigTable::Key *k;
-        if (ConfigTable::find(key, &g, &k)) return;
-        stream->printf("%s = %s\n", key, value);
+        if (ConfigTable::find(name, &g, &k)) return;
+        stream->printf("%s = %s\n", name, value);
     });
 }
 

@@ -403,9 +403,10 @@ void ConfigTable::load(const char *path)
     fclose(fp);
 }
 
-void ConfigTable::for_each(EachFn fn, void *user)
+void ConfigTable::for_each(EachFn fn, void *user, const char *prefix)
 {
     char name[132];
+    size_t plen = strlen(prefix);
     FOR_EACH_GROUP(g) {
         for (uint8_t i = 0; i < g->n; i++) {
             if (g->prefix[0] == '\0' || joins_flat(g->prefix)) {
@@ -413,6 +414,7 @@ void ConfigTable::for_each(EachFn fn, void *user)
             } else {
                 snprintf(name, sizeof(name), "%s.%s", g->prefix, g->keys[i].name);
             }
+            if (strncmp(name, prefix, plen) != 0) continue;
             fn(name, g, &g->keys[i], user);
         }
     }

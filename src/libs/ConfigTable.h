@@ -92,7 +92,7 @@ public:
     static void format_default(const Group *group, const Key *key, char *buf, size_t bufsize);
 
     using EachFn = void (*)(const char *name, const Group *group, const Key *key, void *user);
-    static void for_each(EachFn fn, void *user);
+    static void for_each(EachFn fn, void *user, const char *prefix = "");
 
     // A missing file is not an error.
     static void load(const char *path);
