@@ -1,5 +1,5 @@
-// logging.cpp
-#include "logging.h"
+// Logging.cpp
+#include "Logging.h"
 #include "libs/Kernel.h"
 
 void printk(const char* format, ...) {
