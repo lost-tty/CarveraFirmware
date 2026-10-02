@@ -34,6 +34,7 @@ class Player : public Module, public Source, public Killable {
 
     public:
         void on_module_loaded();
+        void on_main_loop(void *) override;
         static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
         bool is_playing() const { return playing_file; }
         const string &playing_name() const { return filename; }
@@ -68,6 +69,7 @@ class Player : public Module, public Source, public Killable {
         void test_command(string parameters, StreamOutput* stream );
 
         unsigned long calculate_elapsed_secs();
+        void sample_runtime();
         unsigned long current_line();
         string extract_options(string& args);
 		
@@ -80,7 +82,7 @@ class Player : public Module, public Source, public Killable {
         GcodeFile file;
         std::queue<string> buffered_queue; // console lines queued by "buffer", fed one per loop before the next file line
         static const int BUFFER_LIMIT = 32; // a remote client must not grow the queue without bound
-        TickType_t start_time;
+        TickType_t run_ticks = 0, sampled_at = 0;
         struct {
             bool playing_file:1;
             bool m1_stops:1;   // M334 turns it on, M333 off

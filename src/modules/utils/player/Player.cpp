@@ -43,11 +43,11 @@ extern SDFAT mounter;
 void Player::on_module_loaded()
 {
     this->playing_file = false;
-    this->start_time = xTaskGetTickCount();
     this->suspend_pending = false;
 
     for (unsigned i= 0; COMMANDS[i].name != nullptr; i++) SimpleShell::add_command(shell_slots[i], COMMANDS[i].name, &Player::shell, this, COMMANDS[i].help);
     GcodeDispatch::add_handler(this);
+    register_for_event(ON_MAIN_LOOP);
     ADD_MCODE(m0, 0, BARRIER, Player::program_stop);
     ADD_MCODE(m333, 333, IMMEDIATE, Player::optional_stop_mode);
     ADD_MCODE(m334, 334, IMMEDIATE, Player::optional_stop_mode);
@@ -58,12 +58,17 @@ void Player::on_module_loaded()
 
 unsigned long Player::calculate_elapsed_secs()
 {
+    sample_runtime();
+    return (run_ticks + configTICK_RATE_HZ / 2) / configTICK_RATE_HZ;
+}
+
+void Player::sample_runtime()
+{
     TickType_t now = xTaskGetTickCount();
-
-    // Handle tick count overflow
-    TickType_t elapsedTicks = (now >= start_time) ? (now - start_time) : (now + (portMAX_DELAY - start_time + 1));
-
-    return (pdTICKS_TO_MS(elapsedTicks) + 500) / 1000;
+    if (playing_file && !sources.suspended() && !THEKERNEL->get_feed_hold() && !machine_task.is_halted()) {
+        run_ticks += now - sampled_at;
+    }
+    sampled_at = now;
 }
 
 void Player::cleanup()
@@ -200,7 +205,8 @@ void Player::play_command( string parameters, StreamOutput *stream )
     } else {
         stream->printf("  File size %ld\r\n", file.size());
     }
-    this->start_time = xTaskGetTickCount();
+    run_ticks = 0;
+    sampled_at = xTaskGetTickCount();
 }
 
 // Goto a certain line when playing a file
@@ -287,6 +293,11 @@ void Player::list(StreamOutput *stream, unsigned around)
 {
     stream->printf("%s:\r\n", this->filename.c_str());
     file.list(stream, current_line(), around);
+}
+
+void Player::on_main_loop(void *)
+{
+    sample_runtime();
 }
 
 // the file ended, was aborted or the machine halted: queued motion finishes, then spindle and coolant go off as after M2
