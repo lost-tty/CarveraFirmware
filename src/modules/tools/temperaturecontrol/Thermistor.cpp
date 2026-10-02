@@ -53,46 +53,6 @@ void Thermistor::UpdateConfig()
     calc_jk();
 }
 
-// print out predefined thermistors
-void Thermistor::print_predefined_thermistors(StreamOutput* s)
-{
-    int cnt= 1;
-    s->printf("S/H table\n");
-    for (auto& i : predefined_thermistors) {
-        s->printf("%d - %s\n", cnt++, i.name);
-    }
-
-    cnt= 129;
-    s->printf("Beta table\n");
-    for (auto& i : predefined_thermistors_beta) {
-        s->printf("%d - %s\n", cnt++, i.name);
-    }
-}
-
-// calculate the coefficients from the supplied three Temp/Resistance pairs
-// copied from https://github.com/MarlinFirmware/Marlin/blob/Development/Marlin/scripts/createTemperatureLookupMarlin.py
-std::tuple<float,float,float> Thermistor::calculate_steinhart_hart_coefficients(float t1, float r1, float t2, float r2, float t3, float r3)
-{
-    float l1 = logf(r1);
-    float l2 = logf(r2);
-    float l3 = logf(r3);
-
-    float y1 = 1.0F / (t1 + 273.15F);
-    float y2 = 1.0F / (t2 + 273.15F);
-    float y3 = 1.0F / (t3 + 273.15F);
-    float x = (y2 - y1) / (l2 - l1);
-    float y = (y3 - y1) / (l3 - l1);
-    float c = (y - x) / ((l3 - l2) * (l1 + l2 + l3));
-    float b = x - c * (powf(l1,2) + powf(l2,2) + l1 * l2);
-    float a = y1 - (b + powf(l1,2) * c) * l1;
-
-    if(c < 0) {
-        printk("WARNING: negative coefficient in calculate_steinhart_hart_coefficients. Something may be wrong with the measurements\n");
-        c = -c;
-    }
-    return std::make_tuple(a, b, c);
-}
-
 void Thermistor::calc_jk()
 {
     // Thermistor math

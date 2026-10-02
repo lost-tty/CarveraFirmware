@@ -42,7 +42,6 @@
 #include "SwitchPublicAccess.h"
 #include "SwitchPool.h"
 #include "SDFAT.h"
-#include "Thermistor.h"
 #include "md5.h"
 #include "utils.h"
 #include "MainButton.h"
@@ -110,8 +109,6 @@ const SimpleShell::ptentry_t SimpleShell::commands_table[] = {
     {"sleep",     &SimpleShell::sleep_command,     "sleep - enter sleep mode"},
     {"power",     &SimpleShell::power_command,     "power - manage power settings"},
     {"remount",   &SimpleShell::remount_command,   "remount - remount the filesystem"},
-    {"calc_thermistor", &SimpleShell::calc_thermistor_command, "calc_thermistor [-s0] T1,R1,T2,R2,T3,R3 - calculate thermistor coefficients"},
-    {"thermistors", &SimpleShell::print_thermistors_command, "thermistors - list predefined thermistors"},
     {"md5sum",    &SimpleShell::md5sum_command,    "md5sum file - compute MD5 checksum"},
     {"time",      &SimpleShell::time_command,      "time - display current time"},
     {"test",      &SimpleShell::test_command,      "test - run system tests"},
@@ -1163,49 +1160,6 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
     } else {
         stream->printf("error: unknown option %s\n", what.c_str());
     }
-}
-
-// used to test out the get public data events
-void SimpleShell::print_thermistors_command( string parameters, StreamOutput *stream)
-{
-    // #ifndef NO_TOOLS_TEMPERATURECONTROL
-    Thermistor::print_predefined_thermistors(stream);
-    // #endif
-}
-
-void SimpleShell::calc_thermistor_command( string parameters, StreamOutput *stream)
-{
-    // #ifndef NO_TOOLS_TEMPERATURECONTROL
-    string s = shift_parameter( parameters );
-    int saveto= -1;
-    // see if we have -sn as first argument
-    if(s.find("-s", 0, 2) != string::npos) {
-        // save the results to thermistor n
-        saveto= strtol(s.substr(2).c_str(), nullptr, 10);
-    }else{
-        parameters= s;
-    }
-
-    std::vector<float> trl= parse_number_list(parameters.c_str());
-    if(trl.size() == 6) {
-        // calculate the coefficients
-        float c1, c2, c3;
-        std::tie(c1, c2, c3) = Thermistor::calculate_steinhart_hart_coefficients(trl[0], trl[1], trl[2], trl[3], trl[4], trl[5]);
-        stream->printf("Steinhart Hart coefficients:  I%1.18f J%1.18f K%1.18f\n", c1, c2, c3);
-        if(saveto == -1) {
-            stream->printf("  Paste the above in the M305 S0 command, then save with M500\n");
-        }else{
-            char buf[80];
-            snprintf(buf, sizeof(buf), "M305 S%d I%1.18f J%1.18f K%1.18f", saveto, c1, c2, c3);
-            gcode_dispatch.run_line(buf, &THEKERNEL->streams);
-            stream->printf("  Setting Thermistor %d to those settings, save with M500\n", saveto);
-        }
-
-    }else{
-        // give help
-        stream->printf("Usage: calc_thermistor T1,R1,T2,R2,T3,R3\n");
-    }
-    // #endif
 }
 
 // set or get switch state for a named switch

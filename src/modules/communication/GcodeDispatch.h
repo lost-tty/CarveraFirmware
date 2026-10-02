@@ -50,7 +50,6 @@ public:
     void set_script_hook(ScriptHook *hook) { scripts= hook; }
     void run_mdi(const SerialMessage &msg); // a console line: most of them wait for the job to finish
     bool run_line(const SerialMessage &msg); // false: the line was refused
-    bool run_line(const std::string &line, StreamOutput *stream);
     void program_end();
 private:
     enum Gate { PASS, HANDLED, REFUSED };

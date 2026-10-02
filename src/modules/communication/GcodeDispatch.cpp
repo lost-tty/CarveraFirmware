@@ -237,11 +237,6 @@ bool GcodeDispatch::run_line(const SerialMessage &msg)
     return dispatch(msg);
 }
 
-bool GcodeDispatch::run_line(const std::string &line, StreamOutput *stream)
-{
-    return dispatch(SerialMessage{stream, line, 0});
-}
-
 bool GcodeDispatch::dispatch(const SerialMessage &msg)
 {
     const string &s= msg.message;
