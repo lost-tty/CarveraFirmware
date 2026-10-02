@@ -359,6 +359,7 @@ void Conveyor::service()
         // the dropped blocks never went through block_finished: everything queued is over now,
         // or a later refusal waits on a mark that is never reached
         finished= queued;
+        playing= 0;
         THEROBOT.reset_position_from_current_actuator_position();
     }
 }
@@ -395,13 +396,13 @@ void Conveyor::collect()
     in_actions= nullptr;
 }
 
-// see if we are idle
-// this checks the block queue is empty, and that the step queue is empty and
-unsigned int Conveyor::running_line() const
+void Conveyor::executed_unless_overtaken(uint32_t block, unsigned int line)
 {
-    const Block *block= THEKERNEL->step_ticker.get_current_block();
-    if(block != nullptr && block->is_ready) return block->line;
-    return 0;
+    __disable_irq();
+    if(finished == block) {
+        executed= line;
+    }
+    __enable_irq();
 }
 
 bool Conveyor::is_idle() const
@@ -486,12 +487,18 @@ Block *Conveyor::take_block(unsigned int i)
 {
     queue.isr_tail_i= i;
     Block *b= queue.item_ref(i);
+    playing= b->line;
     current_feedrate= b->nominal_speed;
     return b;
 }
 
 void Conveyor::block_finished()
 {
+    const Block *b= queue.item_ref(queue.isr_tail_i);
+    if(b->line != 0) {
+        executed= b->line;
+    }
+    playing= 0;
     // we increment the isr_tail_i so we can get the next block
     queue.isr_tail_i= queue.next(queue.isr_tail_i);
     finished++;

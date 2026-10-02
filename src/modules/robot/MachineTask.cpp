@@ -96,9 +96,37 @@ bool MachineTask::motion_passed(uint32_t mark) const
     return THECONVEYOR.passed(mark);
 }
 
-unsigned int MachineTask::running_line() const
+void MachineTask::begin_action(unsigned int line)
 {
-    return THECONVEYOR.running_line();
+    acting= line;
+}
+
+void MachineTask::end_action(uint32_t after_block)
+{
+    if(acting != 0) {
+        THECONVEYOR.executed_unless_overtaken(after_block, acting);
+    }
+    acting= 0;
+}
+
+MachineTask::Where MachineTask::where() const
+{
+    unsigned int a= acting;
+    if(a != 0) {
+        return {a, true};
+    }
+
+    unsigned int block= THECONVEYOR.block_playing();
+    if(block != 0) {
+        return {block, true};
+    }
+
+    unsigned int t= ticketing;
+    if(t != 0 && !THECONVEYOR.blocks_pending()) {
+        return {t, true};
+    }
+
+    return {THECONVEYOR.last_executed(), false};
 }
 
 bool MachineTask::homed() const
@@ -249,7 +277,12 @@ void MachineTask::serve_tickets()
         } else if(t.kind == Ticket::MOVE) {
             THEROBOT.delta_move_sync(t.move.delta, t.move.scale, t.move.naxis);
         } else {
+            ticketing= t.gcode.line;
             t.job(t.gcode, OnMachine{});
+            if(ticketing != 0) {
+                THECONVEYOR.executed_unless_overtaken(THECONVEYOR.queue_mark(), ticketing);
+            }
+            ticketing= 0;
         }
 
     }

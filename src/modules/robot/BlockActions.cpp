@@ -2,6 +2,7 @@
 
 #include "Gcode.h"
 #include "Logging.h"
+#include "MachineTask.h"
 
 #include <cstring>
 
@@ -27,6 +28,7 @@ bool BlockActions::hold(const McodeRegistry::Mcode *code, const Gcode &gcode, ui
     Pending &p = pending[count];
     p.code = code;
     p.after_block = after_block;
+    p.line = gcode.line;
     p.number = gcode.m;
     p.subcode = gcode.subcode;
     p.n_words = 0;
@@ -61,11 +63,13 @@ void BlockActions::run(const Pending &p)
                                 .has_value= true, .value= (float)p.number});
     for (uint8_t i = 0; i < p.n_words; i++) words.push_back(p.words[i]);
 
-    Gcode gcode(words, 0, 0);
+    Gcode gcode(words, 0, p.line);
     if(p.text >= 0) {
         gcode.text = texts[p.text];
     }
+    machine_task.begin_action(p.line);
     p.code->handler(p.code->owner, &gcode);
+    machine_task.end_action(p.after_block);
 }
 
 // the queue retires in order, so everything that comes due is at the front

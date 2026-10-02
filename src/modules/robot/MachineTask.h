@@ -88,7 +88,10 @@ public:
     uint32_t motion_mark() const;
     bool motion_passed(uint32_t mark) const;
 
-    unsigned int running_line() const;
+    struct Where { unsigned int line; bool in; };
+    Where where() const;
+    void begin_action(unsigned int line);
+    void end_action(uint32_t after_block);
 
     bool homed() const;
     void enforce_keepout();
@@ -131,6 +134,7 @@ private:
     void finish_clear();
     volatile bool jogging{false};
     volatile bool position_lost{false};
+    volatile unsigned int acting{0}, ticketing{0};
 
     static const uint16_t k_stack_words = 384;
     static const UBaseType_t k_priority = 2;

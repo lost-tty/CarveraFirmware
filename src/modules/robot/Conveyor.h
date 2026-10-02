@@ -57,6 +57,11 @@ public:
 
     uint32_t queue_mark() const { return queued; }
     bool passed(uint32_t mark) const { return finished >= mark; }
+    bool blocks_pending() const { return finished != queued; }
+    unsigned int block_playing() const { return playing; }
+    unsigned int last_executed() const { return executed; }
+    void executed_unless_overtaken(uint32_t block, unsigned int line);
+    void clear_executed() { executed= 0; }
 
     bool is_idle() const;
     bool is_queue_empty() { return queue.is_empty(); };
@@ -74,7 +79,6 @@ public:
         } while (i != queue.tail_i);
     }
 
-    unsigned int running_line() const;
     float get_current_feedrate() const { return current_feedrate; }
 
     friend class Planner; // for queue
@@ -101,6 +105,7 @@ private:
     volatile TaskHandle_t in_actions{nullptr};   // the task inside an action handler, if any
     uint32_t queued{0};
     volatile uint32_t finished{0};
+    volatile unsigned int playing{0}, executed{0};
     unsigned int fed_i{0};
     uint32_t fed_steps{0};
     bool fed_started{false};

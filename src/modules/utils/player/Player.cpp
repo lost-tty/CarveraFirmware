@@ -195,6 +195,7 @@ void Player::play_command( string parameters, StreamOutput *stream )
     stream->printf("Playing %s\r\n", this->filename.c_str());
 
     this->playing_file = true;
+    THECONVEYOR.clear_executed();
     sources.push(this);
 
     // -v echoes every line, to everyone: the stream that asked may be gone by then
@@ -279,14 +280,13 @@ void Player::progress_command( string parameters, StreamOutput *stream )
     }
 }
 
-// the motion line executing, or the last line fed when none is or a script is on top
 unsigned long Player::current_line()
 {
-    if (sources.top() == this) {
-        unsigned int line= machine_task.running_line();
-        if(line != 0) return line;
+    if (sources.top() != this) {
+        return file.lines();
     }
-    return file.lines();
+    MachineTask::Where w= machine_task.where();
+    return w.in ? w.line : file.lines();
 }
 
 void Player::list(StreamOutput *stream, unsigned around)

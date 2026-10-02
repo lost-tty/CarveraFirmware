@@ -35,6 +35,7 @@ private:
     struct Pending {
         const McodeRegistry::Mcode *code;
         uint32_t after_block;
+        unsigned int line;
         gcode::Word words[k_max_words];
         uint8_t n_words;
         int8_t text;            // into texts, -1 for a code that carries words
