@@ -219,9 +219,7 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
             case 'H':
                 {
                     machine_task.unlock(new_message.stream);
-                    // issue G28.2 which is force homing cycle
-                    gcode_dispatch.run_line("G28.2", new_message.stream);
-
+                    gcode_dispatch.run_mdi(SerialMessage{new_message.stream, "G28.2", 0});
                 }
                 break;
 
