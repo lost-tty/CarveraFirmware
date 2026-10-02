@@ -1,0 +1,59 @@
+name: Build firmware
+
+on:
+  push:
+  workflow_dispatch:
+
+env:
+  GCC: 15.2.rel1
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Cache toolchain
+        id: tc
+        uses: actions/cache@v4
+        with:
+          path: ~/gcc
+          key: arm-gnu-${{ env.GCC }}-x86_64
+
+      - name: Fetch toolchain
+        if: steps.tc.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/gcc
+          curl -fsSL "https://developer.arm.com/-/media/Files/downloads/gnu/$GCC/binrel/arm-gnu-toolchain-$GCC-x86_64-arm-none-eabi.tar.xz" \
+            | tar xJ -C ~/gcc --strip-components=1
+
+      - name: Build
+        run: |
+          export PATH=~/gcc/bin:$PATH
+          make all AXIS=5 PAXIS=3 CNC=1 -j$(nproc)
+          sha=$(git rev-parse --short=7 HEAD)
+          cp LPC1768/main.bin firmware-${GITHUB_REF_NAME}-$sha.bin
+          tar czf symbols-${GITHUB_REF_NAME}-$sha.tar.gz LPC1768/main.elf
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ github.ref_name }}-${{ github.sha }}
+          path: |
+            firmware-*.bin
+            symbols-*.tar.gz
+
+      # Rolling pre-release: a stable link for testers without a GitHub login
+      - name: Publish dev pre-release
+        if: github.ref == 'refs/heads/dev'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete dev-latest --yes --cleanup-tag || true
+          gh release create dev-latest firmware-*.bin symbols-*.tar.gz \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "dev $(git rev-parse --short=7 HEAD)" \
+            --notes "$(git log -1 --format=%s)"
