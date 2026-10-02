@@ -30,6 +30,7 @@ public:
 
 class GcodeDispatch : public Module
 {
+    friend class SourceStack;
 public:
     static bool run_mcode(Gcode &gcode);
     void report_settings(Gcode *);
@@ -48,12 +49,11 @@ public:
     bool homed_check_enabled() const { return homed_check; }
     Parameters &parameters() { return params; }
     void set_script_hook(ScriptHook *hook) { scripts= hook; }
-    void run_mdi(const SerialMessage &msg); // a console line: most of them wait for the job to finish
-    bool run_line(const SerialMessage &msg); // false: the line was refused
+    void run_mdi(const SerialMessage &msg);
     void program_end();
 private:
     enum Gate { PASS, HANDLED, REFUSED };
-    bool dispatch(const SerialMessage &msg);
+    bool run_line(const SerialMessage &msg);
     Gate allowed_while_halted(const gcode::Words &words);
     Gate homed_enough(const gcode::Words &words);
     bool execute(const gcode::Words &words, const std::string &text, unsigned int line);

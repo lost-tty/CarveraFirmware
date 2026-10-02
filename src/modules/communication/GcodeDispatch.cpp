@@ -234,11 +234,6 @@ void GcodeDispatch::run_mdi(const SerialMessage &msg)
 
 bool GcodeDispatch::run_line(const SerialMessage &msg)
 {
-    return dispatch(msg);
-}
-
-bool GcodeDispatch::dispatch(const SerialMessage &msg)
-{
     const string &s= msg.message;
 
     size_t i= s.find_first_not_of(" \t");
