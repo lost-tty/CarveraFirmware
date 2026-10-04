@@ -46,8 +46,9 @@ class Player : public Module, public Source, public Killable {
         void suspend_gcode(Gcode *);
         void optional_stop_mode(Gcode *);
         void resume_gcode(Gcode *);
+        void progress_report(Gcode *);
 
-        McodeRegistry::Mcode m0, m1, m333, m334, m600, m601;
+        McodeRegistry::Mcode m0, m1, m27, m333, m334, m600, m601;
         void kill() override {}
         void cleanup() override;
         Source::Result next(SerialMessage &msg) override;

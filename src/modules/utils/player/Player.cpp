@@ -49,6 +49,7 @@ void Player::on_module_loaded()
     GcodeDispatch::add_handler(this);
     register_for_event(ON_MAIN_LOOP);
     ADD_MCODE(m0, 0, BARRIER, Player::program_stop);
+    ADD_MCODE(m27, 27, BESIDE_JOB, Player::progress_report);
     ADD_MCODE(m333, 333, IMMEDIATE, Player::optional_stop_mode);
     ADD_MCODE(m334, 334, IMMEDIATE, Player::optional_stop_mode);
     ADD_MCODE(m1, 1, BARRIER, Player::optional_stop);
@@ -130,6 +131,11 @@ void Player::optional_stop_mode(Gcode *gcode)
 void Player::suspend_gcode(Gcode *)
 {
     suspend_pending= playing_file;
+}
+
+void Player::progress_report(Gcode *)
+{
+    progress_command("-b", &THEKERNEL->streams);
 }
 
 void Player::resume_gcode(Gcode *gcode)
