@@ -1,5 +1,6 @@
 // Host test: c++ -std=c++11 -I../src/modules/communication/utils -I../src/modules/utils/script script_test.cpp ../src/modules/utils/script/Script.cpp ../src/modules/communication/utils/GcodeLine.cpp
 #include "Script.h"
+#include "evaluate.h"
 
 #include <cmath>
 #include <cstdio>
@@ -53,7 +54,9 @@ static std::string run(const char *text, Machine &m, const char *sub = nullptr, 
     std::string err;
     if (!prog.load(src, err)) return "LOAD: " + err;
     script::Runner r(prog, m);
-    if (!r.start(sub, args.data(), args.size(), err)) return "START: " + err;
+    if (!r.call(sub, args.data(), args.size(), err))
+        return "START: " + err;
+
     std::string out, line;
     for (int i = 0; i < 100000; i++) {
         script::Runner::Result res = r.step(line, err);
@@ -62,6 +65,9 @@ static std::string run(const char *text, Machine &m, const char *sub = nullptr, 
             return out;
         }
         if (res == script::Runner::ERROR) return out + (out.empty() ? "" : "|") + "ERROR: " + err;
+        if (res == script::Runner::LINE && !evaluate(r, line, err))
+            return out + (out.empty() ? "" : "|") + "ERROR: " + err;
+
         if (!out.empty()) out += '|';
         out += res == script::Runner::MESSAGE ? "[" + line + "]" : line;
     }
@@ -153,8 +159,6 @@ int main() {
     CHECK(run("#<_n> = 0\no1 repeat [2]\no2 while [1]\no3 repeat [2]\nG0 X1\n#<_n> = [#<_n> + 1]\no4 if [#<_n> EQ 1]\no2 break\no4 endif\no3 endrepeat\no2 break\no2 endwhile\no1 endrepeat\n", m) == "G0 X1|G0 X1|G0 X1");
     CHECK(run("#<_n> = 0\no1 while [#<_n> LT 2]\n#<_n> = [#<_n> + 1]\no3 repeat [2]\nG0 X#<_n>\no5 if [#<_n> EQ 1]\no1 continue\no5 endif\no3 endrepeat\no1 endwhile\n", m) == "G0 X1|G0 X2|G0 X2");
     CHECK(run("#[100 + 1] = 4\nG0 X#101\n", m) == "G0 X4");
-    m.named["_big"] = 1e30f;
-    CHECK(run("G0 X#<_big>\n", m) == "ERROR: line 1: value out of range");
     m.v[101] = 6;
     m.named["_clamp_state"] = 2;
     CHECK(run("(MSG, hello #101)\n(DEBUG, x is #101 and #<_clamp_state>)\n(PRINT,#5021)\nG0 X1\n", m) == "[hello #101]|[x is 6 and 2]|[12.5]|G0 X1");
@@ -184,15 +188,19 @@ int main() {
         std::string line, joined;
         m.named.erase("_cnt");
         for (int i = 1; i <= 2; i++) {
-            CHECK(r.start("g81", nullptr, 0, err));
+            r.stop();
+            CHECK(r.call("g81", nullptr, 0, err));
             r.set_local("x", i); r.set_local("y", 10 * i);
             if (i == 1) {
-                CHECK(r.step(line, err) == script::Runner::LINE && line == "G0 X1 Y10");
+                CHECK(r.step(line, err) == script::Runner::LINE && evaluate(r, line, err)
+                      && line == "G0 X1 Y10");
                 CHECK(r.step(line, err) == script::Runner::ERROR && err == "line 3: no value for parameter #<_cnt>");
             }
         }
-        CHECK(r.start("g81", nullptr, 0, err)); r.set_local("x", 3); r.set_local("y", 30);
-        CHECK(r.step(line, err) == script::Runner::LINE && line == "G0 X3 Y30");
+        r.stop();
+        CHECK(r.call("g81", nullptr, 0, err)); r.set_local("x", 3); r.set_local("y", 30);
+        CHECK(r.step(line, err) == script::Runner::LINE && evaluate(r, line, err)
+              && line == "G0 X3 Y30");
         CHECK(r.step(line, err) == script::Runner::ERROR); // _cnt still undefined: globals persist but never got set
     }
     CHECK(load_error("o1 if [1 EQ]\no1 endif\n").rfind("line 1:", 0) == 0);

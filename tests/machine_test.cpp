@@ -1,6 +1,7 @@
 // Host test of the machine script against the sequences the C++ ATC generators produced.
 // c++ -std=c++11 -I../src/modules/communication/utils -I../src/modules/utils/script machine_test.cpp ../src/modules/utils/script/Script.cpp ../src/modules/communication/utils/GcodeLine.cpp
 #include "Script.h"
+#include "evaluate.h"
 
 #include <cstdio>
 #include <cstring>
@@ -45,7 +46,10 @@ static std::string run_all(Machine &m, const std::vector<Call> &calls) {
     script::Runner r(program, m);
     std::string err, out, line;
     for (const Call &c : calls) {
-        if (!r.start(c.sub, nullptr, 0, err)) return "START: " + err;
+        r.stop();
+        if (!r.call(c.sub, nullptr, 0, err))
+            return "START: " + err;
+
         r.set_local("subcode", 0);
         if (c.code) r.set_local("code", c.code);
         for (const Word &w : c.words) { char n[2] = {(char)tolower(w.letter), 0}; r.set_local(n, w.value); }
@@ -58,6 +62,9 @@ static std::string run_all(Machine &m, const std::vector<Call> &calls) {
             }
             if (res == script::Runner::ERROR) return out + "ERROR: " + err;
             if (res == script::Runner::MESSAGE) continue;
+            if (!evaluate(r, line, err))
+                return out + "ERROR: " + err;
+
             out += (out.back() == '/' ? "" : "|") + line;
         }
     }
@@ -69,7 +76,9 @@ static std::string run(Machine &m, const char *sub, std::vector<float> args, std
                        void (*hook)(Machine &, const std::string &) = nullptr, int code = 0) {
     script::Runner r(program, m);
     std::string err, out, line;
-    if (!r.start(sub, args.data(), args.size(), err)) return "START: " + err;
+    if (!r.call(sub, args.data(), args.size(), err))
+        return "START: " + err;
+
     r.set_local("subcode", subcode);
     if (code) r.set_local("code", code);
     for (Word &w : words) { char n[2] = {(char)tolower(w.letter), 0}; r.set_local(n, w.value); }
@@ -81,6 +90,9 @@ static std::string run(Machine &m, const char *sub, std::vector<float> args, std
         }
         if (res == script::Runner::ERROR) return out + "|ERROR: " + err;
         if (res == script::Runner::MESSAGE) { messages += line + "\n"; continue; }
+        if (!evaluate(r, line, err))
+            return out + "|ERROR: " + err;
+
         if (hook) hook(m, line);
         out += (out.empty() ? "" : "|") + line;
     }

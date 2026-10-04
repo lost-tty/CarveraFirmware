@@ -76,22 +76,29 @@ private:
     std::string names;   // each ended by a '\0'
 };
 
-// Executes a script one G-code line at a time. Lines come back with parameters substituted.
+// Executes a script one G-code line at a time. Lines come back as written; the dispatcher evaluates
+// them with parameters().
 // Globals (#<_name>) persist from one program to the next.
 class Runner {
 public:
     Runner(const Program &program, gcode::ParamStore &machine);
-    bool start(const char *sub, const float *args, unsigned nargs, std::string &err); // sub null: the main body
-    bool start_call(const char *line, std::string &sub, std::string &err);
+    // starts the sub, or nests it on the one running; a null sub runs the source from its start
+    bool call(const char *sub, const float *args, unsigned nargs, std::string &err);
+    // the sub and arguments of an "o<name> call [..]" line, then as call()
+    bool call_line(const std::string &text, std::string &sub, std::string &err);
     bool set_local(const char *name, float v); // a #<name> for the sub just started, e.g. a G-code block's words
     enum Result { LINE, MESSAGE, DONE, ERROR }; // MESSAGE: a (MSG,..) (DEBUG,..) or (PRINT,..) comment, text in out
     Result step(std::string &out, std::string &err);
-    unsigned last_offset() const { return current; }                     // of the last LINE or MESSAGE, for trace and list
-    unsigned error_offset() const { return failed.at; }                  // where ERROR was raised
+    struct Place {
+        uint32_t offset, line;
+    };
+    // where the line step() last returned stood, or where its error was raised
+    Place last() const { return last_place; }
+    // for the dispatcher: the running sub's arguments and #<name>s, then the machine's
+    const gcode::ParamStore &parameters() const { return store; }
     float aborted() const { return abort_reason; } // non-zero after an abort ended the script
     bool running() const { return !frames.empty(); }
     void stop() { while (!frames.empty()) pop(); }
-    bool global(const char *name, float &v) const { return store.get_named(name, v); } // #<_name>, e.g. _value
 
     static const unsigned MAX_DEPTH = 8;
     static const unsigned MAX_ARGS = 30;
@@ -136,8 +143,6 @@ private:
 
     Result fail(std::string &err, const std::string &msg);
     void reset() { stop(); silent_steps = 0; abort_reason = 0; }
-    bool enter(const char *sub, const float *args, unsigned nargs, std::string &err);
-    bool call(const std::string &text, std::string &sub, std::string &err);
     bool control(const Mark &here, const std::string &text, std::string &err);
     bool find(const Mark &from, const char *label, size_t length, unsigned kinds, Mark &out,
               std::string &err);
@@ -154,11 +159,10 @@ private:
     }
     void took(Frame &f, unsigned at, unsigned next)
     {
-        current = at;
+        last_place = Place{at, f.line};
         advance(f, next);
     }
     bool arguments(const char *p, float *out, unsigned &n, std::string &err);
-    bool substitute(const std::string &text, std::string &out, std::string &err);
     bool message(const std::string &text, std::string &out, std::string &err);
     bool push(int sub, const float *args, unsigned nargs, std::string &err);
     void pop();
@@ -171,8 +175,7 @@ private:
     std::vector<float> args;  // the top frame's arguments are the tail
     std::vector<Named> named;
     unsigned silent_steps = 0;
-    unsigned current = 0;     // offset of the last LINE or MESSAGE
-    Mark failed = {0, 0, 0};
+    Place last_place = {0, 0};
     float abort_reason = 0;
 };
 

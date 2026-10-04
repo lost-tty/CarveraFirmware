@@ -59,7 +59,8 @@ private:
     Gate homed_enough(const gcode::Words &words);
     bool execute(const gcode::Words &words, const std::string &text, unsigned int line);
     bool parameter_statement(const char *p);
-    bool announce(const std::string &line, size_t from, unsigned int number);
+    bool announce(const std::string &line, size_t from, unsigned int number,
+                  const gcode::ParamStore *store);
     bool fail(const char *msg);
     static bool safe_while_running(const gcode::Words &words);
     static void broadcast(Gcode &gcode, OnMachine);

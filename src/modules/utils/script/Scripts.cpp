@@ -72,7 +72,7 @@ bool Scripts::load()
 void Scripts::list(StreamOutput *stream, unsigned around)
 {
     script::Source &src= macros.source();
-    unsigned cur= runner->last_offset();
+    unsigned cur= runner->last().offset;
     int segment= src.segment_of(cur);
     if(segment < 0) return;
     unsigned at= src.segments[segment].base, first= at, n= 1, line= src.line_of(cur);
@@ -108,7 +108,13 @@ void Scripts::started(const std::string &sub, StreamOutput *stream)
 
 bool Scripts::run(const char *sub, const float *args, unsigned nargs, StreamOutput *stream, std::string &err)
 {
-    if(!can_start(err) || !runner->start(sub, args, nargs, err)) return false;
+    if(!can_start(err))
+        return false;
+
+    runner->stop();
+    if(!runner->call(sub, args, nargs, err))
+        return false;
+
     started(sub, stream);
     return true;
 }
@@ -157,7 +163,13 @@ bool Scripts::trigger(const Gcode &gcode, StreamOutput *stream, std::string &err
 bool Scripts::call(const std::string &line, StreamOutput *stream, std::string &err)
 {
     std::string sub;
-    if(!can_start(err) || !runner->start_call(line.c_str(), sub, err)) return false;
+    if(!can_start(err))
+        return false;
+
+    runner->stop();
+    if(!runner->call_line(line, sub, err))
+        return false;
+
     started(sub, stream);
     return true;
 }
@@ -169,10 +181,12 @@ Source::Result Scripts::next(SerialMessage &msg)
         case script::Runner::LINE:
             if(trace) {
                 char buf[16];
-                snprintf(buf, sizeof(buf), "line %u:", macros.source().line_of(runner->last_offset()));
-                printk("%s> %s\n", macros.located(buf, runner->last_offset()).c_str(), msg.message.c_str());
+                snprintf(buf, sizeof(buf), "line %u:", runner->last().line);
+                printk("%s> %s\n", macros.located(buf, runner->last().offset).c_str(),
+                       msg.message.c_str());
             }
             msg.stream= &THEKERNEL->streams;
+            msg.params= &runner->parameters();
             return LINE;
         case script::Runner::MESSAGE:
             printk("%s\n", msg.message.c_str());
@@ -188,7 +202,7 @@ Source::Result Scripts::next(SerialMessage &msg)
         }
         case script::Runner::ERROR: {
             finish();
-            std::string where= macros.located(err, runner->error_offset());
+            std::string where= macros.located(err, runner->last().offset);
             printk("error:script %s %s\n", name.c_str(), where.c_str());
             halt(SCRIPT);
             return DONE;

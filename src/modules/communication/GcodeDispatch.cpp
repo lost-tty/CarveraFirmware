@@ -266,6 +266,8 @@ bool GcodeDispatch::run_line(const SerialMessage &msg)
         return true;
     }
 
+    const gcode::ParamStore *store= msg.params != nullptr ? msg.params : &params;
+
     // M118 carries free text
     if(s.size() - j >= 4 && memcmp(s.data() + j, "M118", 4) == 0
        && (j + 4 == s.size() || s[j + 4] == ' ' || s[j + 4] == '\t')) {
@@ -273,11 +275,13 @@ bool GcodeDispatch::run_line(const SerialMessage &msg)
             printk("error:Alarm lock\n");
             return false;
         }
-        return announce(s, j + 4, msg.line);
+        return announce(s, j + 4, msg.line, store);
     }
 
     gcode::Line parsed; // local: modules may dispatch console lines while a line executes
-    if(!parsed.parse(s.c_str() + i, &params)) return fail(parsed.error_text().c_str());
+    if(!parsed.parse(s.c_str() + i, store))
+        return fail(parsed.error_text().c_str());
+
     return execute(parsed.words(), s.substr(i), msg.line);
 }
 
@@ -301,7 +305,8 @@ void GcodeDispatch::say(Gcode *gcode)
     printk("%s\r\n", gcode->text.c_str());
 }
 
-bool GcodeDispatch::announce(const string &line, size_t from, unsigned int number)
+bool GcodeDispatch::announce(const string &line, size_t from, unsigned int number,
+                            const gcode::ParamStore *store)
 {
     string out;
     while(from < line.size() && (line[from] == ' ' || line[from] == '\t')) from++;
@@ -319,7 +324,9 @@ bool GcodeDispatch::announce(const string &line, size_t from, unsigned int numbe
             const char *p= line.c_str() + i;
             float v;
             string err;
-            if(!gcode::operand(p, v, &params, err)) return fail(err.c_str());
+            if(!gcode::operand(p, v, store, err))
+                return fail(err.c_str());
+
             out+= plain_number(v);
             i= (p - line.c_str()) - 1;
             continue;

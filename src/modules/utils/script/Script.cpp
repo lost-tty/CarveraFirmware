@@ -514,26 +514,13 @@ void Runner::pop()
     frames.pop_back();
 }
 
-bool Runner::start_call(const char *line, std::string &sub, std::string &err)
+bool Runner::call(const char *sub, const float *args, unsigned nargs, std::string &err)
 {
-    std::string text = line;
-    trim(text);
-    reset();
-    return call(text, sub, err);
-}
-
-bool Runner::start(const char *sub, const float *args, unsigned nargs, std::string &err)
-{
-    reset();
+    if (frames.empty()) reset();
     if (nargs > MAX_ARGS) {
         err = "too many arguments";
         return false;
     }
-    return enter(sub, args, nargs, err);
-}
-
-bool Runner::enter(const char *sub, const float *args, unsigned nargs, std::string &err)
-{
     int index = -1;
     if (sub != nullptr && (index = program.find_sub(sub)) < 0) {
         err = std::string("no sub ") + sub;
@@ -551,8 +538,8 @@ bool Runner::set_local(const char *name, float v)
 Runner::Result Runner::fail(std::string &err, const std::string &msg)
 {
     char buf[16];
-    failed = frames.empty() ? Mark{0, 0, 0} : Mark{frames.back().at, frames.back().line, 0};
-    snprintf(buf, sizeof(buf), "line %u: ", unsigned(failed.line));
+    last_place = frames.empty() ? Place{0, 0} : Place{frames.back().at, frames.back().line};
+    snprintf(buf, sizeof(buf), "line %u: ", unsigned(last_place.line));
     err = buf + msg;
     stop();
     return ERROR;
@@ -563,8 +550,10 @@ bool Runner::arguments(const char *p, float *out, unsigned &n, std::string &err)
     return parse_args(p, out, n, &store, err);
 }
 
-bool Runner::call(const std::string &text, std::string &sub, std::string &err)
+bool Runner::call_line(const std::string &line, std::string &sub, std::string &err)
 {
+    std::string text = line;
+    trim(text);
     const char *label;
     size_t length;
     Kind kind;
@@ -579,7 +568,7 @@ bool Runner::call(const std::string &text, std::string &sub, std::string &err)
     sub.assign(label, length);
     float v[MAX_ARGS];
     unsigned n;
-    return arguments(text.c_str() + arg, v, n, err) && enter(sub.c_str(), v, n, err);
+    return arguments(text.c_str() + arg, v, n, err) && call(sub.c_str(), v, n, err);
 }
 
 bool Runner::find(const Mark &from, const char *label, size_t length, unsigned kinds, Mark &out,
@@ -649,7 +638,9 @@ bool Runner::control(const Mark &here, const std::string &text, std::string &err
         case CALL: {
             unsigned caller = frames.size() - 1;
             std::string sub;
-            if (!call(text, sub, err)) return false;
+            if (!call_line(text, sub, err))
+                return false;
+
             frames[caller].at = here.next; // by index: push may reallocate
             frames[caller].line = here.line + 1;
             return true;
@@ -788,39 +779,6 @@ bool Runner::message(const std::string &text, std::string &out, std::string &err
     return true;
 }
 
-bool Runner::substitute(const std::string &text, std::string &out, std::string &err)
-{
-    if (text[0] != '(' && text[0] != '%' && text.find('#') == std::string::npos && text.find('[') == std::string::npos) {
-        out = text;
-        return true;
-    }
-    gcode::Line l;
-    if (!l.parse(text.c_str(), &store)) {
-        err = l.error_text();
-        return false;
-    }
-    out.clear();
-    char buf[24];
-    for (const gcode::Word &w : l.words()) {
-        int n;
-        if (w.letter == 'G' || w.letter == 'M') {
-            n = snprintf(buf, sizeof(buf), w.subcode ? "%c%d.%d" : "%c%d", w.letter, (int)w.value, w.subcode);
-        } else if (!w.has_value) {
-            n = snprintf(buf, sizeof(buf), "%c", w.letter);
-        } else {
-            buf[0] = w.letter;
-            n = format_value(buf + 1, sizeof(buf) - 1, w.value) ? 1 : (int)sizeof(buf);
-        }
-        if (n >= (int)sizeof(buf)) {
-            err = "value out of range";
-            return false;
-        }
-        if (!out.empty()) out += ' ';
-        out += buf;
-    }
-    return true;
-}
-
 Runner::Result Runner::step(std::string &out, std::string &err)
 {
     std::string text;
@@ -858,9 +816,12 @@ Runner::Result Runner::step(std::string &out, std::string &err)
 
             advance(f, next);
         } else {
-            if (!substitute(text, out, e)) return fail(err, e);
             took(f, at, next);
-            if (out.empty()) continue; // a comment
+            gcode::Line words;
+            if (words.parse(text.c_str(), nullptr) && words.words().empty())
+                continue; // a comment
+
+            out = text;
             silent_steps = 0;
             return LINE;
         }
