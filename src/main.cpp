@@ -16,6 +16,7 @@
 #include "modules/tools/switch/SwitchPool.h"
 #include "modules/tools/atc/ATCHandler.h"
 #include "modules/utils/script/Scripts.h"
+#include "modules/utils/script/MacroFS.h"
 #include "modules/utils/wifi/WifiProvider.h"
 #include "modules/utils/webserver/WebServer.h"
 #include "modules/robot/Conveyor.h"
@@ -137,6 +138,8 @@ WirelessProbe wireless_probe;
 MainButton mainbutton;
 ATCHandler atc_handler;
 Scripts scripts;
+extern const char _binary_macros_cpio_start[], _binary_macros_cpio_end[];
+MacroFS macro_fs(_binary_macros_cpio_start, _binary_macros_cpio_end);
 Endstops endstops;
 Laser laser;
 // the pools keep the M code slots they register, so they outlive the registry

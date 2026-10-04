@@ -356,13 +356,14 @@ $(OUTDIR)/%.o : %.s makefile
 	$(Q) $(MKDIR) $(call convert-slash,$(dir $@)) $(QUIET)
 	$(Q) $(AS) $(AS_FLAGS) -o $@ $<
 
-# all machine scripts in one blob, each preceded by a "(file: name.ngc)" line the loader uses for SD overrides
+# the machine scripts as one cpio archive, served by MacroFS under /macros
 MACROS = $(sort $(wildcard macros/*.ngc))
-$(OUTDIR)/macros.ngc : $(MACROS) makefile ../build/macros.sh
+$(OUTDIR)/macros.cpio : $(MACROS) makefile ../build/macros.sh
 	$(Q) $(MKDIR) $(call convert-slash,$(dir $@)) $(QUIET)
 	$(Q) $(SHELL) ../build/macros.sh $(MACROS) > $@
 
-$(OUTDIR)/macrosdefault.o : $(OUTDIR)/macros.ngc
-	$(Q) cd $(OUTDIR) && $(OBJCOPY) -I binary -O elf32-littlearm -B arm --readonly-text --rename-section .data=.rodata.macrosdefault macros.ngc macrosdefault.o
+$(OUTDIR)/macrosdefault.o : $(OUTDIR)/macros.cpio
+	$(Q) cd $(OUTDIR) && $(OBJCOPY) -I binary -O elf32-littlearm -B arm --readonly-text \
+	    --rename-section .data=.rodata.macrosdefault macros.cpio macrosdefault.o
 
 #########################################################################

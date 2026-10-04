@@ -3,10 +3,22 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <set>
 
 static int failures = 0;
+
+// the source reads files only: each script of a test is written to one first
+static void add(script::Source &src, const char *name, const std::string &text)
+{
+    const char *tmp = getenv("TMPDIR");
+    std::string path = std::string(tmp != nullptr ? tmp : "/tmp") + "/script_test_" + name;
+    FILE *f = fopen(path.c_str(), "w");
+    fputs(text.c_str(), f);
+    fclose(f);
+    src.add(path, text.size());
+}
 #define CHECK(cond) do { if (!(cond)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #cond); failures++; } } while (0)
 
 struct Machine : gcode::ParamStore {
@@ -35,7 +47,8 @@ struct Machine : gcode::ParamStore {
 
 // runs a script (sub or main body) and returns the emitted lines joined by '|', or "ERROR: ..."
 static std::string run(const char *text, Machine &m, const char *sub = nullptr, std::vector<float> args = {}) {
-    script::Source src(text);
+    script::Source src;
+    add(src, "run", text);
     script::Program prog;
     std::string err;
     if (!prog.load(src, err)) return "LOAD: " + err;
@@ -56,7 +69,8 @@ static std::string run(const char *text, Machine &m, const char *sub = nullptr, 
 }
 
 static std::string load_error(const char *text) {
-    script::Source src(text);
+    script::Source src;
+    add(src, "load", text);
     script::Program prog;
     std::string err;
     return prog.load(src, err) ? "ok" : err;
@@ -163,7 +177,8 @@ int main() {
     }
     // globals persist across start(), locals for a block's words
     {
-        script::Source src("o<g81> sub\nG0 X#<x> Y#<y>\n#<_cnt> = [#<_cnt> + 1]\no<g81> endsub\n");
+        script::Source src;
+        add(src, "g81", "o<g81> sub\nG0 X#<x> Y#<y>\n#<_cnt> = [#<_cnt> + 1]\no<g81> endsub\n");
         script::Program prog; std::string err; CHECK(prog.load(src, err));
         script::Runner r(prog, m);
         std::string line, joined;

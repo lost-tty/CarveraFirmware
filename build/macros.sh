@@ -1,14 +1,3 @@
 #!/bin/sh
-# Concatenate the machine scripts into one blob: a "(file: name)" marker per file, ordinary comments
-# blanked (their line numbers must stay, trace and errors refer to the source files), (MSG/DEBUG/PRINT,..) kept.
-for f in "$@"; do
-    echo "(file: $(basename "$f"))"
-    awk '{
-        if ($0 ~ /^[[:space:]]*\([[:space:]]*(MSG|DEBUG|PRINT|msg|debug|print)[[:space:]]*,/) { print; next }
-        gsub(/\([^)]*\)/, "")
-        sub(/[[:space:]]*;.*$/, "")
-        sub(/[[:space:]]+$/, "")
-        print
-    }' "$f"
-    echo
-done
+# Pack the machine scripts into a cpio "newc" archive.
+cd "$(dirname "$1")" && for f in "$@"; do basename "$f"; done | cpio -o -H newc --quiet

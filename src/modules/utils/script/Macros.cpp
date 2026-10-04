@@ -1,5 +1,6 @@
 #include "Macros.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -9,89 +10,81 @@
 #include <dirent.h>
 #endif
 
-static const char MARKER[] = "(file: ";
-static const unsigned MAX_FILES = 32; // one bit per embedded file in the replaced mask
+const char Macros::EMBEDDED_DIR[] = "/macros/";
 
-// the embedded files as (name, content) ranges; the marker line itself is not part of the content
-void Macros::embedded_files(const char *p, const char *end, std::vector<Embedded> &files)
+// the .ngc files, by name
+std::vector<std::string> Macros::list(const char *dir)
 {
-    while (p < end) {
-        const char *nl = (const char *)memchr(p, '\n', end - p);
-        if (nl == nullptr) nl = end;
-        if (size_t(nl - p) > sizeof(MARKER) && strncmp(p, MARKER, sizeof(MARKER) - 1) == 0) {
-            if (!files.empty()) files.back().end = p;
-            files.push_back(Embedded{p + sizeof(MARKER) - 1, uint8_t(nl - p - sizeof(MARKER)), nl < end ? nl + 1 : end, end});
+    std::vector<std::string> names;
+    if (DIR *d = opendir(dir)) {
+        while (struct dirent *e = readdir(d)) {
+            std::string name = e->d_name;
+            bool ngc = name.size() >= 5 && name.compare(name.size() - 4, 4, ".ngc") == 0;
+            if (ngc) names.push_back(name);
         }
-        p = nl + 1;
+        closedir(d);
     }
+    std::sort(names.begin(), names.end());
+    return names;
 }
 
 static long file_size(const std::string &path)
 {
-    script::Source::opens++;
     FILE *fd = fopen(path.c_str(), "r");
-    if (fd == nullptr) return -1;
+    if (fd == nullptr)
+        return -1;
+
     long n = fseek(fd, 0, SEEK_END) == 0 ? ftell(fd) : -1;
     fclose(fd);
     return n;
 }
 
-// one segment per file: the SD copy where there is one, the flash text otherwise
-bool Macros::build(const char *blob, const char *blob_end, const char *dir, uint32_t replaced,
-                   const std::vector<std::string> &extra, Report &report, std::string &err)
+bool Macros::build(const std::vector<std::string> &paths, std::string &err)
 {
-    std::vector<Embedded> files;
-    embedded_files(blob, blob_end, files);
     src.clear();
-    report.replaced = report.added = 0;
-    for (unsigned i = 0; i < files.size(); i++) {
-        const Embedded &f = files[i];
-        std::string name(f.name, f.length);
-        long size = (replaced & (1u << i)) ? file_size(dir + name) : -1;
-        bool ok = size >= 0 ? src.add_file(dir + name, size) : src.add(f.start, f.end - f.start, f.name, f.length);
-        if (!ok) { err = "scripts are too large"; return false; }
-        if (size >= 0) report.replaced++;
-    }
-    for (const std::string &name : extra) { // files without an embedded counterpart add subs
-        long size = file_size(dir + name);
-        if (size < 0) continue;
-        if (!src.add_file(dir + name, size)) {
-            err = "scripts are too large";
+    for (const std::string &path : paths) {
+        long size = file_size(path);
+        if (size < 0) {
+            err = "cannot read " + path;
             return false;
         }
 
-        report.added++;
+        src.add(path, size);
     }
     return prog.load(src, err);
 }
 
-bool Macros::load(const char *blob, const char *blob_end, const char *dir, Report &report, std::string &err)
+// the SD copy of a file where there is one, the embedded file otherwise, then the SD additions
+bool Macros::load(const char *embedded, const char *sd, Report &report, std::string &err)
 {
-    std::vector<Embedded> files;
-    embedded_files(blob, blob_end, files);
+    std::vector<std::string> files = list(embedded), paths;
     report.embedded = files.size();
+    report.replaced = report.added = 0;
+    for (const std::string &name : files) paths.push_back(embedded + name);
 
-    uint32_t replaced = 0;
-    std::vector<std::string> extra;
-    if (dir != nullptr && files.size() <= MAX_FILES) {
-        if (DIR *d = opendir(dir)) {
-            while (struct dirent *e = readdir(d)) {
-                std::string name = e->d_name;
-                if (name.size() < 5 || name.compare(name.size() - 4, 4, ".ngc") != 0) continue;
-                unsigned i = 0;
-                while (i < files.size() && !(name.size() == files[i].length && name.compare(0, name.size(), files[i].name, files[i].length) == 0)) i++;
-                if (i < files.size()) replaced |= 1u << i;
-                else extra.push_back(name);
+    std::vector<std::string> own = sd != nullptr ? list(sd) : std::vector<std::string>();
+    if (!own.empty()) {
+        std::vector<std::string> with_sd = paths;
+        unsigned replaced = 0, added = 0;
+        for (const std::string &name : own) {
+            size_t i = std::find(files.begin(), files.end(), name) - files.begin();
+            if (i < files.size()) {
+                with_sd[i] = sd + name;
+                replaced++;
+            } else {
+                with_sd.push_back(sd + name);
+                added++;
             }
-            closedir(d);
         }
-    }
+        if (build(with_sd, err)) {
+            report.replaced = replaced;
+            report.added = added;
+            return true;
+        }
 
-    if (replaced != 0 || !extra.empty()) {
-        if (build(blob, blob_end, dir, replaced, extra, report, err)) return true;
         report.fallback = located(err, prog.error_offset);
     }
-    return build(blob, blob_end, nullptr, 0, std::vector<std::string>(), report, err); // the embedded scripts alone
+    return build(paths, err); // the embedded scripts alone
 }
 
 std::string Macros::file(unsigned offset)

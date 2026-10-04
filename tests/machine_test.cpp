@@ -34,7 +34,7 @@ struct Machine : gcode::ParamStore {
     bool set_named(const char *, float, std::string &) override { return false; }
 };
 
-static std::string text, messages;
+static std::string messages;
 static script::Program program;
 
 struct Word { char letter; float value; };
@@ -118,14 +118,14 @@ int main() {
     while (struct dirent *e = readdir(d)) if (strstr(e->d_name, ".ngc")) files.push_back(e->d_name);
     closedir(d);
     std::sort(files.begin(), files.end());
+    script::Source source;
     for (const std::string &name : files) {
-        FILE *f = fopen(("../src/macros/" + name).c_str(), "r");
-        text += "(file: " + name + ")\n";
-        for (int c; (c = fgetc(f)) != EOF;) text += (char)c;
+        std::string path = "../src/macros/" + name;
+        FILE *f = fopen(path.c_str(), "r");
+        fseek(f, 0, SEEK_END);
+        source.add(path, ftell(f));
         fclose(f);
-        text += '\n';
     }
-    script::Source source(text.c_str());
     std::string err;
     CHECK(program.load(source, err));
     if (!err.empty()) printf("%s\n", err.c_str());

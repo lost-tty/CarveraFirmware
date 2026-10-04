@@ -1,10 +1,12 @@
-// Host test of the script loader: the embedded blob, SD replacements and additions, line mapping, memory use.
-// usage: macros_test <blob built by build/macros.sh> <scratch directory>
+// Host test of the script loader: the embedded files, SD replacements and additions, line mapping,
+// memory use.
+// usage: macros_test <directory standing for /macros, e.g. ../src/macros> <scratch directory>
 #include "Macros.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <dirent.h>
 #include <fstream>
 #include <new>
 #include <sstream>
@@ -27,31 +29,30 @@ static void write(const std::string &path, const std::string &content) { std::of
 
 int main(int argc, char **argv) {
     if (argc != 3) return 2;
-    std::ifstream f(argv[1]); std::stringstream ss; ss << f.rdbuf(); std::string blob = ss.str();
+    std::string embedded = std::string(argv[1]) + "/";
     unsigned files = 0;
-    for (size_t p = 0; (p = blob.find("(file: ", p)) != std::string::npos; p += 7) if (p == 0 || blob[p - 1] == '\n') files++;
+    if (DIR *d = opendir(embedded.c_str())) {
+        while (struct dirent *e = readdir(d)) files += strstr(e->d_name, ".ngc") != nullptr;
+        closedir(d);
+    }
     std::string dir = std::string(argv[2]) + "/macros/";
     mkdir(dir.c_str(), 0755);
 
     { // embedded only
         size_t before = live, peak_before = peak = live;
         Macros m; Macros::Report r; std::string err;
-        script::Source::opens = 0;
-        CHECK(m.load(blob.data(), blob.data() + blob.size(), nullptr, r, err));
+        CHECK(m.load(embedded.c_str(), nullptr, r, err));
         CHECK(err.empty());
-        CHECK(script::Source::opens == 0); // the embedded scripts never touch the card
         CHECK(r.embedded == files && r.replaced == 0 && r.added == 0 && r.fallback.empty());
         CHECK(m.program().find_sub("tool_change") >= 0 && m.program().find_sub("atc_change") >= 0);
         int sub = m.program().find_sub("atc_change");
         unsigned at = m.program().controls[sub].offset;
         CHECK(m.file(at) == "atc_change.ngc");                       // the first embedded file, alphabetically
-        CHECK(m.source().line_of(at) == 2);                          // the marker line is not part of the segment
+        CHECK(m.source().line_of(at) == 2);
         CHECK(m.located("line 2: bad", at) == "atc_change.ngc:2: bad");
         CHECK(m.located("no line", at) == "no line");
         CHECK(m.source().segments.size() == files);
-        std::string line; unsigned next;
-        CHECK(m.source().line_at(m.source().segments[1].base, line, next)); // segments start at a line and exclude the marker
-        CHECK(line.compare(0, 7, "(file: ") != 0);
+        CHECK(std::string(m.source().segments[0].path) == embedded + "atc_change.ngc");
         CHECK(m.source().line_of(m.source().segments[1].base) == 1);
         m.source().release();
         printf("embedded load: %zu bytes live, %zu peak\n", live - before, peak - peak_before);
@@ -62,17 +63,15 @@ int main(int argc, char **argv) {
         write(dir + "notes.txt", "ignored");
         size_t before = live;
         Macros m; Macros::Report r; std::string err;
-        CHECK(m.load(blob.data(), blob.data() + blob.size(), dir.c_str(), r, err));
+        CHECK(m.load(embedded.c_str(), dir.c_str(), r, err));
         CHECK(r.embedded == files && r.replaced == 1 && r.added == 1 && r.fallback.empty());
-        // one size check per file, then one open per switch back to a file segment while validating
-        CHECK(script::Source::opens <= 8 * (r.replaced + r.added));
         int extra = m.program().find_sub("extra");
         CHECK(extra >= 0);
         unsigned at = m.program().controls[extra].offset;
         CHECK(m.file(at) == "extra.ngc" && m.source().line_of(at) == 2);
         char buf[32]; snprintf(buf, sizeof(buf), "line %u: x", m.source().line_of(at));
         CHECK(m.located(buf, at) == "extra.ngc:2: x");
-        std::string line; unsigned next;                             // the replaced file is read from disk, not from flash
+        std::string line; unsigned next;
         CHECK(m.source().line_at(m.program().controls[m.program().find_sub("g28")].offset + 11, line, next) && line == "(MSG, custom)");
         m.source().release();
         printf("sd load: %zu bytes live (%zu segments, %zu controls, %zu labels)\n", live - before,
@@ -81,7 +80,7 @@ int main(int argc, char **argv) {
     { // a broken SD file drops the whole SD set, the embedded scripts stay
         write(dir + "broken.ngc", "o<broken> sub\nG0 X0\n");
         Macros m; Macros::Report r; std::string err;
-        CHECK(m.load(blob.data(), blob.data() + blob.size(), dir.c_str(), r, err));
+        CHECK(m.load(embedded.c_str(), dir.c_str(), r, err));
         CHECK(r.replaced == 0 && r.added == 0 && r.fallback.compare(0, 11, "broken.ngc:") == 0);
         CHECK(r.embedded == files);
         CHECK(m.program().find_sub("extra") < 0 && m.program().find_sub("g28") >= 0);
@@ -90,7 +89,7 @@ int main(int argc, char **argv) {
     { // past the 64 KB the offsets can address
         write(dir + "huge.ngc", std::string(70000, '\n'));
         Macros m; Macros::Report r; std::string err;
-        CHECK(m.load(blob.data(), blob.data() + blob.size(), dir.c_str(), r, err));
+        CHECK(m.load(embedded.c_str(), dir.c_str(), r, err));
         CHECK(r.fallback == "scripts are too large" && r.added == 0);
         CHECK(m.program().find_sub("tool_change") >= 0); // the embedded scripts still load
         remove((dir + "huge.ngc").c_str());

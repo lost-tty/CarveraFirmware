@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <strings.h>
 
@@ -9,44 +10,22 @@ namespace script {
 
 using gcode::skip_space;
 
-Source::Source(const char *text) : Source(text, strlen(text)) {}
-
-Source::Source(const char *text, size_t length)
-{
-    add(text, length, "", 0);
-}
-
 void Source::clear()
 {
     release();
-    for (Segment &s : segments) if (s.owned) delete[] const_cast<char *>(s.path);
+    for (Segment &s : segments) free(s.path);
     segments.clear();
 }
 
-bool Source::add(const char *flash, size_t length, const char *name, uint8_t name_length)
+void Source::add(const std::string &path, size_t length)
 {
-    segments.push_back(Segment{size(), uint32_t(length), flash, name, name_length, 0});
-    return true;
-}
-
-// the path is copied: its name comes from a directory listing that does not outlive the load
-bool Source::add_file(const std::string &path, size_t length)
-{
-    if (path.size() > 255)
-        return false;
-
-    char *copy = new char[path.size()];
-    memcpy(copy, path.data(), path.size());
-    segments.push_back(Segment{size(), uint32_t(length), nullptr, copy, uint8_t(path.size()), 1});
-    return true;
+    segments.push_back(Segment{size(), uint32_t(length), strdup(path.c_str())});
 }
 
 std::string Source::basename(unsigned segment) const
 {
-    const Segment &s = segments[segment];
-    const char *end = s.path + s.path_length, *p = end;
-    while (p > s.path && p[-1] != '/') p--;
-    return std::string(p, end);
+    const char *slash = strrchr(segments[segment].path, '/');
+    return slash != nullptr ? slash + 1 : segments[segment].path;
 }
 
 void Source::release()
@@ -62,15 +41,11 @@ int Source::segment_of(unsigned offset) const
     return -1;
 }
 
-unsigned Source::opens = 0; // host tests check that flash-only loading touches no files
-
 bool Source::open(int segment)
 {
     if (opened == segment) return true;
-    opens++;
     release();
-    std::string path(segments[segment].path, segments[segment].path_length);
-    fd = fopen(path.c_str(), "r");
+    fd = fopen(segments[segment].path, "r");
     if (fd == nullptr) return false;
     opened = segment;
     read_at = 0;
@@ -84,10 +59,6 @@ const char *Source::chunk(unsigned offset, unsigned &length, char *buf, size_t s
     if (i < 0 || offset >= this->size()) return nullptr;
     const Segment &s = segments[i];
     unsigned avail = s.base + s.size - offset;
-    if (s.flash != nullptr) {
-        length = avail;
-        return s.flash + (offset - s.base);
-    }
     if (!open(i))
         return nullptr;
 
@@ -277,10 +248,22 @@ bool Program::load(Source &src, std::string &err)
     std::string e;
     float args[Runner::MAX_ARGS];
 
+    auto unclosed = [&]() {
+        char buf[48];
+        error_offset = controls[open.back()].offset;
+        snprintf(buf, sizeof(buf), "line %u: unclosed %s", src.line_of(error_offset),
+                 KEYWORDS[controls[open.back()].kind]);
+        err = buf;
+        return false;
+    };
+
     int segment = -1;
     unsigned n = 0;
     for (unsigned at = 0, next; src.line_at(at, text, next); at = next, n++) {
         if (src.segment_of(at) != segment) { // line numbers restart with each file
+            if (!open.empty())
+                return unclosed(); // a block ends in the file that opened it
+
             segment = src.segment_of(at);
             n = 0;
         }
@@ -377,13 +360,9 @@ bool Program::load(Source &src, std::string &err)
         if (index >= 1000) { err = lineno + "too many o-words"; return false; }
         controls.push_back(c);
     }
-    if (!open.empty()) {
-        char buf[48];
-        error_offset = controls[open.back()].offset;
-        snprintf(buf, sizeof(buf), "line %u: unclosed %s", src.line_of(error_offset), KEYWORDS[controls[open.back()].kind]);
-        err = buf;
-        return false;
-    }
+    if (!open.empty())
+        return unclosed();
+
     for (Control &c : controls) {
         if (c.kind != CALL) continue;
         if (find_sub(label_text(labels[c.label]).c_str()) < 0) {

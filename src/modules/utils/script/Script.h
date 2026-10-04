@@ -12,40 +12,33 @@
 // "o<name> abort [reason]" is ours: it ends the whole script and halts the machine with that reason.
 namespace script {
 
-// The text of a script, read in place: segments in flash or files, addressed as one range of offsets.
-// Nothing is copied; one file is open at a time, released when a script has finished.
+// The text of a script, read in place from its files, addressed as one range of offsets. Nothing is
+// copied; one file is open at a time, released when a script has finished.
 class Source {
 public:
     static const unsigned MAX_LINE = 132; // read buffer; longer lines take several reads
     struct Segment {
         uint32_t base, size;
-        const char *flash;   // null: a file, read from path
-        const char *path;    // a flash segment's is its name
-        uint8_t path_length;
-        uint8_t owned;
+        char *path;
     };
     Source() {}
-    explicit Source(const char *text); // one segment in memory, for tests
-    Source(const char *text, size_t length);
     ~Source() { clear(); }
     void clear();
-    bool add(const char *flash, size_t length, const char *name, uint8_t name_length);   // name must outlive the source
-    bool add_file(const std::string &path, size_t length);                              // the path is copied
+    void add(const std::string &path, size_t length);
     void release();                                                       // closes the open file
     unsigned size() const { return segments.empty() ? 0 : segments.back().base + segments.back().size; }
     bool line_at(unsigned offset, std::string &out, unsigned &next);      // the line starting at offset, next: the one after
     unsigned next(unsigned offset);                                       // offset of the line after the one at offset
     bool read(unsigned offset, char *buf, size_t length);
-    const char *chunk(unsigned offset, unsigned &length, char *buf, size_t size); // bytes at offset: flash in place, file via buf
+    const char *chunk(unsigned offset, unsigned &length, char *buf, size_t size);
     unsigned line_of(unsigned offset);                                    // 1-based line within its segment
     int segment_of(unsigned offset) const;
     std::string basename(unsigned segment) const;
     std::vector<Segment> segments;
-    static unsigned opens; // files opened since the last reset, for tests
 
 private:
     bool open(int segment);
-    Source(const Source &);            // segments own names: no copying
+    Source(const Source &);            // segments own their paths: no copying
     Source &operator=(const Source &);
     FILE *fd = nullptr;
     int opened = -1;

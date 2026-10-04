@@ -18,7 +18,6 @@
 #include <cstring>
 #include "modules/robot/MachineTask.h"
 
-extern const char _binary_macros_ngc_start[], _binary_macros_ngc_end[]; // src/macros/*.ngc, concatenated by the makefile
 
 // G/M codes a script may take over, by defining the sub in the machine script
 struct Trigger { char letter; uint16_t code; bool any_subcode; const char *sub; };
@@ -57,7 +56,7 @@ bool Scripts::load()
     runner= nullptr;
     Macros::Report r;
     std::string err;
-    loaded= macros.load(_binary_macros_ngc_start, _binary_macros_ngc_end, SD_DIR, r, err);
+    loaded= macros.load(Macros::EMBEDDED_DIR, SD_DIR, r, err);
     if(!r.fallback.empty()) printk("error:%s, using the embedded scripts\n", r.fallback.c_str());
     if(!loaded) {
         printk("error:%s\n", macros.located(err, macros.program().error_offset).c_str());
