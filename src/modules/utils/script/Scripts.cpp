@@ -82,7 +82,7 @@ void Scripts::list(StreamOutput *stream, unsigned around)
         first= at;
         n++;
     }
-    stream->printf("%s:\r\n", src.name(segment).c_str());
+    stream->printf("%s:\r\n", src.basename(segment).c_str());
     std::string text;
     unsigned next;
     for (unsigned end= src.segments[segment].base + src.segments[segment].size;

@@ -48,14 +48,18 @@ bool Macros::build(const char *blob, const char *blob_end, const char *dir, uint
         const Embedded &f = files[i];
         std::string name(f.name, f.length);
         long size = (replaced & (1u << i)) ? file_size(dir + name) : -1;
-        bool ok = size >= 0 ? src.add_file(dir, name, size) : src.add(f.start, f.end - f.start, f.name, f.length);
+        bool ok = size >= 0 ? src.add_file(dir + name, size) : src.add(f.start, f.end - f.start, f.name, f.length);
         if (!ok) { err = "scripts are too large"; return false; }
         if (size >= 0) report.replaced++;
     }
     for (const std::string &name : extra) { // files without an embedded counterpart add subs
         long size = file_size(dir + name);
         if (size < 0) continue;
-        if (!src.add_file(dir, name, size)) { err = "scripts are too large"; return false; }
+        if (!src.add_file(dir + name, size)) {
+            err = "scripts are too large";
+            return false;
+        }
+
         report.added++;
     }
     return prog.load(src, err);
@@ -93,7 +97,7 @@ bool Macros::load(const char *blob, const char *blob_end, const char *dir, Repor
 std::string Macros::file(unsigned offset)
 {
     int i = src.segment_of(offset);
-    return i < 0 ? "" : src.name(i);
+    return i < 0 ? "" : src.basename(i);
 }
 
 std::string Macros::located(const std::string &err, unsigned offset)

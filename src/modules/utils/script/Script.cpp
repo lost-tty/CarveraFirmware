@@ -19,26 +19,34 @@ Source::Source(const char *text, size_t length)
 void Source::clear()
 {
     release();
-    for (Segment &s : segments) if (s.owned) delete[] const_cast<char *>(s.name);
+    for (Segment &s : segments) if (s.owned) delete[] const_cast<char *>(s.path);
     segments.clear();
 }
 
 bool Source::add(const char *flash, size_t length, const char *name, uint8_t name_length)
 {
-    if (size() + length > 0xFFFF) return false;
-    segments.push_back(Segment{uint16_t(size()), uint16_t(length), flash, name, name_length, 0});
+    segments.push_back(Segment{size(), uint32_t(length), flash, name, name_length, 0});
     return true;
 }
 
-// the name is copied: it comes from a directory listing that does not outlive the load
-bool Source::add_file(const char *d, const std::string &name, size_t length)
+// the path is copied: its name comes from a directory listing that does not outlive the load
+bool Source::add_file(const std::string &path, size_t length)
 {
-    if (name.size() > 255 || size() + length > 0xFFFF) return false;
-    char *copy = new char[name.size()];
-    memcpy(copy, name.data(), name.size());
-    dir = d;
-    segments.push_back(Segment{uint16_t(size()), uint16_t(length), nullptr, copy, uint8_t(name.size()), 1});
+    if (path.size() > 255)
+        return false;
+
+    char *copy = new char[path.size()];
+    memcpy(copy, path.data(), path.size());
+    segments.push_back(Segment{size(), uint32_t(length), nullptr, copy, uint8_t(path.size()), 1});
     return true;
+}
+
+std::string Source::basename(unsigned segment) const
+{
+    const Segment &s = segments[segment];
+    const char *end = s.path + s.path_length, *p = end;
+    while (p > s.path && p[-1] != '/') p--;
+    return std::string(p, end);
 }
 
 void Source::release()
@@ -61,10 +69,11 @@ bool Source::open(int segment)
     if (opened == segment) return true;
     opens++;
     release();
-    std::string path = std::string(dir) + name(segment);
+    std::string path(segments[segment].path, segments[segment].path_length);
     fd = fopen(path.c_str(), "r");
     if (fd == nullptr) return false;
     opened = segment;
+    read_at = 0;
     return true;
 }
 
@@ -79,8 +88,17 @@ const char *Source::chunk(unsigned offset, unsigned &length, char *buf, size_t s
         length = avail;
         return s.flash + (offset - s.base);
     }
-    if (!open(i) || fseek(fd, offset - s.base, SEEK_SET) != 0) return nullptr;
+    if (!open(i))
+        return nullptr;
+
+    if (read_at != offset - s.base) {
+        if (fseek(fd, offset - s.base, SEEK_SET) != 0)
+            return nullptr;
+
+        read_at = offset - s.base;
+    }
     length = fread(buf, 1, avail < size ? avail : size, fd);
+    read_at += length;
     return length > 0 ? buf : nullptr;
 }
 
@@ -236,6 +254,11 @@ std::string Program::label_text(const Label &l) const
 
 bool Program::load(Source &src, std::string &err)
 {
+    if (src.size() > 0xFFFF) { // the control table holds 16-bit offsets
+        err = "scripts are too large";
+        return false;
+    }
+
     source = &src;
     controls.clear();
     labels.clear();
