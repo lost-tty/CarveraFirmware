@@ -16,6 +16,7 @@
 #include "modules/tools/switch/SwitchPool.h"
 #include "modules/tools/atc/ATCHandler.h"
 #include "modules/utils/script/Scripts.h"
+#include "modules/utils/script/Program.h"
 #include "modules/utils/script/MacroFS.h"
 #include "modules/utils/wifi/WifiProvider.h"
 #include "modules/utils/webserver/WebServer.h"
@@ -26,7 +27,6 @@
 #include "modules/utils/player/Player.h"
 #include "modules/utils/mainbutton/MainButton.h"
 #include "modules/communication/GcodeDispatch.h"
-#include "modules/communication/Source.h"
 #include "modules/communication/WirelessProbe.h"
 #include "modules/communication/usb/UsbHost.h"
 #include "checksumm.h"
@@ -128,7 +128,6 @@ Kernel kernel;
 Conveyor THECONVEYOR;
 Robot THEROBOT;
 GcodeDispatch gcode_dispatch;
-SourceStack sources;
 SimpleShell simpleshell __attribute__((section("AHBSRAM")));
 WifiProvider wifi_provider __attribute__((section("AHBSRAM")));
 WebServer web_server (&wifi_provider);
@@ -137,6 +136,7 @@ Player player;
 WirelessProbe wireless_probe;
 MainButton mainbutton;
 ATCHandler atc_handler;
+Program program;
 Scripts scripts;
 extern const char _binary_macros_cpio_start[], _binary_macros_cpio_end[];
 MacroFS macro_fs(_binary_macros_cpio_start, _binary_macros_cpio_end);
@@ -166,7 +166,6 @@ void init() {
 
     gcode_dispatch.init();
     THEKERNEL->add_module(&gcode_dispatch);
-    THEKERNEL->add_module(&sources); // before player: on halt a script pops its state before the suspend state
 
     THEROBOT.init();
     THEKERNEL->add_module(&THEROBOT);
@@ -186,6 +185,7 @@ void init() {
     // Create and add main modules
     THEKERNEL->add_module(&player);
     THEKERNEL->add_module(&atc_handler);
+    THEKERNEL->add_module(&program);
     THEKERNEL->add_module(&scripts);
     THEKERNEL->add_module(&wireless_probe);
     THEKERNEL->add_module(&usb_host);

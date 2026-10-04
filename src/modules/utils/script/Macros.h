@@ -18,6 +18,7 @@ public:
     bool load(const char *embedded, const char *sd, Report &report, std::string &err);
     const script::Program &program() const { return prog; }
     script::Source &source() { return src; }
+    const script::Source &source() const { return src; }
     std::string located(const std::string &err, unsigned offset); // "line N: ..." -> "file.ngc:N: ..."
     std::string file(unsigned offset);                            // the .ngc the offset is in
 

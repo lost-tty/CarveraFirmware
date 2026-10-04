@@ -17,9 +17,41 @@ void Source::clear()
     segments.clear();
 }
 
-void Source::add(const std::string &path, size_t length)
+bool Source::add(const std::string &path)
 {
-    segments.push_back(Segment{size(), uint32_t(length), strdup(path.c_str())});
+    FILE *f = fopen(path.c_str(), "r");
+    if (f == nullptr)
+        return false;
+
+    long length = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : 0;
+    fclose(f);
+    segments.push_back(Segment{size(), uint32_t(length), strdup(path.c_str()), false});
+    return true;
+}
+
+bool Source::add_job(const std::string &path)
+{
+    remove_job();
+    if (!add(path))
+        return false;
+
+    segments.back().job = true;
+    return true;
+}
+
+void Source::remove_job()
+{
+    if (job() < 0)
+        return;
+
+    release();
+    free(segments.back().path);
+    segments.pop_back();
+}
+
+int Source::job() const
+{
+    return !segments.empty() && segments.back().job ? int(segments.size()) - 1 : -1;
 }
 
 std::string Source::basename(unsigned segment) const
@@ -430,7 +462,7 @@ Runner::Named *Runner::find_named(const char *name, uint8_t depth)
 
 bool Runner::Store::get(int n, float &v) const
 {
-    if (n >= 1 && n <= (int)MAX_ARGS) {
+    if (n >= 1 && n <= (int)MAX_ARGS && !r.at_main()) {
         if (r.frames.empty()) return false;
         const Frame &f = r.frames.back();
         if (!(f.has_arg & (1u << (n - 1)))) return false;
@@ -442,7 +474,7 @@ bool Runner::Store::get(int n, float &v) const
 
 bool Runner::Store::set(int n, float v)
 {
-    if (n >= 1 && n <= (int)MAX_ARGS) {
+    if (n >= 1 && n <= (int)MAX_ARGS && !r.at_main()) {
         Frame &f = r.frames.back();
         if (r.args.size() < size_t(f.base + n)) r.args.resize(f.base + n, 0);
         r.args[f.base + n - 1] = v;
@@ -498,6 +530,7 @@ bool Runner::push(int sub, const float *args, unsigned nargs, std::string &err)
     f.line = sub < 0 ? 1 : program.subs[sub].line + 1;
     f.base = this->args.size();
     f.testing = false;
+    f.main = sub < 0;
     f.has_arg = nargs == 0 ? 0 : (nargs >= 32 ? ~0u : (1u << nargs) - 1);
     this->args.insert(this->args.end(), args, args + nargs);
     return true;
@@ -506,6 +539,7 @@ bool Runner::push(int sub, const float *args, unsigned nargs, std::string &err)
 void Runner::pop()
 {
     uint8_t depth = frames.size() - 1;
+    if (frames.back().main) main_ended = Place{frames.back().at, frames.back().line};
     for (unsigned i = 0; i < named.size();) {
         if (named[i].depth == depth) named.erase(named.begin() + i);
         else i++;
@@ -521,12 +555,57 @@ bool Runner::call(const char *sub, const float *args, unsigned nargs, std::strin
         err = "too many arguments";
         return false;
     }
-    int index = -1;
-    if (sub != nullptr && (index = program.find_sub(sub)) < 0) {
+    int index = program.find_sub(sub);
+    if (index < 0) {
         err = std::string("no sub ") + sub;
         return false;
     }
     return push(index, args, nargs, err);
+}
+
+bool Runner::start_main(unsigned offset, std::string &err)
+{
+    reset();
+    if (!push(-1, nullptr, 0, err))
+        return false;
+
+    frames[0].at = main_start = offset;
+    return true;
+}
+
+bool Runner::goto_main(unsigned line, std::string &err)
+{
+    if (!at_main()) {
+        err = "a sub is running";
+        return false;
+    }
+    Source &src = *program.source;
+    const Source::Segment &s = src.segments[src.segment_of(main_start)];
+    Blocks blocks;
+    std::string text, e;
+    unsigned at = s.base, end = s.base + s.size, n = 1;
+    for (unsigned next; n < line && at < end && src.line_at(at, text, next); at = next, n++) {
+        trim(text);
+        const char *label;
+        size_t length;
+        Kind kind;
+        if (o_word(text, label, length, kind)) {
+            blocks.take(kind, std::string(label, length), n, at, e);
+        }
+    }
+    if (!blocks.open.empty()) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "line %u is inside a block opened at line %u", line,
+                 blocks.open.back().line);
+        err = buf;
+        return false;
+    }
+    Frame &f = frames[0];
+    f.at = at;
+    f.line = n;
+    f.testing = false;
+    f.loops.clear();
+    return true;
 }
 
 bool Runner::set_local(const char *name, float v)
@@ -622,6 +701,10 @@ bool Runner::control(const Mark &here, const std::string &text, std::string &err
             jump_after(end);
             return true;
         case ENDSUB: case RETURN:
+            if (f.main) {
+                err = std::string(KEYWORDS[kind]) + " outside sub";
+                return false;
+            }
             n = 0;
             if (kind == RETURN && !arguments(rest, v, n, err))
                 return false;
@@ -787,6 +870,9 @@ Runner::Result Runner::step(std::string &out, std::string &err)
         unsigned at = f.at, next;
         if (!program.source->line_at(at, text, next)) {
             pop();
+            if (at_main())
+                return RETURNED;
+
             continue;
         }
         trim(text);
@@ -808,8 +894,12 @@ Runner::Result Runner::step(std::string &out, std::string &err)
             return fail(err, "script does not progress");
         }
         if (ctl) {
+            size_t depth = frames.size();
             if (!control(Mark{at, f.line, next}, text, e))
                 return fail(err, e);
+
+            if (frames.size() < depth && at_main())
+                return RETURNED;
         } else if (text[0] == '#') {
             if (!gcode::assign(text.c_str(), store, e))
                 return fail(err, e);

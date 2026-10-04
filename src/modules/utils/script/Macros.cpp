@@ -28,28 +28,14 @@ std::vector<std::string> Macros::list(const char *dir)
     return names;
 }
 
-static long file_size(const std::string &path)
-{
-    FILE *fd = fopen(path.c_str(), "r");
-    if (fd == nullptr)
-        return -1;
-
-    long n = fseek(fd, 0, SEEK_END) == 0 ? ftell(fd) : -1;
-    fclose(fd);
-    return n;
-}
-
 bool Macros::build(const std::vector<std::string> &paths, std::string &err)
 {
     src.clear();
     for (const std::string &path : paths) {
-        long size = file_size(path);
-        if (size < 0) {
+        if (!src.add(path)) {
             err = "cannot read " + path;
             return false;
         }
-
-        src.add(path, size);
     }
     return prog.load(src, err);
 }

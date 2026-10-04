@@ -17,7 +17,7 @@
 #include "libs/StepTicker.h"
 #include "libs/Watchdog.h"
 #include "modules/robot/MachineTask.h"
-#include "modules/communication/Source.h"
+#include "modules/utils/script/Program.h"
 #include "modules/communication/GcodeDispatch.h"
 #include "modules/communication/SerialConsole.h"
 #include "modules/communication/WirelessProbe.h"
@@ -180,7 +180,7 @@ uint8_t Kernel::get_state()
     bool homing = endstops.is_homing();
     if (sleeping) {
     	return SLEEP;
-    } else if (sources.suspended()) {
+    } else if (program.suspended()) {
     	return SUSPEND;
     } else if(machine_task.is_halted()) {
     	return ALARM;

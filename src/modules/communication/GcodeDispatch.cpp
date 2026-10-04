@@ -17,7 +17,7 @@
 #include "libs/SerialMessage.h"
 #include "libs/StreamOutput.h"
 #include "checksumm.h"
-#include "Source.h"
+#include "Program.h"
 #include "BlockActions.h"
 #include "Script.h"
 
@@ -141,7 +141,7 @@ void GcodeDispatch::broadcast(Gcode &gcode, OnMachine)
     // the posting line has already returned, so the error is reported from here
     if(gcode.error_text.empty()) return;
     printk("error:%s\n", gcode.error_text.c_str());
-    if(!sources.stop_after_queued(gcode.line)) sources.clear();
+    if(!program.stop_after_queued(gcode.line)) program.stop();
 }
 
 // G4 and G92 read or set where the machine is, so the queue has to run out first
@@ -218,7 +218,7 @@ void GcodeDispatch::run_mdi(const SerialMessage &msg)
         return;
     }
 
-    if(sources.active()) {
+    if(program.active()) {
         // without the parameters: reading #5021 drains the queue, and the letters decide this
         const char *text= msg.message.c_str();
         gcode::skip_space(text);

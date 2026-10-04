@@ -20,11 +20,15 @@ public:
     struct Segment {
         uint32_t base, size;
         char *path;
+        bool job;   // read as it runs, after the scripts are loaded
     };
     Source() {}
     ~Source() { clear(); }
     void clear();
-    void add(const std::string &path, size_t length);
+    bool add(const std::string &path);  // false: the file cannot be read
+    bool add_job(const std::string &path);
+    void remove_job();
+    int job() const;
     void release();                                                       // closes the open file
     unsigned size() const { return segments.empty() ? 0 : segments.back().base + segments.back().size; }
     bool line_at(unsigned offset, std::string &out, unsigned &next);      // the line starting at offset, next: the one after
@@ -82,12 +86,17 @@ private:
 class Runner {
 public:
     Runner(const Program &program, gcode::ParamStore &machine);
-    // starts the sub, or nests it on the one running; a null sub runs the source from its start
+    // the source from offset on as the bottom frame, where #1..#30 are the machine's
+    bool start_main(unsigned offset, std::string &err);
+    bool goto_main(unsigned line, std::string &err);
+    // starts the sub, or nests it on the one running
     bool call(const char *sub, const float *args, unsigned nargs, std::string &err);
     // the sub and arguments of an "o<name> call [..]" line, then as call()
     bool call_line(const std::string &text, std::string &sub, std::string &err);
     bool set_local(const char *name, float v); // a #<name> for the sub just started, e.g. a G-code block's words
-    enum Result { LINE, MESSAGE, DONE, ERROR }; // MESSAGE: a (MSG,..) (DEBUG,..) or (PRINT,..) comment, text in out
+    // MESSAGE: a (MSG,..) (DEBUG,..) or (PRINT,..) comment, text in out; RETURNED: a sub returned
+    // to the bottom frame, before its next line
+    enum Result { LINE, MESSAGE, RETURNED, DONE, ERROR };
     Result step(std::string &out, std::string &err);
     struct Place {
         uint32_t offset, line;
@@ -98,6 +107,9 @@ public:
     const gcode::ParamStore &parameters() const { return store; }
     float aborted() const { return abort_reason; } // non-zero after an abort ended the script
     bool running() const { return !frames.empty(); }
+    bool at_main() const { return frames.size() == 1 && frames[0].main; }
+    // the bottom frame's next line, or where it ended
+    Place main() const { return frames.empty() ? main_ended : Place{frames[0].at, frames[0].line}; }
     void stop() { while (!frames.empty()) pop(); }
 
     static const unsigned MAX_DEPTH = 8;
@@ -119,6 +131,7 @@ private:
         uint32_t line;
         uint16_t base;    // its arguments start here in args
         bool testing;     // arrived at an elseif/else because the previous condition was false
+        bool main;
         uint32_t has_arg;
         std::vector<Loop> loops; // innermost last
     };
@@ -176,6 +189,8 @@ private:
     std::vector<Named> named;
     unsigned silent_steps = 0;
     Place last_place = {0, 0};
+    Place main_ended = {0, 0};
+    uint32_t main_start = 0;
     float abort_reason = 0;
 };
 

@@ -31,7 +31,7 @@ public:
 
 class GcodeDispatch : public Module
 {
-    friend class SourceStack;
+    friend class Program;
 public:
     static bool run_mcode(Gcode &gcode);
     void report_settings(Gcode *);

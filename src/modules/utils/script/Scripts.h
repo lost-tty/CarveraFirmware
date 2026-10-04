@@ -4,18 +4,14 @@
 
 #include "libs/Module.h"
 #include "GcodeDispatch.h"
-#include "Macros.h"
-#include "Source.h"
 
 #include <string>
 
-// Runs O-word scripts. The machine scripts (src/macros/*.ngc, embedded; a file of the same name in
-// /sd/macros/ replaces it, extra files add subs) provide subs that take over G/M codes when defined
-// (M6 -> o<tool_change> ...) and can be run from the shell with "macro run <sub> [args]". A running script
-// is a source on the stack: it pauses the job it was started from and feeds one line per main loop.
-class Scripts : public Module, public ScriptHook, public Source {
+// Loads the machine scripts and hands the G/M codes their subs take over to the program module.
+class Scripts : public Module, public ScriptHook {
 public:
     void on_module_loaded() override;
+    void on_main_loop(void *) override;
     static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
     static const SimpleShell::Sub<Scripts> SUBS[];
     void sub_check(std::string args, StreamOutput *stream);
@@ -26,9 +22,6 @@ public:
     SimpleShell::Registered shell_slot;
     bool trigger(const Gcode &gcode, StreamOutput *stream, std::string &err) override;
     bool call(const std::string &line, StreamOutput *stream, std::string &err) override;
-    Source::Result next(SerialMessage &msg) override;
-    void abort() override;
-    void list(StreamOutput *stream, unsigned around) override;
     void boot();
     void file_changed(const char *path);
     bool run_sub(const char *sub, const float *args, unsigned nargs);
@@ -36,19 +29,9 @@ public:
 private:
     bool load();
     bool run(const char *sub, const float *args, unsigned nargs, StreamOutput *reply, std::string &err);
-    bool can_start(std::string &err) const;
-    void started(const std::string &sub, StreamOutput *reply);
-    void finish();
-    void halt(int reason);
 
-    Macros macros;
-    script::Runner *runner= nullptr;
-    StreamOutput *reply= nullptr;       // caller waiting for ok/error
-    std::string name;                   // sub being run, for messages
     bool loaded= false;
-    bool trace= false;                  // echo every executed line with its origin
-    bool cycle_run= false;              // the sub running was triggered by a canned cycle (G80-89)
-    GcodeDispatch::ModalState saved_modal;  // the program's group 1 while a cycle sub runs
+    bool stale= false;                  // a script file changed while the source was in use
 };
 
 extern Scripts scripts;

@@ -11,6 +11,7 @@
 #include "SpindlePublicAccess.h"
 #include "SpindleControl.h"
 #include "Player.h"
+#include "Program.h"
 
 #include <cstring>
 
@@ -86,7 +87,7 @@ static bool spindle_on()
 
 static bool player_playing()
 {
-    return player.is_playing();
+    return program.playing();
 }
 
 Parameters::Table *Parameters::tables = nullptr;

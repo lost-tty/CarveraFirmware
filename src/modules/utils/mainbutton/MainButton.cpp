@@ -4,6 +4,7 @@
 #include "Logging.h"
 #include "Endstops.h"
 #include "Player.h"
+#include "Program.h"
 #include "SwitchPublicAccess.h"
 #include "SwitchPool.h"
 #include "SwitchConfig.h"
@@ -240,7 +241,7 @@ void MainButton::handle_button()
 
     uint8_t state = THEKERNEL->get_state();
 
-    if(cfg.stop_on_cover_open && !machine_task.is_halted() && player.is_playing() && !endstops.cover_closed())
+    if(cfg.stop_on_cover_open && !machine_task.is_halted() && program.playing() && !endstops.cover_closed())
         machine_task.halt(COVER_OPEN, "cover open");
 
     update_power(state);

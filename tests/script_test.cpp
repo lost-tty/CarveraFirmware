@@ -5,20 +5,22 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <map>
 #include <set>
 
 static int failures = 0;
 
 // the source reads files only: each script of a test is written to one first
-static void add(script::Source &src, const char *name, const std::string &text)
+static void add(script::Source &src, const char *name, const std::string &text, bool job = false)
 {
     const char *tmp = getenv("TMPDIR");
     std::string path = std::string(tmp != nullptr ? tmp : "/tmp") + "/script_test_" + name;
     FILE *f = fopen(path.c_str(), "w");
     fputs(text.c_str(), f);
     fclose(f);
-    src.add(path, text.size());
+    if (job) src.add_job(path);
+    else src.add(path);
 }
 #define CHECK(cond) do { if (!(cond)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #cond); failures++; } } while (0)
 
@@ -54,7 +56,8 @@ static std::string run(const char *text, Machine &m, const char *sub = nullptr, 
     std::string err;
     if (!prog.load(src, err)) return "LOAD: " + err;
     script::Runner r(prog, m);
-    if (!r.call(sub, args.data(), args.size(), err))
+    bool ok = sub != nullptr ? r.call(sub, args.data(), args.size(), err) : r.start_main(0, err);
+    if (!ok)
         return "START: " + err;
 
     std::string out, line;
@@ -65,11 +68,55 @@ static std::string run(const char *text, Machine &m, const char *sub = nullptr, 
             return out;
         }
         if (res == script::Runner::ERROR) return out + (out.empty() ? "" : "|") + "ERROR: " + err;
+        if (res == script::Runner::RETURNED)
+            continue;
+
         if (res == script::Runner::LINE && !evaluate(r, line, err))
             return out + (out.empty() ? "" : "|") + "ERROR: " + err;
 
         if (!out.empty()) out += '|';
         out += res == script::Runner::MESSAGE ? "[" + line + "]" : line;
+    }
+    return out + "|TIMEOUT";
+}
+
+// runs a job after the scripts, as the player does: each line with "@line", "@~line" inside a sub
+static std::string run_job(const char *lib, const char *job, Machine &m,
+                           const char *call_after = nullptr)
+{
+    script::Source src;
+    add(src, "lib", lib);
+    script::Program prog;
+    std::string err;
+    if (!prog.load(src, err))
+        return "LOAD: " + err;
+
+    add(src, "job", job, true); // as Macros adds it: after the scripts are loaded
+    script::Runner r(prog, m);
+    if (!r.start_main(src.segments[1].base, err))
+        return "START: " + err;
+
+    std::string out, line;
+    for (int i = 0; i < 100000; i++) {
+        script::Runner::Result res = r.step(line, err);
+        if (res == script::Runner::DONE)
+            return out;
+
+        if (res == script::Runner::ERROR)
+            return out + "|ERROR: " + err;
+
+        if (res == script::Runner::RETURNED)
+            continue;
+
+        if (!evaluate(r, line, err))
+            return out + "|ERROR: " + err;
+
+        char at[16];
+        snprintf(at, sizeof(at), "@%s%u", r.at_main() ? "" : "~", r.last().line);
+        if (!out.empty()) out += '|';
+        out += line + at;
+        if (call_after != nullptr && line == call_after && !r.call("sq", nullptr, 0, err))
+            return out + "|CALL: " + err;
     }
     return out + "|TIMEOUT";
 }
@@ -209,6 +256,90 @@ int main() {
     CHECK(load_error("o1 frob\n") == "line 1: unknown o-word frob");
     CHECK(load_error("O<A> SUB\nO<A> ENDSUB\nO<a> CALL\n") == "ok"); // case-insensitive
 
+    {
+        const char *lib = "o<sq> sub\nG1 X#1\no<sq> endsub\n";
+        const char *job = "G0 X0\n(comment)\n\no100 repeat [2]\nG1 X1\no100 endrepeat\n"
+                          "o<sq> call [5]\nG1 X[\nG1 X9\n";
+        CHECK(run_job(lib, job, m).find("G0 X0@1|G1 X1@5|G1 X1@5|G1 X5@~2|") == 0);
+        CHECK(run_job(lib, "G1 X[\n", m).find("ERROR") != std::string::npos);
+        CHECK(run_job("G1 X[\n", "G0\n", m).find("LOAD") == 0);
+        CHECK(run_job("o<sq> sub\nG1 Z1\no<sq> endsub\n", "G1 X1\nG1 X2\nG1 X3\n", m, "G1 X1")
+              == "G1 X1@1|G1 Z1@~2|G1 X2@2|G1 X3@3");
+    }
+    {
+        Machine j;
+        j.v[5] = 3;
+        CHECK(run_job("o<sq> sub\nG1 X#5\no<sq> endsub\n",
+                      "G1 X#5\n#5 = 7\no<sq> call [1] [2] [4] [8] [16]\nG1 Y#5\n", j)
+              == "G1 X3@1|G1 X16@~2|G1 Y7@4");
+        CHECK(j.v[5] == 7);
+    }
+    {
+        const char *job = "G0\no1 while [1]\nG1\no1 endwhile\nG2\n";
+        script::Source src;
+        add(src, "job", job, true);
+        script::Program prog;
+        std::string err;
+        CHECK(prog.load(src, err));
+        script::Runner r(prog, m);
+        CHECK(r.start_main(0, err));
+        CHECK(!r.goto_main(3, err) && err == "line 3 is inside a block opened at line 2");
+        CHECK(r.goto_main(5, err));
+        std::string line;
+        CHECK(r.step(line, err) == script::Runner::LINE && line == "G2" && r.last().line == 5);
+        CHECK(r.step(line, err) == script::Runner::DONE && r.main().line == 6);
+        CHECK(r.main().offset == strlen(job));
+    }
+    {
+        // a goto out of a suspended repeat starts the count afresh
+        const char *job = "G0\no1 repeat [2]\nG1\no1 endrepeat\nG2\n";
+        script::Source src;
+        add(src, "job", job);
+        script::Program prog;
+        std::string err, line;
+        CHECK(prog.load(src, err));
+        script::Runner r(prog, m);
+        CHECK(r.start_main(0, err));
+        CHECK(r.step(line, err) == script::Runner::LINE && line == "G0");
+        CHECK(r.step(line, err) == script::Runner::LINE && line == "G1");
+        CHECK(r.goto_main(1, err));
+        std::string out;
+        while (r.step(line, err) == script::Runner::LINE) out += line + "|";
+        CHECK(out == "G0|G1|G1|G2|");
+    }
+    {
+        // the job is read as it runs: nothing of it is checked at load, errors come where they are
+        CHECK(run_job("", "G0\no1 if [0]\nG1\n", m) == "G0@1|ERROR: line 2: no end to o1");
+        CHECK(run_job("", "G0\no2 endwhile\n", m)
+              == "G0@1|ERROR: line 2: endwhile outside its loop");
+        CHECK(run_job("", "o1 if [0]\nG1\no1 elseif [1]\nG2\no1 else\nG3\no1 endif\n", m)
+              == "G2@4");
+        CHECK(run_job("", "#<_n>=0\no1 while [#<_n> lt 2]\n#<_n>=[#<_n>+1]\no2 if [#<_n> eq 1]\n"
+                          "o1 continue\no2 endif\nG1 X#<_n>\no1 endwhile\n", m) == "G1 X2@7");
+        CHECK(run_job("", "o1 repeat [3]\no1 break\nG1\no1 endrepeat\nG2\n", m) == "G2@5");
+        CHECK(run_job("", "o<x> sub\nG9\no<x> endsub\nG1\n", m) == "G1@4");
+        CHECK(run_job("", "G1\no<x> return\n", m) == "G1@1|ERROR: line 2: return outside sub");
+    }
+    {
+        std::string job;
+        for (int i = 0; i < 20000; i++) job += "(header)\n";
+        job += "G0 X1\n";
+        CHECK(run_job("", job.c_str(), m) == "G0 X1@20001");
+    }
+    {
+        script::Source src;
+        add(src, "lib", "o<sq> sub\nG2\no<sq> endsub\n");
+        script::Program prog;
+        std::string err, line;
+        CHECK(prog.load(src, err));
+        add(src, "job", "o<sq> call\nG1\n", true);
+        script::Runner r(prog, m);
+        CHECK(r.start_main(src.segments[1].base, err));
+        CHECK(r.step(line, err) == script::Runner::LINE && line == "G2");
+        // a pause can come in here
+        CHECK(r.step(line, err) == script::Runner::RETURNED && r.at_main());
+        CHECK(r.step(line, err) == script::Runner::LINE && line == "G1");
+    }
     printf(failures ? "%d failures\n" : "all passed\n", failures);
     return failures != 0;
 }

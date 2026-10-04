@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 #include "modules/robot/MachineTask.h"
+#include "Program.h"
 
 
 // G/M codes a script may take over, by defining the sub in the machine script
@@ -42,18 +43,18 @@ void Scripts::on_module_loaded()
     gcode_dispatch.set_script_hook(this);
     SimpleShell::add_command(shell_slot, "macro", &Scripts::shell, this,
                              "macro list | params | check | run <sub> [args] | trace on|off");
+    register_for_event(ON_MAIN_LOOP);
     load();
 }
 
 #define SD_DIR SCRIPTS_DIR
 bool Scripts::load()
 {
-    if(runner != nullptr && runner->running()) {
+    if(program.busy()) {
         printk("error:script running\n");
         return false;
     }
-    delete runner;
-    runner= nullptr;
+    Macros &macros= program.macros();
     Macros::Report r;
     std::string err;
     loaded= macros.load(Macros::EMBEDDED_DIR, SD_DIR, r, err);
@@ -62,161 +63,58 @@ bool Scripts::load()
         printk("error:%s\n", macros.located(err, macros.program().error_offset).c_str());
         return false;
     }
-    runner= new script::Runner(macros.program(), gcode_dispatch.parameters());
     if(r.replaced + r.added > 0) printk("scripts: %u embedded, %u replaced, %u added from " SD_DIR "\n", r.embedded, r.replaced, r.added);
     else printk("scripts: %u embedded\n", r.embedded);
     return true;
 }
 
-// the lines around the one running, like a debugger
-void Scripts::list(StreamOutput *stream, unsigned around)
-{
-    script::Source &src= macros.source();
-    unsigned cur= runner->last().offset;
-    int segment= src.segment_of(cur);
-    if(segment < 0) return;
-    unsigned at= src.segments[segment].base, first= at, n= 1, line= src.line_of(cur);
-    while(n + around < line) { // the window starts `around` lines before the current one
-        at= src.next(at);
-        first= at;
-        n++;
-    }
-    stream->printf("%s:\r\n", src.basename(segment).c_str());
-    std::string text;
-    unsigned next;
-    for (unsigned end= src.segments[segment].base + src.segments[segment].size;
-         first < end && n <= line + around && src.line_at(first, text, next); first= next, n++) {
-        stream->printf("%c %5u  %s\r\n", first == cur ? '>' : ' ', n, text.c_str());
-    }
-    src.release();
-}
-
-bool Scripts::can_start(std::string &err) const
-{
-    if(!loaded) err= "no scripts";
-    else if(runner->running()) err= "script running";
-    else return true;
-    return false;
-}
-
-void Scripts::started(const std::string &sub, StreamOutput *stream)
-{
-    name= sub;
-    reply= stream;
-    sources.push(this);
-}
-
 bool Scripts::run(const char *sub, const float *args, unsigned nargs, StreamOutput *stream, std::string &err)
 {
-    if(!can_start(err))
+    if(!loaded) {
+        err= "no scripts";
         return false;
-
-    runner->stop();
-    if(!runner->call(sub, args, nargs, err))
-        return false;
-
-    started(sub, stream);
-    return true;
-}
-
-void Scripts::finish()
-{
-    if(cycle_run) gcode_dispatch.set_modal_state(saved_modal);
-    cycle_run= false;
-    machine_task.enforce_keepout();
-    atc_handler.set_state(0);
-    reply= nullptr;
-}
-
-void Scripts::halt(int reason)
-{
-    machine_task.halt(reason, name.empty() ? "script aborted" : name.c_str());
+    }
+    return program.call(sub, args, nargs, stream, err);
 }
 
 // M6 T3 -> o<tool_change> with #<t> = 3 and #<subcode> = 0; every word of the block becomes a #<letter>.
 // The sub is only pushed here, its first line runs on the next main loop; stream gets the ok when it is done.
 bool Scripts::trigger(const Gcode &gcode, StreamOutput *stream, std::string &err)
 {
-    // while a script runs, only its own lines reach the dispatcher: they keep the codes' built-in
+    // while a sub runs, only its own lines reach the dispatcher: they keep the codes' built-in
     // meaning instead of triggering the sub they came from
-    if(runner == nullptr || runner->running()) return false;
+    if(program.in_sub())
+        return false;
+
     if(!gcode.has_g && !gcode.has_m) return false;
     const Trigger *t= nullptr;
     for (const Trigger &e : TRIGGERS) {
         bool code= (e.letter == 'G') ? (gcode.has_g && gcode.g == e.code) : (gcode.has_m && gcode.m == e.code);
         if(code && (e.any_subcode || gcode.subcode == 0)) t= &e;
     }
-    if(t == nullptr || !loaded || macros.program().find_sub(t->sub) < 0) return false; // not scripted, the C++ handler takes it
+    // not scripted, the C++ handler takes it
+    if(t == nullptr || !loaded || program.macros().program().find_sub(t->sub) < 0)
+        return false;
+
     if(!run(t->sub, nullptr, 0, stream, err)) return true;
     // a canned cycle's sub moves in its own group 1; the program's is put back when the sub ends
-    cycle_run= t->letter == 'G' && t->code >= 80 && t->code <= 89;
-    if(cycle_run) saved_modal= gcode_dispatch.modal_state();
-    runner->set_local("code", t->code);
-    runner->set_local("subcode", gcode.subcode);
+    if(t->letter == 'G' && t->code >= 80 && t->code <= 89) program.restore_modal_on_return();
+    program.set_local("code", t->code);
+    program.set_local("subcode", gcode.subcode);
     for (const gcode::Word &w : gcode.get_words()) {
         char local[2]= {(char)tolower(w.letter), 0};
-        if(w.letter != 'G' && w.letter != 'M') runner->set_local(local, w.value);
+        if(w.letter != 'G' && w.letter != 'M') program.set_local(local, w.value);
     }
     return true;
 }
 
 bool Scripts::call(const std::string &line, StreamOutput *stream, std::string &err)
 {
-    std::string sub;
-    if(!can_start(err))
+    if(!loaded) {
+        err= "no scripts";
         return false;
-
-    runner->stop();
-    if(!runner->call_line(line, sub, err))
-        return false;
-
-    started(sub, stream);
-    return true;
-}
-
-Source::Result Scripts::next(SerialMessage &msg)
-{
-    std::string err;
-    switch(runner->step(msg.message, err)) {
-        case script::Runner::LINE:
-            if(trace) {
-                char buf[16];
-                snprintf(buf, sizeof(buf), "line %u:", runner->last().line);
-                printk("%s> %s\n", macros.located(buf, runner->last().offset).c_str(),
-                       msg.message.c_str());
-            }
-            msg.stream= &THEKERNEL->streams;
-            msg.params= &runner->parameters();
-            return LINE;
-        case script::Runner::MESSAGE:
-            printk("%s\n", msg.message.c_str());
-            return WAIT;
-        case script::Runner::DONE: {
-            float reason= runner->aborted();
-            finish();
-            if(reason != 0) {
-                printk("error:script %s aborted (%d)\n", name.c_str(), (int)reason);
-                halt(reason > 0 && reason < 255 ? (int)reason : SCRIPT);
-            }
-            return DONE;
-        }
-        case script::Runner::ERROR: {
-            finish();
-            std::string where= macros.located(err, runner->last().offset);
-            printk("error:script %s %s\n", name.c_str(), where.c_str());
-            halt(SCRIPT);
-            return DONE;
-        }
     }
-    return WAIT;
-}
-
-void Scripts::abort()
-{
-    if(!runner->running()) return;
-    runner->stop();
-    if(reply != nullptr) reply->printf("error:script %s stopped\r\n", name.c_str());
-    finish();
+    return program.call_line(line, stream, err);
 }
 
 // hooks from other modules: run a sub if the machine script has it
@@ -224,20 +122,35 @@ void Scripts::abort()
 void Scripts::file_changed(const char *path)
 {
     if(path == nullptr || strncmp(path, SD_DIR, sizeof(SD_DIR) - 1) != 0) return;
+    if(program.busy()) { // the source still reads the job and the subs: reload once they are done
+        stale= true;
+        return;
+    }
     loaded= false;
     load();
 }
 
+void Scripts::on_main_loop(void *)
+{
+    if(!stale || program.busy())
+        return;
+
+    stale= false;
+    file_changed(SD_DIR);
+}
+
 bool Scripts::run_sub(const char *sub, const float *args, unsigned nargs)
 {
-    if(!loaded || macros.program().find_sub(sub) < 0) return false;
+    if(!loaded || program.macros().program().find_sub(sub) < 0)
+        return false;
+
     std::string err;
     if(run(sub, args, nargs, nullptr, err)) return true;
     printk("error:script %s %s\n", sub, err.c_str());
     return false;
 }
 
-// only queues the sub, the source stack runs it once the main loop is going
+// only queues the sub, it runs once the main loop is going
 void Scripts::boot()
 {
     run_sub("boot", nullptr, 0);
@@ -268,7 +181,7 @@ void Scripts::sub_list(std::string, StreamOutput *stream)
         stream->printf("error:no scripts, try macro check\n");
         return;
     }
-    const script::Program &p= macros.program();
+    const script::Program &p= program.macros().program();
     for (unsigned i= 0; i < p.subs.size(); i++) stream->printf("%s\n", p.name(i));
 }
 
@@ -291,5 +204,5 @@ void Scripts::sub_run(std::string cmd, StreamOutput *stream)
 
 void Scripts::sub_trace(std::string cmd, StreamOutput *stream)
 {
-    trace= shift_parameter(cmd) == "on";
+    program.set_trace(shift_parameter(cmd) == "on");
 }

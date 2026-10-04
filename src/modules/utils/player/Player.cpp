@@ -26,7 +26,7 @@
 #include "modules/robot/MachineTask.h"
 #include "DirHandle.h"
 #include "PlayerPublicAccess.h"
-#include "Scripts.h"
+#include "Program.h"
 #include "TemperatureControlPool.h"
 #include "Block.h"
 
@@ -42,9 +42,6 @@ extern SDFAT mounter;
 
 void Player::on_module_loaded()
 {
-    this->playing_file = false;
-    this->suspend_pending = false;
-
     for (unsigned i= 0; COMMANDS[i].name != nullptr; i++) SimpleShell::add_command(shell_slots[i], COMMANDS[i].name, &Player::shell, this, COMMANDS[i].help);
     GcodeDispatch::add_handler(this);
     register_for_event(ON_MAIN_LOOP);
@@ -66,19 +63,13 @@ unsigned long Player::calculate_elapsed_secs()
 void Player::sample_runtime()
 {
     TickType_t now = xTaskGetTickCount();
-    if (playing_file && !sources.suspended() && !THEKERNEL->get_feed_hold() && !machine_task.is_halted()) {
+    if (program.playing() && !program.suspended() && !THEKERNEL->get_feed_hold()
+        && !machine_task.is_halted()) {
         run_ticks += now - sampled_at;
     }
     sampled_at = now;
 }
 
-void Player::cleanup()
-{
-    if(sources.suspended()) {
-        sources.resume();
-        printk("Suspend cleared\n");
-    }
-}
 
 // extract any options found on line, terminates args at the space before the first option (-v)
 // eg this is a file.gcode -v
@@ -102,7 +93,7 @@ void Player::on_gcode_received(Gcode *argument)
     if(!gcode->has_g || gcode->g != 28) return;
 
     // homing cancels suspend
-    if (sources.suspended()) sources.resume();
+    if (program.suspended()) program.resume();
 }
 
 // M0: stop the program until the operator resumes it
@@ -110,14 +101,14 @@ void Player::on_gcode_received(Gcode *argument)
 // picks this up and suspends there
 void Player::program_stop(Gcode *)
 {
-    suspend_pending= playing_file;
+    program.ask_pause();
 }
 
 // M1: the same, obeyed only when the optional stop mode is on
 void Player::optional_stop(Gcode *)
 {
     if(!m1_stops) return;
-    suspend_pending= playing_file;
+    program.ask_pause();
 }
 
 // M333, M334: whether M1 stops the program
@@ -130,7 +121,7 @@ void Player::optional_stop_mode(Gcode *gcode)
 // M600: suspend
 void Player::suspend_gcode(Gcode *)
 {
-    suspend_pending= playing_file;
+    program.ask_pause();
 }
 
 void Player::progress_report(Gcode *)
@@ -166,11 +157,10 @@ void Player::shell(void *self, const char *name, std::string args, StreamOutput 
 
 void Player::buffer_command( string parameters, StreamOutput *stream )
 {
-    if ((int)buffered_queue.size() >= BUFFER_LIMIT) {
+    if (!program.insert(parameters)) {
         stream->printf("error:buffer queue full, an abort clears it\r\n");
         return;
     }
-    buffered_queue.push(parameters);
     stream->printf("Command buffered: %s\r\n", parameters.c_str());
 }
 
@@ -181,9 +171,9 @@ void Player::play_command( string parameters, StreamOutput *stream )
     // extract any options from the line and terminate the line there
     string options= extract_options(parameters);
     // Get filename which is the entire parameter line upto any options found or entire line
-    this->filename = absolute_from_relative(shift_parameter(parameters), stream);
+    string path = absolute_from_relative(shift_parameter(parameters), stream);
 
-    if (!sources.empty() || sources.suspended()) {
+    if (program.busy() || program.suspended()) {
         stream->printf("Currently printing, abort print first\r\n");
         return;
     }
@@ -193,24 +183,21 @@ void Player::play_command( string parameters, StreamOutput *stream )
         return;
     }
 
-    if (!file.open(this->filename.c_str())) { // also closes a paused print
-        stream->printf("File not found: %s\r\n", this->filename.c_str());
+    // -v echoes every line, to everyone: the stream that asked may be gone by then
+    bool verbose = options.find_first_of("Vv") != string::npos;
+    string err;
+    if (!program.start_job(path, verbose, err)) {
+        stream->printf("%s\r\n", err.c_str());
         return;
     }
 
-    stream->printf("Playing %s\r\n", this->filename.c_str());
-
-    this->playing_file = true;
+    stream->printf("Playing %s\r\n", path.c_str());
     THECONVEYOR.clear_executed();
-    sources.push(this);
 
-    // -v echoes every line, to everyone: the stream that asked may be gone by then
-    this->verbose = options.find_first_of("Vv") != string::npos;
-
-    if (file.size() == 0) {
+    if (program.job_size() == 0) {
         stream->printf("WARNING - Could not get file size\r\n");
     } else {
-        stream->printf("  File size %ld\r\n", file.size());
+        stream->printf("  File size %u\r\n", program.job_size());
     }
     run_ticks = 0;
     sampled_at = xTaskGetTickCount();
@@ -219,12 +206,12 @@ void Player::play_command( string parameters, StreamOutput *stream )
 // Goto a certain line when playing a file
 void Player::goto_command( string parameters, StreamOutput *stream )
 {
-    if (!sources.suspended()) {
+    if (!program.suspended()) {
         stream->printf("Can only jump when pausing!\r\n");
         return;
     }
 
-    if (!file.is_open()) {
+    if (!program.playing()) {
     	stream->printf("Missing file handle!\r\n");
     	return;
     }
@@ -234,10 +221,13 @@ void Player::goto_command( string parameters, StreamOutput *stream )
         char *ptr = NULL;
         unsigned long line = strtol(line_str.c_str(), &ptr, 10);
         if(line < 1) line = 1;
+        string err;
+        if (!program.jump(line, err)) {
+            stream->printf("error:%s\r\n", err.c_str());
+            return;
+        }
         stream->printf("Goto line %lu...\r\n", line);
-
         machine_task.post_stop();
-        file.seek_line(line);
     }
 }
 
@@ -248,37 +238,31 @@ void Player::progress_command( string parameters, StreamOutput *stream )
     string options = shift_parameter( parameters );
     bool sdprinting= options.find_first_of("Bb") != string::npos;
 
-    if(!playing_file && file.is_open()) {
-        if(sdprinting)
-            stream->printf("SD printing byte %lu/%lu\r\n", file.bytes(), file.size());
-        else
-            stream->printf("SD print is paused at %lu/%lu\r\n", file.bytes(), file.size());
-        return;
-
-    } else if(!playing_file) {
+    if(!program.playing()) {
         stream->printf("Not currently playing\r\n");
         return;
     }
 
-    if(file.size() > 0) {
+    unsigned size = program.job_size(), read = program.job_read();
+    if(size > 0) {
         unsigned long est = 0;
         unsigned long elapsed_secs = calculate_elapsed_secs();
         if(elapsed_secs > 10) {
-            unsigned long bytespersec = file.bytes() / elapsed_secs;
+            unsigned long bytespersec = read / elapsed_secs;
             if(bytespersec > 0)
-                est = (file.size() - file.bytes()) / bytespersec;
+                est = (size - read) / bytespersec;
         }
 
-        float pcnt = file.bytes() * 100.0F / file.size();
+        float pcnt = read * 100.0F / size;
         // If -b or -B is passed, report in the format used by Marlin and the others.
         if (!sdprinting) {
             stream->printf(est > 0 ? "file: %s, %u %% complete, elapsed time: %02lu:%02lu:%02lu, est time: %02lu:%02lu:%02lu\r\n"
                                    : "file: %s, %u %% complete, elapsed time: %02lu:%02lu:%02lu\r\n",
-                           this->filename.c_str(), (unsigned int)roundf(pcnt),
+                           program.job_name(), (unsigned int)roundf(pcnt),
                            elapsed_secs / 3600, (elapsed_secs % 3600) / 60, elapsed_secs % 60,
                            est / 3600, (est % 3600) / 60, est % 60);
         } else {
-            stream->printf("SD printing byte %lu/%lu\r\n", file.bytes(), file.size());
+            stream->printf("SD printing byte %u/%u\r\n", read, size);
         }
 
     } else {
@@ -286,51 +270,26 @@ void Player::progress_command( string parameters, StreamOutput *stream )
     }
 }
 
-unsigned long Player::current_line()
-{
-    if (sources.top() != this) {
-        return file.lines();
-    }
-    MachineTask::Where w= machine_task.where();
-    return w.in ? w.line : file.lines();
-}
-
-void Player::list(StreamOutput *stream, unsigned around)
-{
-    stream->printf("%s:\r\n", this->filename.c_str());
-    file.list(stream, current_line(), around);
-}
-
 void Player::on_main_loop(void *)
 {
     sample_runtime();
 }
 
-// the file ended, was aborted or the machine halted: queued motion finishes, then spindle and coolant go off as after M2
-void Player::abort()
+// the job ended, was stopped or the machine halted
+void Player::job_ended()
 {
-    if (this->playing_file) {
-        unsigned long secs = calculate_elapsed_secs();
-        printk("%s ran for %02lu:%02lu:%02lu\n", this->filename.c_str(),
-               secs / 3600, (secs % 3600) / 60, secs % 60);
-    }
-    this->playing_file = false;
-    this->suspend_pending = false;
-    this->m1_stops = false;
-    this->filename = "";
-    this->verbose = false;
-    while (!buffered_queue.empty())
-         buffered_queue.pop();
-    file.close();
-    machine_task.enforce_keepout();
+    unsigned long secs = calculate_elapsed_secs();
+    printk("%s ran for %02lu:%02lu:%02lu\n", program.job_name(),
+           secs / 3600, (secs % 3600) / 60, secs % 60);
+    m1_stops = false;
 }
 
 // stops whatever the machine is doing, held or not, and closes the file if one is open: a hold
 // in MDI has no other way out than this
 void Player::abort_command( string parameters, StreamOutput *stream )
 {
-    bool file= !sources.empty();
-    sources.clear(); // the file and any script on top of it, or a script alone
+    bool file= program.busy();
+    program.stop(); // the file and any script on top of it, or a script alone
 
     if(machine_task.is_halted()) {
         printk("Aborted by halt\n");
@@ -343,41 +302,6 @@ void Player::abort_command( string parameters, StreamOutput *stream )
     }
 }
 
-
-Source::Result Player::next(SerialMessage &msg)
-{
-    if (this->suspend_pending) {
-        this->suspend_pending = false;
-        suspend_now();
-        return WAIT;
-    }
-
-    if (!buffered_queue.empty()) {
-        msg.message = buffered_queue.front();
-        buffered_queue.pop();
-        // a buffered line runs ahead of the next file line, so that is the line a stop here reports
-        msg.line = file.lines() + 1;
-        return LINE;
-    }
-
-    char buf[130];
-    unsigned long discarded = file.discarded();
-    if (file.next_line(buf, sizeof(buf))) {
-        if (this->verbose) {
-            if (file.discarded() != discarded) printk("Warning: Discarded long line\n");
-            printk("%lu: %s", file.lines(), buf);
-        }
-        msg.message = buf;
-        // playing a file: the trace above is the output, replies go to every console
-        msg.stream = &THEKERNEL->streams;
-        msg.line = file.lines();
-        return LINE;
-    }
-
-    if (!machine_task.idle()) return WAIT;
-    abort();
-    return DONE;
-}
 
 /*
 bool Player::check_cluster(const char *gcode_str, float *x_value, float *y_value, float *distance, float *slope, float *s_value)
@@ -410,28 +334,31 @@ bool Player::check_cluster(const char *gcode_str, float *x_value, float *y_value
 
 bool Player::get_progress(struct pad_progress &p)
 {
-    if(file.size() == 0 || !playing_file) return false;
-    p.played_lines = current_line();
+    if(program.job_size() == 0)
+        return false;
+
+    p.played_lines = machine_task.where().line;
     p.elapsed_secs = this->calculate_elapsed_secs();
-    p.percent_complete = roundf(file.bytes() * 100.0F / file.size());
-    p.filename = this->filename;
+    p.percent_complete = roundf(program.job_read() * 100.0F / program.job_size());
+    p.filename = program.job_name();
     return true;
 }
 
 void Player::suspend_command(string parameters, StreamOutput *stream )
 {
-    if (sources.suspended()) {
+    if (program.suspended()) {
         stream->printf("Already suspended!\n");
         return;
     }
 
-    if(!this->playing_file) {
+    if(!program.playing()) {
         stream->printf("Can not suspend when not playing file!\n");
         return;
     }
 
-    if (sources.top() != this) { // a tool change or other script is half way; pause at the next file line instead
-        this->suspend_pending = true;
+    // a tool change or other script is half way; pause at the next file line instead
+    if (program.in_sub()) {
+        program.ask_pause();
         stream->printf("Suspending after the running script...\n");
         return;
     }
@@ -440,22 +367,21 @@ void Player::suspend_command(string parameters, StreamOutput *stream )
 
 void Player::suspend_now()
 {
-    sources.suspend();
+    program.suspend();
     printk("Suspended, resume to continue playing\n");
 }
 
 void Player::resume_command(string parameters, StreamOutput *stream )
 {
-    if (this->suspend_pending) {
-        this->suspend_pending = false;
+    if (program.cancel_pause()) {
         stream->printf("Suspend cancelled\n");
         return;
     }
-    if(!sources.suspended()) {
+    if(!program.suspended()) {
         stream->printf("Not suspended\n");
         return;
     }
 
-    sources.resume();
+    program.resume();
     stream->printf("Playing file resumed\n");
 }

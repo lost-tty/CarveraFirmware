@@ -132,11 +132,7 @@ int main() {
     std::sort(files.begin(), files.end());
     script::Source source;
     for (const std::string &name : files) {
-        std::string path = "../src/macros/" + name;
-        FILE *f = fopen(path.c_str(), "r");
-        fseek(f, 0, SEEK_END);
-        source.add(path, ftell(f));
-        fclose(f);
+        source.add("../src/macros/" + name);
     }
     std::string err;
     CHECK(program.load(source, err));

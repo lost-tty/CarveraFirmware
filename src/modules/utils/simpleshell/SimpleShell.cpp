@@ -26,6 +26,8 @@
 #include "FileStream.h"
 #include "checksumm.h"
 #include "Scripts.h"
+#include "Program.h"
+#include "Script.h"
 #include "modules/utils/player/Player.h"
 #include "Gcode.h"
 #include "Robot.h"
@@ -345,7 +347,9 @@ void SimpleShell::remount_command( string parameters, StreamOutput *stream )
 // a suspended job is not active but still reads on from its file
 bool SimpleShell::being_played(const string &path, StreamOutput *stream)
 {
-    if(!player.is_playing() || player.playing_name() != path) return false;
+    if(!program.playing() || path != program.job_name())
+        return false;
+
     stream->printf("error:%s is being played\r\n", path.c_str());
     return true;
 }

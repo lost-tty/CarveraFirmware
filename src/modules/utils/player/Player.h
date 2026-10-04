@@ -9,10 +9,7 @@
 #pragma once
 
 #include "Module.h"
-#include "libs/Killable.h"
 class Gcode;
-#include "GcodeFile.h"
-#include "Source.h"
 #include "libs/McodeRegistry.h"
 #include "SimpleShell.h"
 
@@ -20,7 +17,6 @@ class Gcode;
 #include <string>
 #include <cstdint>
 #include <map>
-#include <queue>
 #include <vector>
 
 #include "FreeRTOS.h"
@@ -29,15 +25,13 @@ using std::string;
 
 class StreamOutput;
 
-// Job control: plays a file as the bottom source of the stack and feeds the stack from its main loop.
-class Player : public Module, public Source, public Killable {
+// Job control: the shell commands and M-codes for the job the program module runs.
+class Player : public Module {
 
     public:
         void on_module_loaded();
         void on_main_loop(void *) override;
         static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
-        bool is_playing() const { return playing_file; }
-        const string &playing_name() const { return filename; }
         bool m1_stops_program() const { return m1_stops; }
         bool get_progress(struct pad_progress &p);
         void on_gcode_received(Gcode *argument);
@@ -49,11 +43,7 @@ class Player : public Module, public Source, public Killable {
         void progress_report(Gcode *);
 
         McodeRegistry::Mcode m0, m1, m27, m333, m334, m600, m601;
-        void kill() override {}
-        void cleanup() override;
-        Source::Result next(SerialMessage &msg) override;
-        void abort() override;
-        void list(StreamOutput* stream, unsigned around) override;
+        void job_ended();
 
     private:
         typedef void (Player::*command_t)(string, StreamOutput *);
@@ -71,24 +61,13 @@ class Player : public Module, public Source, public Killable {
 
         unsigned long calculate_elapsed_secs();
         void sample_runtime();
-        unsigned long current_line();
         string extract_options(string& args);
 		
         // 2024
         // bool check_cluster(const char *gcode_str, float *x_value, float *y_value, float *distance, float *slope, float *s_value);
 
-        string filename;
-        bool verbose;
-
-        GcodeFile file;
-        std::queue<string> buffered_queue; // console lines queued by "buffer", fed one per loop before the next file line
-        static const int BUFFER_LIMIT = 32; // a remote client must not grow the queue without bound
         TickType_t run_ticks = 0, sampled_at = 0;
-        struct {
-            bool playing_file:1;
-            bool m1_stops:1;   // M334 turns it on, M333 off
-            bool suspend_pending:1;   // asked for while a script was on top, taken at the next file line
-        };
+        bool m1_stops = false;   // M334 turns it on, M333 off
 };
 
 extern Player player;

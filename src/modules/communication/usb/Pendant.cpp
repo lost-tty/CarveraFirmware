@@ -1,7 +1,7 @@
 #include "Pendant.h"
 #include "UsbHost.h"
 #include "libs/Kernel.h"
-#include "Source.h"
+#include "Program.h"
 #include "libs/Logging.h"
 #include "Robot.h"
 #include "StepperMotor.h"
@@ -183,7 +183,7 @@ void Pendant::key_down(uint8_t key, bool shifted)
                 break;
             case HOLD:
                 if (THEKERNEL->is_feed_hold_enabled()) machine_task.hold(!THEKERNEL->get_feed_hold());
-                else line(sources.suspended() ? "resume" : "suspend");
+                else line(program.suspended() ? "resume" : "suspend");
                 break;
             case ABORT:
                 machine_task.halt(MANUAL, "stopped from pendant");
