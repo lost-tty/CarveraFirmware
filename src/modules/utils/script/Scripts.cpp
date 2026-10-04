@@ -255,9 +255,7 @@ void Scripts::sub_list(std::string, StreamOutput *stream)
         return;
     }
     const script::Program &p= macros.program();
-    for (const script::Control &c : p.controls) {
-        if(c.kind == script::SUB) stream->printf("%s\n", p.label_text(p.labels[c.label]).c_str());
-    }
+    for (unsigned i= 0; i < p.subs.size(); i++) stream->printf("%s\n", p.name(i));
 }
 
 void Scripts::sub_params(std::string, StreamOutput *stream)

@@ -47,41 +47,37 @@ private:
 
 enum Kind : uint8_t { SUB, ENDSUB, CALL, RETURN, ABORT, IF, ELSEIF, ELSE, ENDIF, WHILE, ENDWHILE, BREAK, CONTINUE, REPEAT, ENDREPEAT };
 
-struct Control {
-    uint16_t offset; // of the line in the source
-    Kind kind;
-    uint8_t arg;     // offset of the argument text in the trimmed line
-    uint16_t label;  // index into the label list
-    uint16_t match;  // sub<->endsub, if/elseif/else->next branch or endif, while<->endwhile, repeat<->endrepeat,
-                     // break/continue->loop
+struct Sub {
+    uint32_t offset;
+    uint32_t line;   // within its segment
+    uint16_t name;   // into Program::names
 };
-
-struct Label { uint16_t offset, length; }; // the name as written in the source; numeric labels compare by value
 
 inline bool is_control(const char *p)
 {
     return (p[0] == 'o' || p[0] == 'O') && (p[1] == '<' || (p[1] >= '0' && p[1] <= '9'));
 }
 
-// A validated script: control words with their pairing. Everything else is checked to tokenize.
+// Validates the scripts at load and keeps only their subs; the runner finds the blocks as it reads.
 class Program {
 public:
     bool load(Source &source, std::string &err); // err: "line N: ...", N within the segment at error_offset
-    int find_sub(const char *name) const;        // index into controls, or -1
-    const Control *control_at(unsigned offset) const;
-    unsigned after(const Control &c) const { return source->next(c.offset); }
-    bool label_is(const Label &l, const char *name, size_t length) const;
-    std::string label_text(const Label &l) const;
+    int find_sub(const char *name) const;        // index into subs, or -1
+    const char *name(int i) const { return names.c_str() + subs[i].name; }
     static const unsigned MAX_LABEL = 64;
 
     Source *source = nullptr;
     unsigned error_offset = 0;
-    std::vector<Control> controls; // by offset
-    std::vector<Label> labels;
+    std::vector<Sub> subs;
+
+private:
+    typedef std::vector<std::pair<std::string, uint32_t> > Calls;
+    bool check(unsigned segment, Calls &calls, std::string &err);
+    std::string names;   // each ended by a '\0'
 };
 
-// Executes a Program one G-code line at a time. Lines come back with parameters substituted.
-// Globals (#<_name>) persist across start() so scripts can keep state between calls.
+// Executes a script one G-code line at a time. Lines come back with parameters substituted.
+// Globals (#<_name>) persist from one program to the next.
 class Runner {
 public:
     Runner(const Program &program, gcode::ParamStore &machine);
@@ -91,7 +87,7 @@ public:
     enum Result { LINE, MESSAGE, DONE, ERROR }; // MESSAGE: a (MSG,..) (DEBUG,..) or (PRINT,..) comment, text in out
     Result step(std::string &out, std::string &err);
     unsigned last_offset() const { return current; }                     // of the last LINE or MESSAGE, for trace and list
-    unsigned error_offset() const { return failed_at; }                  // where ERROR was raised
+    unsigned error_offset() const { return failed.at; }                  // where ERROR was raised
     float aborted() const { return abort_reason; } // non-zero after an abort ended the script
     bool running() const { return !frames.empty(); }
     void stop() { while (!frames.empty()) pop(); }
@@ -103,12 +99,21 @@ public:
     static const unsigned MAX_SILENT_STEPS = 10000; // control steps without a line: the script loops forever
 
 private:
+    struct Mark {
+        uint32_t at, line, next; // a line, its number and the offset of the one after
+    };
+    struct Loop {
+        uint32_t at, line;
+        uint32_t left;
+        std::string label;
+    };
     struct Frame {
-        uint16_t at;      // offset of the next line to look at
+        uint32_t at;      // offset of the next line to look at
+        uint32_t line;
         uint16_t base;    // its arguments start here in args
         bool testing;     // arrived at an elseif/else because the previous condition was false
         uint32_t has_arg;
-        std::vector<std::pair<uint16_t, uint32_t> > repeats; // innermost last: repeat control -> iterations left
+        std::vector<Loop> loops; // innermost last
     };
     struct Named {
         uint8_t depth; // frame index, GLOBAL for #<_name>
@@ -133,8 +138,25 @@ private:
     void reset() { stop(); silent_steps = 0; abort_reason = 0; }
     bool enter(const char *sub, const float *args, unsigned nargs, std::string &err);
     bool call(const std::string &text, std::string &sub, std::string &err);
-    bool control(const Control &c, const std::string &text, std::string &err);
-    void jump(unsigned offset) { frames.back().at = offset; }
+    bool control(const Mark &here, const std::string &text, std::string &err);
+    bool find(const Mark &from, const char *label, size_t length, unsigned kinds, Mark &out,
+              std::string &err);
+    void jump_to(uint32_t at, uint32_t line)
+    {
+        frames.back().at = at;
+        frames.back().line = line;
+    }
+    void jump_after(const Mark &m) { jump_to(m.next, m.line + 1); }
+    static void advance(Frame &f, unsigned next)
+    {
+        f.at = next;
+        f.line++;
+    }
+    void took(Frame &f, unsigned at, unsigned next)
+    {
+        current = at;
+        advance(f, next);
+    }
     bool arguments(const char *p, float *out, unsigned &n, std::string &err);
     bool substitute(const std::string &text, std::string &out, std::string &err);
     bool message(const std::string &text, std::string &out, std::string &err);
@@ -150,7 +172,7 @@ private:
     std::vector<Named> named;
     unsigned silent_steps = 0;
     unsigned current = 0;     // offset of the last LINE or MESSAGE
-    unsigned failed_at = 0;
+    Mark failed = {0, 0, 0};
     float abort_reason = 0;
 };
 

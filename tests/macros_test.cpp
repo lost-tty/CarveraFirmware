@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
         CHECK(r.embedded == files && r.replaced == 0 && r.added == 0 && r.fallback.empty());
         CHECK(m.program().find_sub("tool_change") >= 0 && m.program().find_sub("atc_change") >= 0);
         int sub = m.program().find_sub("atc_change");
-        unsigned at = m.program().controls[sub].offset;
+        unsigned at = m.program().subs[sub].offset;
         CHECK(m.file(at) == "atc_change.ngc");                       // the first embedded file, alphabetically
         CHECK(m.source().line_of(at) == 2);
         CHECK(m.located("line 2: bad", at) == "atc_change.ngc:2: bad");
@@ -67,15 +67,15 @@ int main(int argc, char **argv) {
         CHECK(r.embedded == files && r.replaced == 1 && r.added == 1 && r.fallback.empty());
         int extra = m.program().find_sub("extra");
         CHECK(extra >= 0);
-        unsigned at = m.program().controls[extra].offset;
+        unsigned at = m.program().subs[extra].offset;
         CHECK(m.file(at) == "extra.ngc" && m.source().line_of(at) == 2);
         char buf[32]; snprintf(buf, sizeof(buf), "line %u: x", m.source().line_of(at));
         CHECK(m.located(buf, at) == "extra.ngc:2: x");
         std::string line; unsigned next;
-        CHECK(m.source().line_at(m.program().controls[m.program().find_sub("g28")].offset + 11, line, next) && line == "(MSG, custom)");
+        CHECK(m.source().line_at(m.program().subs[m.program().find_sub("g28")].offset + 11, line, next) && line == "(MSG, custom)");
         m.source().release();
-        printf("sd load: %zu bytes live (%zu segments, %zu controls, %zu labels)\n", live - before,
-               m.source().segments.size(), m.program().controls.size(), m.program().labels.size());
+        printf("sd load: %zu bytes live (%zu segments, %zu subs)\n", live - before,
+               m.source().segments.size(), m.program().subs.size());
     }
     { // a broken SD file drops the whole SD set, the embedded scripts stay
         write(dir + "broken.ngc", "o<broken> sub\nG0 X0\n");
@@ -86,12 +86,14 @@ int main(int argc, char **argv) {
         CHECK(m.program().find_sub("extra") < 0 && m.program().find_sub("g28") >= 0);
         remove((dir + "broken.ngc").c_str());
     }
-    { // past the 64 KB the offsets can address
-        write(dir + "huge.ngc", std::string(70000, '\n'));
+    { // past 64 KB
+        write(dir + "huge.ngc", std::string(70000, '\n') + "o<huge> sub\nG0 X1\no<huge> endsub\n");
         Macros m; Macros::Report r; std::string err;
         CHECK(m.load(embedded.c_str(), dir.c_str(), r, err));
-        CHECK(r.fallback == "scripts are too large" && r.added == 0);
-        CHECK(m.program().find_sub("tool_change") >= 0); // the embedded scripts still load
+        CHECK(r.fallback.empty() && r.added == 2); // with extra.ngc from above
+        int huge = m.program().find_sub("huge");
+        CHECK(huge >= 0 && m.program().subs[huge].line == 70001);
+        CHECK(m.program().find_sub("tool_change") >= 0);
         remove((dir + "huge.ngc").c_str());
     }
     remove((dir + "g28.ngc").c_str()); remove((dir + "extra.ngc").c_str()); remove((dir + "notes.txt").c_str());

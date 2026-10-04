@@ -172,6 +172,14 @@ static bool split_control(const std::string &s, const char *&label, size_t &leng
     return false;
 }
 
+// label points into text
+static bool o_word(const std::string &text, const char *&label, size_t &length, Kind &kind)
+{
+    uint8_t arg;
+    std::string e;
+    return is_control(text.c_str()) && split_control(text, label, length, kind, arg, e);
+}
+
 // numeric labels compare by value, so o1 and o01 are the same block
 static bool label_equal(const char *a, size_t alen, const char *b, size_t blen)
 {
@@ -179,6 +187,79 @@ static bool label_equal(const char *a, size_t alen, const char *b, size_t blen)
         return strtol(std::string(a, alen).c_str(), nullptr, 10) == strtol(std::string(b, blen).c_str(), nullptr, 10);
     }
     return alen == blen && strncasecmp(a, b, alen) == 0;
+}
+
+// the blocks open at a line: o-words pair by label, a branch takes the place of its if or elseif
+struct Blocks {
+    struct Open { Kind kind; std::string label; unsigned line; uint32_t offset; };
+    std::vector<Open> open;
+    bool take(Kind kind, const std::string &label, unsigned line, uint32_t offset,
+              std::string &err);
+};
+
+bool Blocks::take(Kind kind, const std::string &label, unsigned line, uint32_t offset,
+                  std::string &err)
+{
+    Open *top = open.empty() ? nullptr : &open.back();
+    auto ours = [&](const Open &o) {
+        return label_equal(o.label.data(), o.label.size(), label.data(), label.size());
+    };
+    bool in_if = top != nullptr && top->kind >= IF && top->kind <= ELSE && ours(*top);
+    switch (kind) {
+        case SUB:
+            if (top != nullptr) {
+                err = std::string("sub inside ") + KEYWORDS[top->kind];
+                return false;
+            }
+            open.push_back(Open{kind, label, line, offset});
+            return true;
+        case IF: case WHILE: case REPEAT:
+            open.push_back(Open{kind, label, line, offset});
+            return true;
+        case ELSEIF: case ELSE:
+            if (!in_if) {
+                err = "no matching if";
+                return false;
+            }
+            if (top->kind == ELSE) {
+                err = "branch after else";
+                return false;
+            }
+            *top = Open{kind, label, line, offset};
+            return true;
+        case ENDIF:
+            if (!in_if) {
+                err = "no matching if";
+                return false;
+            }
+            open.pop_back();
+            return true;
+        case ENDWHILE: case ENDREPEAT: case ENDSUB: {
+            Kind want = kind == ENDWHILE ? WHILE : kind == ENDREPEAT ? REPEAT : SUB;
+            if (top == nullptr || top->kind != want || !ours(*top)) {
+                err = std::string("no matching ") + KEYWORDS[want];
+                return false;
+            }
+            open.pop_back();
+            return true;
+        }
+        case BREAK: case CONTINUE:
+            for (const Open &o : open) {
+                if ((o.kind == WHILE || o.kind == REPEAT) && ours(o))
+                    return true;
+            }
+            err = "no matching loop";
+            return false;
+        case RETURN: case ABORT:
+            if (open.empty() || open[0].kind != SUB) {
+                err = std::string(KEYWORDS[kind]) + " outside sub";
+                return false;
+            }
+            return true;
+        case CALL:
+            return true;
+    }
+    return true;
 }
 
 // [expr] [expr] ... up to MAX_ARGS values; a trailing comment is allowed
@@ -209,65 +290,54 @@ public:
     bool set_named(const char *, float, std::string &) override { return true; }
 };
 
-bool Program::label_is(const Label &l, const char *name, size_t length) const
-{
-    char buf[MAX_LABEL];
-    if (!source->read(l.offset, buf, l.length)) return false;
-    return label_equal(buf, l.length, name, length);
-}
-
-std::string Program::label_text(const Label &l) const
-{
-    char buf[MAX_LABEL];
-    if (!source->read(l.offset, buf, l.length)) return "?";
-    return std::string(buf, l.length);
-}
-
 bool Program::load(Source &src, std::string &err)
 {
-    if (src.size() > 0xFFFF) { // the control table holds 16-bit offsets
-        err = "scripts are too large";
-        return false;
-    }
-
     source = &src;
-    controls.clear();
-    labels.clear();
+    std::vector<Sub>().swap(subs);
+    std::string().swap(names);
     error_offset = 0;
-    unsigned count = 0; // o-word lines, so the table is allocated once at its final size
-    std::string text;
-    for (unsigned at = 0, next; src.line_at(at, text, next); at = next) {
-        const char *p = text.c_str();
-        skip_space(p);
-        if (is_control(p)) count++;
+    Calls calls;
+    for (unsigned i = 0; i < src.segments.size(); i++) {
+        if (!check(i, calls, err))
+            return false;
     }
-    controls.reserve(count);
+    for (const std::pair<std::string, uint32_t> &c : calls) {
+        if (find_sub(c.first.c_str()) < 0) {
+            char buf[24];
+            error_offset = c.second;
+            snprintf(buf, sizeof(buf), "line %u: ", src.line_of(c.second));
+            err = buf + std::string("call to unknown sub ") + c.first;
+            return false;
+        }
+    }
+    subs.shrink_to_fit();
+    names.shrink_to_fit();
+    src.release();
+    return true;
+}
 
+bool Program::check(unsigned segment, Calls &calls, std::string &err)
+{
+    Source &src = *source;
+    Blocks blocks;
     Permissive permissive;
-    std::vector<uint16_t> open; // unclosed sub/if(latest branch)/while/repeat
-    std::string e;
+    std::string text, e;
     float args[Runner::MAX_ARGS];
+    unsigned end = src.segments[segment].base + src.segments[segment].size, n = 0;
+    error_offset = src.segments[segment].base;
 
     auto unclosed = [&]() {
         char buf[48];
-        error_offset = controls[open.back()].offset;
-        snprintf(buf, sizeof(buf), "line %u: unclosed %s", src.line_of(error_offset),
-                 KEYWORDS[controls[open.back()].kind]);
+        error_offset = blocks.open.back().offset;
+        snprintf(buf, sizeof(buf), "line %u: unclosed %s", blocks.open.back().line,
+                 KEYWORDS[blocks.open.back().kind]);
         err = buf;
         return false;
     };
 
-    int segment = -1;
-    unsigned n = 0;
-    for (unsigned at = 0, next; src.line_at(at, text, next); at = next, n++) {
-        if (src.segment_of(at) != segment) { // line numbers restart with each file
-            if (!open.empty())
-                return unclosed(); // a block ends in the file that opened it
-
-            segment = src.segment_of(at);
-            n = 0;
-        }
-        unsigned leading = trim(text);
+    for (unsigned at = src.segments[segment].base, next; at < end && src.line_at(at, text, next);
+         at = next, n++) {
+        trim(text);
         char lbuf[24];
         snprintf(lbuf, sizeof(lbuf), "line %u: ", n + 1);
         std::string lineno = lbuf;
@@ -284,10 +354,11 @@ bool Program::load(Source &src, std::string &err)
             continue;
         }
 
-        Control c{uint16_t(at), SUB, 0, 0, 0};
         const char *label;
         size_t length;
-        if (!split_control(text, label, length, c.kind, c.arg, e)) {
+        Kind kind;
+        uint8_t arg;
+        if (!split_control(text, label, length, kind, arg, e)) {
             err = lineno + e;
             return false;
         }
@@ -295,109 +366,56 @@ bool Program::load(Source &src, std::string &err)
             err = lineno + "label too long";
             return false;
         }
-        c.label = labels.size();
-        for (uint16_t i = 0; i < labels.size(); i++) if (label_is(labels[i], label, length)) c.label = i;
-        if (c.label == labels.size()) labels.push_back(Label{uint16_t(at + leading + (label - text.c_str())), uint16_t(length)});
-
         unsigned nargs;
-        if (!parse_args(text.c_str() + c.arg, args, nargs, &permissive, e)) {
+        if (!parse_args(text.c_str() + arg, args, nargs, &permissive, e)) {
             err = lineno + e;
             return false;
         }
-        bool needs_one = c.kind == IF || c.kind == ELSEIF || c.kind == WHILE || c.kind == REPEAT || c.kind == ABORT;
-        if ((needs_one && nargs != 1) || (c.kind == RETURN && nargs > 1) || (!needs_one && c.kind != RETURN && c.kind != CALL && nargs != 0)) {
+        bool needs_one = kind == IF || kind == ELSEIF || kind == WHILE || kind == REPEAT
+                         || kind == ABORT;
+        bool any = kind == RETURN || kind == CALL;
+        if ((needs_one && nargs != 1) || (kind == RETURN && nargs > 1)
+            || (!needs_one && !any && nargs != 0)) {
             err = lineno + (needs_one ? "expected one [condition]" : "unexpected argument");
             return false;
         }
 
-        Control *top = open.empty() ? nullptr : &controls[open.back()];
-        bool in_sub = !open.empty() && controls[open[0]].kind == SUB;
-        uint16_t index = controls.size();
-        switch (c.kind) {
-            case SUB:
-                if (top != nullptr) { err = lineno + "sub inside " + KEYWORDS[top->kind]; return false; }
-                if (find_sub(std::string(label, length).c_str()) >= 0) { err = lineno + "duplicate sub " + std::string(label, length); return false; }
-                open.push_back(index);
-                break;
-            case IF: case WHILE: case REPEAT:
-                open.push_back(index);
-                break;
-            case ELSEIF: case ELSE:
-                if (top == nullptr || top->kind < IF || top->kind > ELSE || top->label != c.label) { err = lineno + "no matching if"; return false; }
-                if (top->kind == ELSE) { err = lineno + "branch after else"; return false; }
-                top->match = index;
-                open.back() = index; // the chain continues from this branch
-                break;
-            case ENDIF:
-                if (top == nullptr || top->kind < IF || top->kind > ELSE || top->label != c.label) { err = lineno + "no matching if"; return false; }
-                top->match = index;
-                open.pop_back();
-                break;
-            case ENDWHILE: case ENDREPEAT: case ENDSUB: {
-                Kind want = c.kind == ENDWHILE ? WHILE : c.kind == ENDREPEAT ? REPEAT : SUB;
-                if (top == nullptr || top->kind != want || top->label != c.label) { err = lineno + "no matching " + KEYWORDS[want]; return false; }
-                top->match = index;
-                c.match = open.back();
-                open.pop_back();
-                break;
-            }
-            case BREAK: case CONTINUE: {
-                int loop = -1;
-                for (int i = open.size() - 1; i >= 0 && loop < 0; i--) {
-                    const Control &o = controls[open[i]];
-                    if ((o.kind == WHILE || o.kind == REPEAT) && o.label == c.label) loop = open[i];
-                }
-                if (loop < 0) { err = lineno + "no matching loop"; return false; }
-                c.match = loop;
-                break;
-            }
-            case RETURN: case ABORT:
-                if (!in_sub) { err = lineno + std::string(KEYWORDS[c.kind]) + " outside sub"; return false; }
-                break;
-            case CALL:
-                break;
-        }
-        if (index >= 1000) { err = lineno + "too many o-words"; return false; }
-        controls.push_back(c);
-    }
-    if (!open.empty())
-        return unclosed();
-
-    for (Control &c : controls) {
-        if (c.kind != CALL) continue;
-        if (find_sub(label_text(labels[c.label]).c_str()) < 0) {
-            char buf[24];
-            error_offset = c.offset;
-            snprintf(buf, sizeof(buf), "line %u: ", src.line_of(c.offset));
-            err = buf + std::string("call to unknown sub ") + label_text(labels[c.label]);
+        std::string name(label, length);
+        if (kind == SUB && find_sub(name.c_str()) >= 0) {
+            err = lineno + "duplicate sub " + name;
             return false;
         }
+        if (!blocks.take(kind, name, n + 1, at, e)) {
+            err = lineno + e;
+            return false;
+        }
+        if (kind == SUB) {
+            if (names.size() + length >= 0xFFFF) {
+                err = lineno + "too many subs";
+                return false;
+            }
+            subs.push_back(Sub{at, n + 1, uint16_t(names.size())});
+            names.append(name.c_str(), name.size() + 1);
+        }
+        if (kind == CALL) calls.push_back(std::make_pair(name, at));
     }
-    labels.shrink_to_fit();
-    src.release();
+    if (!blocks.open.empty())
+        return unclosed(); // a block ends in the file that opened it
+
     return true;
 }
 
 int Program::find_sub(const char *name) const
 {
-    for (unsigned i = 0; i < controls.size(); i++) {
-        if (controls[i].kind == SUB && label_is(labels[controls[i].label], name, strlen(name))) return i;
+    for (unsigned i = 0; i < subs.size(); i++) {
+        if (label_equal(this->name(i), strlen(this->name(i)), name, strlen(name)))
+            return i;
     }
     return -1;
 }
 
-const Control *Program::control_at(unsigned offset) const
-{
-    unsigned lo = 0, hi = controls.size();
-    while (lo < hi) {
-        unsigned mid = (lo + hi) / 2;
-        if (controls[mid].offset < offset) lo = mid + 1;
-        else hi = mid;
-    }
-    return lo < controls.size() && controls[lo].offset == offset ? &controls[lo] : nullptr;
-}
-
-Runner::Runner(const Program &program, gcode::ParamStore &machine) : program(program), machine(machine), store(*this)
+Runner::Runner(const Program &program, gcode::ParamStore &machine)
+    : program(program), machine(machine), store(*this)
 {
     frames.reserve(MAX_DEPTH);
     named.push_back(Named{GLOBAL, "_value", 0});
@@ -476,7 +494,8 @@ bool Runner::push(int sub, const float *args, unsigned nargs, std::string &err)
     }
     frames.emplace_back();
     Frame &f = frames.back();
-    f.at = sub < 0 ? 0 : program.after(program.controls[sub]);
+    f.at = sub < 0 ? 0 : program.source->next(program.subs[sub].offset);
+    f.line = sub < 0 ? 1 : program.subs[sub].line + 1;
     f.base = this->args.size();
     f.testing = false;
     f.has_arg = nargs == 0 ? 0 : (nargs >= 32 ? ~0u : (1u << nargs) - 1);
@@ -532,8 +551,8 @@ bool Runner::set_local(const char *name, float v)
 Runner::Result Runner::fail(std::string &err, const std::string &msg)
 {
     char buf[16];
-    failed_at = frames.empty() ? 0 : frames.back().at;
-    snprintf(buf, sizeof(buf), "line %u: ", frames.empty() ? 0 : program.source->line_of(failed_at));
+    failed = frames.empty() ? Mark{0, 0, 0} : Mark{frames.back().at, frames.back().line, 0};
+    snprintf(buf, sizeof(buf), "line %u: ", unsigned(failed.line));
     err = buf + msg;
     stop();
     return ERROR;
@@ -550,7 +569,9 @@ bool Runner::call(const std::string &text, std::string &sub, std::string &err)
     size_t length;
     Kind kind;
     uint8_t arg;
-    if (!split_control(text, label, length, kind, arg, err)) return false;
+    if (!split_control(text, label, length, kind, arg, err))
+        return false;
+
     if (kind != CALL) {
         err = "only a call runs from here";
         return false;
@@ -561,21 +582,61 @@ bool Runner::call(const std::string &text, std::string &sub, std::string &err)
     return arguments(text.c_str() + arg, v, n, err) && enter(sub.c_str(), v, n, err);
 }
 
-// leaves the frame on the next line to look at
-bool Runner::control(const Control &c, const std::string &text, std::string &err)
+bool Runner::find(const Mark &from, const char *label, size_t length, unsigned kinds, Mark &out,
+                  std::string &err)
 {
-    const char *rest = text.c_str() + c.arg;
+    Source &src = *program.source;
+    int segment = src.segment_of(from.at);
+    unsigned line = from.line + 1;
+    Blocks blocks;
+    std::string text, e;
+    unsigned next;
+    for (unsigned at = from.next; src.segment_of(at) == segment && src.line_at(at, text, next);
+         at = next, line++) {
+        trim(text);
+        const char *l;
+        size_t n;
+        Kind kind;
+        if (!o_word(text, l, n, kind))
+            continue;
+
+        if (blocks.open.empty() && (kinds & (1u << kind)) && label_equal(l, n, label, length)) {
+            out = Mark{at, line, next};
+            return true;
+        }
+        blocks.take(kind, std::string(l, n), line, at, e);
+    }
+    err = "no end to o" + std::string(label, length);
+    return false;
+}
+
+// leaves the frame on the next line to look at
+bool Runner::control(const Mark &here, const std::string &text, std::string &err)
+{
+    const char *label;
+    size_t length;
+    Kind kind;
+    uint8_t arg;
+    if (!split_control(text, label, length, kind, arg, err))
+        return false;
+
+    const char *rest = text.c_str() + arg;
     Frame &f = frames.back();
     float v[MAX_ARGS];
     unsigned n;
-    const std::vector<Control> &cs = program.controls;
-    switch (c.kind) {
+    Mark end;
+    switch (kind) {
         case SUB: // a definition met in straight-line flow: skip over it
-            jump(program.after(cs[c.match]));
+            if (!find(here, label, length, 1u << ENDSUB, end, err))
+                return false;
+
+            jump_after(end);
             return true;
         case ENDSUB: case RETURN:
             n = 0;
-            if (c.kind == RETURN && !arguments(rest, v, n, err)) return false;
+            if (kind == RETURN && !arguments(rest, v, n, err))
+                return false;
+
             if (n) find_named("_value", GLOBAL)->value = v[0];
             find_named("_value_returned", GLOBAL)->value = n;
             pop();
@@ -589,65 +650,86 @@ bool Runner::control(const Control &c, const std::string &text, std::string &err
             unsigned caller = frames.size() - 1;
             std::string sub;
             if (!call(text, sub, err)) return false;
-            frames[caller].at = program.after(c); // by index: push may reallocate
+            frames[caller].at = here.next; // by index: push may reallocate
+            frames[caller].line = here.line + 1;
             return true;
         }
         case IF: case ELSEIF: case ELSE: {
-            if (c.kind != IF && !f.testing) { // fell out of a taken branch: to the endif
-                const Control *b = &c;
-                while (b->kind != ENDIF) b = &cs[b->match];
-                jump(program.after(*b));
+            if (kind != IF && !f.testing) { // fell out of a taken branch: to the endif
+                if (!find(here, label, length, 1u << ENDIF, end, err))
+                    return false;
+
+                jump_after(end);
                 return true;
             }
-            bool cond = c.kind == ELSE;
-            if (c.kind != ELSE) {
+            bool cond = kind == ELSE;
+            if (kind != ELSE) {
                 if (!arguments(rest, v, n, err)) return false;
                 cond = v[0] != 0;
             }
             f.testing = !cond;
-            jump(cond ? program.after(c) : cs[c.match].offset);
+            if (cond) {
+                jump_after(here);
+                return true;
+            }
+            if (!find(here, label, length, 1u << ELSEIF | 1u << ELSE | 1u << ENDIF, end, err)) {
+                return false;
+            }
+            jump_to(end.at, end.line);
             return true;
         }
         case ENDIF:
             f.testing = false;
-            jump(program.after(c));
+            jump_after(here);
             return true;
-        case WHILE:
-            if (!arguments(rest, v, n, err)) return false;
-            jump(v[0] != 0 ? program.after(c) : program.after(cs[c.match]));
-            return true;
-        case ENDWHILE:
-            jump(cs[c.match].offset); // re-test
-            return true;
-        case REPEAT: {
-            uint16_t index = &c - &cs[0];
-            if (f.repeats.empty() || f.repeats.back().first != index) {
+        case WHILE: case REPEAT: {
+            bool entered = !f.loops.empty() && f.loops.back().at == here.at;
+            if (!entered || kind == WHILE) {
                 if (!arguments(rest, v, n, err)) return false;
-                if (v[0] < 0) {
+                if (kind == REPEAT && v[0] < 0) {
                     err = "negative repeat count";
                     return false;
                 }
-                f.repeats.push_back(std::make_pair(index, uint32_t(v[0])));
             }
-            if (f.repeats.back().second == 0) {
-                f.repeats.pop_back();
-                jump(program.after(cs[c.match]));
-            } else {
-                f.repeats.back().second--;
-                jump(program.after(c));
+            if (!entered) {
+                uint32_t left = kind == REPEAT ? uint32_t(v[0]) : 0;
+                f.loops.push_back(Loop{here.at, here.line, left, std::string(label, length)});
             }
+            bool more = kind == WHILE ? v[0] != 0 : f.loops.back().left > 0;
+            if (more) {
+                if (kind == REPEAT) f.loops.back().left--;
+                jump_after(here);
+                return true;
+            }
+            f.loops.pop_back();
+            unsigned ends = kind == WHILE ? 1u << ENDWHILE : 1u << ENDREPEAT;
+            if (!find(here, label, length, ends, end, err))
+                return false;
+
+            jump_after(end);
             return true;
         }
-        case ENDREPEAT:
-            jump(cs[c.match].offset); // count down
-            return true;
-        case BREAK: case CONTINUE: {
-            // loops nest in index order, so everything opened inside the target loop is above it on the stack
-            while (!f.repeats.empty() && (f.repeats.back().first > c.match || (c.kind == BREAK && f.repeats.back().first == c.match))) {
-                f.repeats.pop_back();
+        case ENDWHILE: case ENDREPEAT: case CONTINUE: case BREAK: {
+            // loops opened inside this one sit above it on the stack
+            auto ours = [&]() {
+                const std::string &l = f.loops.back().label;
+                return label_equal(l.data(), l.size(), label, length);
+            };
+            bool leaving = kind == BREAK || kind == CONTINUE;
+            while (leaving && !f.loops.empty() && !ours()) f.loops.pop_back();
+            if (f.loops.empty() || !ours()) {
+                err = std::string(KEYWORDS[kind]) + " outside its loop";
+                return false;
             }
-            const Control &loop = cs[c.match];
-            jump(c.kind == BREAK ? program.after(cs[loop.match]) : cs[loop.match].offset);
+            if (kind != BREAK) {
+                jump_to(f.loops.back().at, f.loops.back().line);
+                return true;
+            }
+            f.loops.pop_back();
+            if (!find(here, label, length, 1u << ENDWHILE | 1u << ENDREPEAT, end, err)) {
+                return false;
+            }
+            jump_after(end);
             return true;
         }
     }
@@ -750,28 +832,34 @@ Runner::Result Runner::step(std::string &out, std::string &err)
             continue;
         }
         trim(text);
-        if (++silent_steps > MAX_SILENT_STEPS) return fail(err, "script does not progress");
 
         std::string e;
         bool msg = text.size() > 5 && text[0] == '(' && (strncasecmp(text.c_str() + 1, "MSG,", 4) == 0 || strncasecmp(text.c_str() + 1, "DEBUG,", 6) == 0 || strncasecmp(text.c_str() + 1, "PRINT,", 6) == 0);
         if (msg) {
             if (!message(text, out, e)) return fail(err, e);
-            current = at;
-            f.at = next;
+            took(f, at, next);
             silent_steps = 0;
             return MESSAGE;
         }
         if (text.empty() || text[0] == ';') {
-            f.at = next;
-        } else if (const Control *c = program.control_at(at)) {
-            if (!control(*c, text, e)) return fail(err, e);
+            advance(f, next);
+            continue;
+        }
+        bool ctl = is_control(text.c_str());
+        if ((ctl || text[0] == '#') && ++silent_steps > MAX_SILENT_STEPS) {
+            return fail(err, "script does not progress");
+        }
+        if (ctl) {
+            if (!control(Mark{at, f.line, next}, text, e))
+                return fail(err, e);
         } else if (text[0] == '#') {
-            if (!gcode::assign(text.c_str(), store, e)) return fail(err, e);
-            f.at = next;
+            if (!gcode::assign(text.c_str(), store, e))
+                return fail(err, e);
+
+            advance(f, next);
         } else {
             if (!substitute(text, out, e)) return fail(err, e);
-            current = at;
-            f.at = next;
+            took(f, at, next);
             if (out.empty()) continue; // a comment
             silent_steps = 0;
             return LINE;
