@@ -83,11 +83,6 @@ void FileTransfer::download(const std::string& filename, StreamOutput* stream)
 
 void FileTransfer::start_download(const std::string& filename, StreamOutput* stream)
 {
-    if (!THECONVEYOR.is_idle()) {
-        stream->send(Frame::FILE_CAN, "ok\r\n", 4);
-        return;
-    }
-
     this->filename = filename;
     path_md5 = change_to_md5_path(filename);
     path_lz = change_to_lz_path(filename);
