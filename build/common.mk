@@ -358,7 +358,7 @@ $(OUTDIR)/%.o : %.s makefile
 
 # all machine scripts in one blob, each preceded by a "(file: name.ngc)" line the loader uses for SD overrides
 MACROS = $(sort $(wildcard macros/*.ngc))
-$(OUTDIR)/macros.ngc : $(MACROS) makefile
+$(OUTDIR)/macros.ngc : $(MACROS) makefile ../build/macros.sh
 	$(Q) $(MKDIR) $(call convert-slash,$(dir $@)) $(QUIET)
 	$(Q) $(SHELL) ../build/macros.sh $(MACROS) > $@
 
