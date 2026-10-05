@@ -61,7 +61,6 @@ class Player : public Module {
 
         unsigned long calculate_elapsed_secs();
         void sample_runtime();
-        string extract_options(string& args);
 		
         // 2024
         // bool check_cluster(const char *gcode_str, float *x_value, float *y_value, float *distance, float *slope, float *s_value);

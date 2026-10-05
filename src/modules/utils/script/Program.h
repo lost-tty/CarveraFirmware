@@ -17,16 +17,16 @@ public:
     void on_module_loaded() override;
     void kill() override {}
     void cleanup() override;
-    static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
-    SimpleShell::Registered shell_slot;
+    static void list_shell(void *self, const char *name, std::string args, StreamOutput *stream);
+    static void trace_shell(void *self, const char *name, std::string args, StreamOutput *stream);
+    SimpleShell::Registered list_slot, trace_slot;
 
     Macros &macros() { return files; }
-    bool start_job(const std::string &path, bool echo, std::string &err);
+    bool start_job(const std::string &path, std::string &err);
     bool call(const char *sub, const float *args, unsigned nargs, StreamOutput *reply,
               std::string &err);
     bool call_line(const std::string &line, StreamOutput *reply, std::string &err);
     bool set_local(const char *name, float v) { return runner->set_local(name, v); }
-    void set_trace(bool on) { trace= on; }
 
     bool step(SerialMessage &msg);   // true: msg holds a line to dispatch
     void refused(unsigned line);
@@ -70,8 +70,7 @@ private:
     unsigned line= 0;                   // the last job line read
     uint32_t stop_after= 0;             // the queue mark the refused line was written before
     unsigned int stop_line= 0;
-    bool trace= false;                  // echo every sub line with its origin
-    bool echo= false;                   // echo every job line
+    bool trace= false;
     bool nested= false;                 // a sub runs on the job
     bool ending= false;                 // the job is read to its end, the machine finishes it
     bool paused= false;

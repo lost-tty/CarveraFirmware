@@ -25,7 +25,7 @@ void Scripts::on_module_loaded()
 {
     gcode_dispatch.set_script_hook(this);
     SimpleShell::add_command(shell_slot, "macro", &Scripts::shell, this,
-                             "macro list | params | run <sub> [args] | trace on|off");
+                             "macro list | params | run <sub> [args]");
     load();
 }
 
@@ -110,7 +110,6 @@ const SimpleShell::Sub<Scripts> Scripts::SUBS[] = {
     {"list",   &Scripts::sub_list,   "the subs that are defined"},
     {"params", &Scripts::sub_params, "the #<_name> values a script can read"},
     {"run",    &Scripts::sub_run,    "run one sub: run <sub> [args]"},
-    {"trace",  &Scripts::sub_trace,  "echo every executed line: trace on|off"},
     {nullptr, nullptr, nullptr},
 };
 
@@ -146,9 +145,4 @@ void Scripts::sub_run(std::string cmd, StreamOutput *stream)
         stream->printf("error:%s\n", err.c_str());
 
     // ok follows when the script has finished
-}
-
-void Scripts::sub_trace(std::string cmd, StreamOutput *stream)
-{
-    program.set_trace(shift_parameter(cmd) == "on");
 }

@@ -17,11 +17,13 @@ void Program::on_module_loaded()
     library.source= &source;
     library.resolver= &files;
     runner= new script::Runner(library, gcode_dispatch.parameters());
-    SimpleShell::add_command(shell_slot, "list", &Program::shell, this,
+    SimpleShell::add_command(trace_slot, "trace", &Program::trace_shell, this,
+                             "trace on|off - echo every line with its file and number");
+    SimpleShell::add_command(list_slot, "list", &Program::list_shell, this,
                              "list [n] - lines around the one running");
 }
 
-bool Program::start_job(const std::string &path, bool echo_lines, std::string &err)
+bool Program::start_job(const std::string &path, std::string &err)
 {
     script::Source &src= source;
     if(!src.add_job(path)) {
@@ -34,7 +36,6 @@ bool Program::start_job(const std::string &path, bool echo_lines, std::string &e
     }
     name= path;
     line= 0;
-    echo= echo_lines;
     return true;
 }
 
@@ -119,13 +120,10 @@ bool Program::advance(SerialMessage &msg)
         case script::Runner::LINE:
             // a sub's lines belong to the job line that called it
             msg.line= runner->at_main() ? (line= runner->last().line) : line;
-            if(runner->at_main()) {
-                if(echo) printk("%u: %s\n", line, msg.message.c_str());
-            } else if(trace) {
-                char buf[16];
-                snprintf(buf, sizeof(buf), "line %u:", unsigned(runner->last().line));
-                printk("%s> %s\n", source.located(buf, runner->last().offset).c_str(),
-                       msg.message.c_str());
+            if(trace) {
+                script::Runner::Place at= runner->last();
+                printk("%s:%u> %s\n", source.basename(source.segment_of(at.offset)).c_str(),
+                       unsigned(at.line), msg.message.c_str());
             }
             msg.params= &runner->parameters();
             return true;
@@ -277,7 +275,6 @@ void Program::end_job()
     player.job_ended();
     source.remove_job();
     line= 0;
-    echo= false;
     pause_asked= false;
     machine_task.enforce_keepout();
     forget();
@@ -288,7 +285,20 @@ void Program::halt(int reason)
     machine_task.halt(reason, name.empty() ? "script aborted" : name.c_str());
 }
 
-void Program::shell(void *self, const char *, std::string cmd, StreamOutput *stream)
+void Program::trace_shell(void *self, const char *, std::string cmd, StreamOutput *stream)
+{
+    Program *me= static_cast<Program *>(self);
+    std::string on= shift_parameter(cmd);
+    if(on == "on" || on == "off") {
+        me->trace= on == "on";
+    } else if(!on.empty()) {
+        stream->printf("error:trace on|off\r\n");
+        return;
+    }
+    stream->printf("trace %s\r\n", me->trace ? "on" : "off");
+}
+
+void Program::list_shell(void *self, const char *, std::string cmd, StreamOutput *stream)
 {
     Program *me= static_cast<Program *>(self);
     std::string n= shift_parameter(cmd);

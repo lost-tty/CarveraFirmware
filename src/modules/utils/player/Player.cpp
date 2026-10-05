@@ -71,21 +71,6 @@ void Player::sample_runtime()
 }
 
 
-// extract any options found on line, terminates args at the space before the first option (-v)
-// eg this is a file.gcode -v
-//    will return -v and set args to this is a file.gcode
-string Player::extract_options(string& args)
-{
-    string opts;
-    size_t pos= args.find(" -");
-    if(pos != string::npos) {
-        opts= args.substr(pos);
-        args= args.substr(0, pos);
-    }
-
-    return opts;
-}
-
 // only G codes come through here; the M codes are registered
 void Player::on_gcode_received(Gcode *argument)
 {
@@ -136,7 +121,7 @@ void Player::resume_gcode(Gcode *gcode)
 
 // When a new line is received, check if it is a command, and if it is, act upon it
 const Player::Cmd Player::COMMANDS[] = {
-    {"play",     &Player::play_command,     "play file [-v] - play a gcode file"},
+    {"play",     &Player::play_command,     "play file - play a gcode file"},
     {"progress", &Player::progress_command, "progress [-b] - progress of the file being played"},
     {"abort",    &Player::abort_command,    "abort - stop the machine, held or not, and close the file if one is playing"},
     {"suspend",  &Player::suspend_command,  "suspend [h] - suspend the job, h keeps the spindle on"},
@@ -168,10 +153,6 @@ void Player::buffer_command( string parameters, StreamOutput *stream )
 // Play a gcode file by considering each line as if it was received on the serial console
 void Player::play_command( string parameters, StreamOutput *stream )
 {
-
-    // extract any options from the line and terminate the line there
-    string options= extract_options(parameters);
-    // Get filename which is the entire parameter line upto any options found or entire line
     string path = absolute_from_relative(shift_parameter(parameters), stream);
 
     if (program.busy() || program.suspended()) {
@@ -184,10 +165,8 @@ void Player::play_command( string parameters, StreamOutput *stream )
         return;
     }
 
-    // -v echoes every line, to everyone: the stream that asked may be gone by then
-    bool verbose = options.find_first_of("Vv") != string::npos;
     string err;
-    if (!program.start_job(path, verbose, err)) {
+    if (!program.start_job(path, err)) {
         stream->printf("%s\r\n", err.c_str());
         return;
     }

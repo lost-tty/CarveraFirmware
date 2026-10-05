@@ -16,7 +16,6 @@ public:
     void sub_list(std::string args, StreamOutput *stream);
     void sub_params(std::string args, StreamOutput *stream);
     void sub_run(std::string args, StreamOutput *stream);
-    void sub_trace(std::string args, StreamOutput *stream);
     SimpleShell::Registered shell_slot;
     bool trigger(const Gcode &gcode, StreamOutput *stream, std::string &err) override;
     bool call(const std::string &line, StreamOutput *stream, std::string &err) override;
