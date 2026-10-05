@@ -134,15 +134,15 @@ void ThreePointStrategy::report_settings()
 
 bool ThreePointStrategy::handleGcode(Gcode *gcode)
 {
-    if(gcode->has_g) {
+    if(gcode->has_g()) {
         // G code processing
-        if(gcode->g == 29) { // test probe points for level
+        if(gcode->g() == 29) { // test probe points for level
             if(!test_probe_points(gcode)) {
                 printk("Probe failed to complete, probe not triggered or other error\n");
             }
             return true;
 
-        } else if( gcode->g == 31 ) { // report status
+        } else if( gcode->g() == 31 ) { // report status
             if(this->plane == nullptr) {
                  printk("Bed leveling plane is not set\n");
             }else{
@@ -151,7 +151,7 @@ bool ThreePointStrategy::handleGcode(Gcode *gcode)
             printk("Probe is %s\n", zprobe->getProbeStatus() ? "Triggered" : "Not triggered");
             return true;
 
-        } else if( gcode->g == 32 ) { // three point probe
+        } else if( gcode->g() == 32 ) { // three point probe
             // first wait for an empty queue i.e. no moves left
             THECONVEYOR.wait_for_idle();
 

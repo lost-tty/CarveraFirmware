@@ -86,11 +86,11 @@ bool Scripts::trigger(const Gcode &gcode, StreamOutput *stream, std::string &err
     if(program.in_sub())
         return false;
 
-    if(!gcode.has_g && !gcode.has_m) return false;
+    if(!gcode.has_g() && !gcode.has_m()) return false;
     const Trigger *t= nullptr;
     for (const Trigger &e : TRIGGERS) {
-        bool code= (e.letter == 'G') ? (gcode.has_g && gcode.g == e.code) : (gcode.has_m && gcode.m == e.code);
-        if(code && (e.any_subcode || gcode.subcode == 0)) t= &e;
+        bool code= (e.letter == 'G') ? (gcode.has_g() && gcode.g() == e.code) : (gcode.has_m() && gcode.m() == e.code);
+        if(code && (e.any_subcode || gcode.subcode() == 0)) t= &e;
     }
     // not scripted, the C++ handler takes it
     if(t == nullptr || !loaded || program.macros().program().find_sub(t->sub) < 0)
@@ -100,7 +100,7 @@ bool Scripts::trigger(const Gcode &gcode, StreamOutput *stream, std::string &err
     // a canned cycle's sub moves in its own group 1; the program's is put back when the sub ends
     if(t->letter == 'G' && t->code >= 80 && t->code <= 89) program.restore_modal_on_return();
     program.set_local("code", t->code);
-    program.set_local("subcode", gcode.subcode);
+    program.set_local("subcode", gcode.subcode());
     for (const gcode::Word &w : gcode.get_words()) {
         char local[2]= {(char)tolower(w.letter), 0};
         if(w.letter != 'G' && w.letter != 'M') program.set_local(local, w.value);

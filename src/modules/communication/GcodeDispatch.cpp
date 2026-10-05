@@ -95,7 +95,7 @@ Module *GcodeDispatch::handlers = nullptr;
 
 bool GcodeDispatch::run_mcode(Gcode &gcode)
 {
-    const McodeRegistry::Mcode *m= McodeRegistry::find(gcode.m, gcode.subcode);
+    const McodeRegistry::Mcode *m= McodeRegistry::find(gcode.m(), gcode.subcode());
     if(m == nullptr) return false;
 
     uint8_t when= m->when & ~McodeRegistry::MID_JOB;
@@ -120,7 +120,7 @@ bool GcodeDispatch::run_mcode(Gcode &gcode)
 // an empty queue has nothing to wait behind
 void GcodeDispatch::hold_or_run(Gcode &gcode, OnMachine)
 {
-    const McodeRegistry::Mcode *m= McodeRegistry::find(gcode.m, gcode.subcode);
+    const McodeRegistry::Mcode *m= McodeRegistry::find(gcode.m(), gcode.subcode());
     if(m == nullptr) return;
     if(THECONVEYOR.hold_action(m, gcode)) return;
     m->handler(m->owner, &gcode);
@@ -128,7 +128,7 @@ void GcodeDispatch::hold_or_run(Gcode &gcode, OnMachine)
 
 void GcodeDispatch::run_barrier(Gcode &gcode, OnMachine on)
 {
-    const McodeRegistry::Mcode *m= McodeRegistry::find(gcode.m, gcode.subcode);
+    const McodeRegistry::Mcode *m= McodeRegistry::find(gcode.m(), gcode.subcode());
     if(m == nullptr) return;
     if(!THECONVEYOR.wait_for_idle()) return;
     m->handler(m->owner, &gcode);
@@ -510,7 +510,7 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, unsig
         if(c.rank == MOTION) {
             gcode.mcs= blocks[c.block].mcs;
             if(c.index < words.size()) {
-                uint8_t g= gcode.g;
+                uint8_t g= gcode.g();
                 if(g < 4) {
                     modal_motion= g;
                     modal_cycle= 0;
@@ -524,7 +524,7 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, unsig
         }
 
         bool claimed= true;
-        if(gcode.has_m) claimed= run_mcode(gcode);
+        if(gcode.has_m()) claimed= run_mcode(gcode);
         else if(c.index >= words.size()) run_gcode(gcode, 0);
         else run_gcode(gcode, c.rank == MOTION ? 0 : classify(words[c.index]).flags);
 
@@ -537,7 +537,7 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, unsig
 
         if(!claimed) {
             char buf[24];
-            snprintf(buf, sizeof(buf), "unsupported M%u", gcode.m);
+            snprintf(buf, sizeof(buf), "unsupported M%u", gcode.m());
             return fail(buf);
         }
 

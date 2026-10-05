@@ -67,7 +67,7 @@ void TemperatureControlPool::poll(std::vector<struct pad_temperature> &v)
 void TemperatureControlPool::report_temperature(Gcode *gcode)
 {
     for(TemperatureControl *c : controls) {
-        if(c->get_report_mcode() == gcode->m) c->report_temperature(gcode);
+        if(c->get_report_mcode() == gcode->m()) c->report_temperature(gcode);
     }
 }
 

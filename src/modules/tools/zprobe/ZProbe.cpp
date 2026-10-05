@@ -197,7 +197,7 @@ void ZProbe::on_gcode_received(Gcode *argument)
 {
     Gcode *gcode = argument;
 
-    if( gcode->has_g && gcode->g >= 29 && gcode->g <= 32) {
+    if( gcode->has_g() && gcode->g() >= 29 && gcode->g() <= 32) {
 
         invert_probe = false;
         // make sure the probe is defined and not already triggered before moving motors
@@ -214,7 +214,7 @@ void ZProbe::on_gcode_received(Gcode *argument)
             return;
         }
 
-        if( gcode->g == 30 ) { // simple Z probe
+        if( gcode->g() == 30 ) { // simple Z probe
             bool set_z= gcode->has_letter('Z');
             bool probe_result;
             bool reverse= (gcode->has_letter('R') && gcode->get_value('R') != 0); // specify to probe in reverse direction
@@ -242,7 +242,7 @@ void ZProbe::on_gcode_received(Gcode *argument)
                         return;
                     }
                 }
-                printk("No strategy found to handle G%d\n", gcode->g);
+                printk("No strategy found to handle G%d\n", gcode->g());
 
             }else{
                 // P paramater selects which strategy to send the code to
@@ -250,7 +250,7 @@ void ZProbe::on_gcode_received(Gcode *argument)
                 uint16_t i= gcode->get_value('P');
                 if(i < strategies.size()) {
                     if(!strategies[i]->handleGcode(gcode)){
-                        printk("strategy #%d did not handle G%d\n", i, gcode->g);
+                        printk("strategy #%d did not handle G%d\n", i, gcode->g());
                     }
                     return;
 
@@ -260,9 +260,9 @@ void ZProbe::on_gcode_received(Gcode *argument)
             }
         }
 
-    } else if(gcode->has_g && gcode->g == 38 ) { // G38.2 Straight Probe with error, G38.3 straight probe without error
+    } else if(gcode->has_g() && gcode->g() == 38 ) { // G38.2 Straight Probe with error, G38.3 straight probe without error
         // linuxcnc/grbl style probe http://www.linuxcnc.org/docs/2.5/html/gcode/gcode.html#sec:G38-probe
-        if(gcode->subcode < 2 || gcode->subcode > 6) {
+        if(gcode->subcode() < 2 || gcode->subcode() > 6) {
             printk("Error :Only G38.2 to G38.5 are supported\n");
             return;
         }
@@ -273,13 +273,13 @@ void ZProbe::on_gcode_received(Gcode *argument)
             return;
         }
 
-        if (gcode->subcode == 4 || gcode->subcode == 5) {
+        if (gcode->subcode() == 4 || gcode->subcode() == 5) {
             invert_probe = true;
         } else {
             invert_probe = false;
         }
 
-        if (gcode->subcode == 6) {
+        if (gcode->subcode() == 6) {
             calibrate_Z(gcode);
         } else {
             probe_XYZ(gcode);
@@ -362,7 +362,7 @@ void ZProbe::probe_XYZ(Gcode *gcode)
     printk("[PRB:%1.3f,%1.3f,%1.3f:%d]\n", THEROBOT.from_millimeters(pos[X_AXIS]), THEROBOT.from_millimeters(pos[Y_AXIS]), THEROBOT.from_millimeters(pos[Z_AXIS]), probeok);
     THEROBOT.set_last_probe_position(std::make_tuple(pos[X_AXIS], pos[Y_AXIS], pos[Z_AXIS], probeok));
 
-    if(probeok == 0 && (gcode->subcode == 2 || gcode->subcode == 4)) {
+    if(probeok == 0 && (gcode->subcode() == 2 || gcode->subcode() == 4)) {
         // issue error if probe was not triggered and subcode is 2 or 4
         printk("ALARM: Probe fail\n");
         machine_task.halt(PROBE_FAIL, "probe failed");

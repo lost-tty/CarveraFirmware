@@ -20,11 +20,10 @@ using std::string;
 // One command word (G or M) of a line plus all of the line's parameter words.
 class Gcode {
     public:
-        Gcode() : m(0), g(0), line(0), subcode(0), has_m(false), has_g(false),
-            mcs(false) {}
+        Gcode() : line(0), mcs(false) {}
         Gcode(const string& text, unsigned int line = 0);
-        // command is an index into words, or words.size() for a line without G or M
-        Gcode(const gcode::Words& words, size_t command, unsigned int line);
+        // index of the command in words, or words.size() for a line without G or M
+        Gcode(const gcode::Words& words, size_t index, unsigned int line);
 
         bool has_letter(char letter) const { return find(letter) != nullptr; }
         float get_value(char letter) const;
@@ -34,23 +33,21 @@ class Gcode {
         std::map<char,float> get_args() const;
         const gcode::Words& get_words() const { return words; }
 
-        unsigned int m;
-        unsigned int g;
-        unsigned int line;
-        uint8_t subcode;
+        bool has_g() const { return command.letter == 'G'; }
+        bool has_m() const { return command.letter == 'M'; }
+        unsigned g() const { return has_g() ? unsigned(command.value) : 0; }
+        unsigned m() const { return has_m() ? unsigned(command.value) : 0; }
+        uint8_t subcode() const { return command.subcode; }
 
-        struct {
-            bool has_m:1;
-            bool has_g:1;
-            bool mcs:1;                                       // G53: this motion is in machine coordinates
-        };
+        gcode::Word command{};  // the G or M word, letter 0 for a line without one
+        unsigned int line;
+        bool mcs;               // G53: this motion is in machine coordinates
 
         string error_text;
         string text;        // the part of the line that is not g-code
 
     private:
         const gcode::Word* find(char letter) const;
-        void set_command(const gcode::Word& w);
         static bool is_parameter(char letter) { return letter != 'G' && letter != 'M' && letter != 'T'; }
 
         gcode::Words words;

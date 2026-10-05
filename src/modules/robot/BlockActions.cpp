@@ -29,8 +29,8 @@ bool BlockActions::hold(const McodeRegistry::Mcode *code, const Gcode &gcode, ui
     p.code = code;
     p.after_block = after_block;
     p.line = gcode.line;
-    p.number = gcode.m;
-    p.subcode = gcode.subcode;
+    p.number = gcode.m();
+    p.subcode = gcode.subcode();
     p.n_words = 0;
     p.text = -1;
 

@@ -231,21 +231,21 @@ void Switch::load_config(const SwitchConfigT &cfg)
 static bool gcode_matches(uint16_t code, const Gcode *gcode)
 {
     if (code == ConfigTable::GCODE_NONE) return false;
-    if (code & ConfigTable::GCODE_G) return gcode->has_g && gcode->g == (code & ~ConfigTable::GCODE_G);
-    return gcode->has_m && gcode->m == code;
+    if (code & ConfigTable::GCODE_G) return gcode->has_g() && gcode->g() == (code & ~ConfigTable::GCODE_G);
+    return gcode->has_m() && gcode->m() == code;
 }
 
 bool Switch::match_input_on_gcode(const Gcode *gcode) const
 {
     bool b= gcode_matches(on_command, gcode);
 
-    return (b && gcode->subcode == subcode);
+    return (b && gcode->subcode() == subcode);
 }
 
 bool Switch::match_input_off_gcode(const Gcode *gcode) const
 {
     bool b= gcode_matches(off_command, gcode);
-    return (b && gcode->subcode == subcode);
+    return (b && gcode->subcode() == subcode);
 }
 
 void Switch::turn_on_switch(float value)
@@ -341,7 +341,7 @@ void Switch::turn_off_switch()
 void Switch::on_gcode_received(Gcode *argument)
 {
     Gcode *gcode = argument;
-    if(gcode->has_m) return;
+    if(gcode->has_m()) return;
 
     if(match_input_on_gcode(gcode)) on_gcode(gcode);
     else if(match_input_off_gcode(gcode)) off_gcode(gcode);

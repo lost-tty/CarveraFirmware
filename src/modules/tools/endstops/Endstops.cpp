@@ -507,8 +507,8 @@ void Endstops::report_settings(void *self)
 void Endstops::on_gcode_received(Gcode *argument)
 {
     Gcode *gcode = argument;
-    if ( gcode->has_g && gcode->g == 28) {
-        switch(gcode->subcode) {
+    if ( gcode->has_g() && gcode->g() == 28) {
+        switch(gcode->subcode()) {
             case 0: // G28 in grbl mode will do a rapid to the predefined position otherwise it is home command
                 // G28 goes to clearance via the g28 script
                 break;

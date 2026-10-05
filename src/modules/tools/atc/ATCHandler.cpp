@@ -251,7 +251,7 @@ static void halt(int reason, const char *msg)
 // M490: home the clamp, M490.1 clamp, M490.2 loosen
 void ATCHandler::clamp_gcode(Gcode *gcode)
 {
-    switch (gcode->subcode) {
+    switch (gcode->subcode()) {
         case 0: home_clamp(); break;
         case 1: clamp_tool(); break;
         case 2: loose_tool(); break;
@@ -261,7 +261,7 @@ void ATCHandler::clamp_gcode(Gcode *gcode)
 // M492: is the slot occupied (.0 .1 expect a tool, .2 expects none, .4 only reports), M492.3 is the probe alive
 void ATCHandler::detect_gcode(Gcode *gcode)
 {
-    switch (gcode->subcode) {
+    switch (gcode->subcode()) {
         case 0: case 1:
             tool_detected = laser_detect();
             if (!tool_detected) halt(ATC_NO_TOOL, "Tool confliction occured, please check tool rack!");
@@ -282,7 +282,7 @@ void ATCHandler::detect_gcode(Gcode *gcode)
 // M493: measure the tool length, M493.2 T<n> say which tool is in the spindle
 void ATCHandler::tool_gcode(Gcode *gcode)
 {
-    switch (gcode->subcode) {
+    switch (gcode->subcode()) {
         case 0: case 1:
             set_tool_offset();
             break;
@@ -299,7 +299,7 @@ void ATCHandler::tool_gcode(Gcode *gcode)
 // M494: light the probe for two minutes, M494.2 turn it off
 void ATCHandler::probe_laser_gcode(Gcode *gcode)
 {
-    switch (gcode->subcode) {
+    switch (gcode->subcode()) {
         case 0: case 1:
             probe_laser_countdown = 120;
             probe_laser_timer.start();
@@ -313,7 +313,7 @@ void ATCHandler::probe_laser_gcode(Gcode *gcode)
 // M497.<n>: what the status line reports as |A:<n> while a macro runs
 void ATCHandler::state_gcode(Gcode *gcode)
 {
-    atc_state= gcode->subcode;
+    atc_state= gcode->subcode();
 }
 
 float ATCHandler::param_clamp_state(void *c)

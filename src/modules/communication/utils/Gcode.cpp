@@ -10,7 +10,7 @@
 #include <climits>
 
 Gcode::Gcode(const string& text, unsigned int line)
-    : m(0), g(0), line(line), subcode(0), has_m(false), has_g(false), mcs(false)
+    : line(line), mcs(false)
 {
     gcode::Line parsed;
     if (!parsed.parse(text.c_str(), nullptr)) {
@@ -18,28 +18,20 @@ Gcode::Gcode(const string& text, unsigned int line)
         return;
     }
     words = parsed.words();
-    // module-built lines carry a single command, take the first G and the first M
+    // module-built lines carry a single command
     for (const gcode::Word& w : words) {
-        if ((w.letter == 'G' && !has_g) || (w.letter == 'M' && !has_m)) set_command(w);
+        if (w.letter == 'G' || w.letter == 'M') {
+            command = w;
+            break;
+        }
     }
 }
 
-Gcode::Gcode(const gcode::Words& words, size_t command, unsigned int line)
-    : m(0), g(0), line(line), subcode(0), has_m(false), has_g(false), mcs(false), words(words)
+Gcode::Gcode(const gcode::Words& words, size_t index, unsigned int line)
+    : line(line), mcs(false), words(words)
 {
-    if (command < words.size()) set_command(words[command]);
-}
-
-void Gcode::set_command(const gcode::Word& w)
-{
-    if (w.letter == 'G') {
-        has_g = true;
-        g = w.value;
-    } else {
-        has_m = true;
-        m = w.value;
-    }
-    subcode = w.subcode;
+    if (index < words.size())
+        command = words[index];
 }
 
 const gcode::Word* Gcode::find(char letter) const

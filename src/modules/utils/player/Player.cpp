@@ -90,7 +90,7 @@ string Player::extract_options(string& args)
 void Player::on_gcode_received(Gcode *argument)
 {
     Gcode *gcode = argument;
-    if(!gcode->has_g || gcode->g != 28) return;
+    if(!gcode->has_g() || gcode->g() != 28) return;
 
     // homing cancels suspend
     if (program.suspended()) program.resume();
@@ -114,7 +114,7 @@ void Player::optional_stop(Gcode *)
 // M333, M334: whether M1 stops the program
 void Player::optional_stop_mode(Gcode *gcode)
 {
-    m1_stops= gcode->m == 334;
+    m1_stops= gcode->m() == 334;
     printk("turning optional stop mode %s\r\n", m1_stops ? "on" : "off");
 }
 
@@ -309,7 +309,7 @@ bool Player::check_cluster(const char *gcode_str, float *x_value, float *y_value
 	float new_slope = 0.0;
 	bool is_cluster = false;
 	Gcode *gcode = new Gcode(gcode_str, &StreamOutput::NullStream);
-	if (!gcode->has_m && gcode->has_g && gcode->g == 1) {
+	if (!gcode->has_m() && gcode->has_g() && gcode->g() == 1) {
 		*x_value = gcode->get_value('X');
 		*y_value = gcode->get_value('Y');
 		*s_value = gcode->get_value('S');

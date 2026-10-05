@@ -304,7 +304,7 @@ void WifiProvider::query_sta_param(Gcode *gcode)
     };
     const unsigned n= sizeof(params) / sizeof(params[0]);
 
-    if(gcode->subcode >= n) {
+    if(gcode->subcode() >= n) {
         printk("error:M482 takes a subcode 0 to %u\r\n", n - 1);
         return;
     }
@@ -312,16 +312,16 @@ void WifiProvider::query_sta_param(Gcode *gcode)
     u8 value[64]{};
     u8 len= 0;
     u16 status= 0;
-    if(M8266WIFI_SPI_Query_STA_Param(params[gcode->subcode].type, value, &len, &status) == 0) {
+    if(M8266WIFI_SPI_Query_STA_Param(params[gcode->subcode()].type, value, &len, &status) == 0) {
         printk("error:wifi query failed, status %u\r\n", status);
         return;
     }
 
-    const char *name= params[gcode->subcode].name;
-    if(params[gcode->subcode].type == STA_PARAM_TYPE_MAC) {
+    const char *name= params[gcode->subcode()].name;
+    if(params[gcode->subcode()].type == STA_PARAM_TYPE_MAC) {
         printk("%s: %02X:%02X:%02X:%02X:%02X:%02X\r\n",
                               name, value[0], value[1], value[2], value[3], value[4], value[5]);
-    } else if(params[gcode->subcode].type == STA_PARAM_TYPE_CHANNEL) {
+    } else if(params[gcode->subcode()].type == STA_PARAM_TYPE_CHANNEL) {
         printk("%s: %u\r\n", name, value[0]);
     } else {
         value[sizeof(value) - 1]= 0;
@@ -344,7 +344,7 @@ void WifiProvider::query_ap_param(Gcode *gcode)
     };
     const unsigned n= sizeof(params) / sizeof(params[0]);
 
-    if(gcode->subcode >= n) {
+    if(gcode->subcode() >= n) {
         printk("error:M483 takes a subcode 0 to %u\r\n", n - 1);
         return;
     }
@@ -352,13 +352,13 @@ void WifiProvider::query_ap_param(Gcode *gcode)
     u8 value[64]{};
     u8 len= 0;
     u16 status= 0;
-    if(M8266WIFI_SPI_Query_AP_Param(params[gcode->subcode].type, value, &len, &status) == 0) {
+    if(M8266WIFI_SPI_Query_AP_Param(params[gcode->subcode()].type, value, &len, &status) == 0) {
         printk("error:wifi query failed, status %u\r\n", status);
         return;
     }
 
-    AP_PARAM_TYPE type= params[gcode->subcode].type;
-    const char *name= params[gcode->subcode].name;
+    AP_PARAM_TYPE type= params[gcode->subcode()].type;
+    const char *name= params[gcode->subcode()].name;
     if(type == AP_PARAM_TYPE_CHANNEL || type == AP_PARAM_TYPE_AUTHMODE || type == AP_PARAM_TYPE_PHY_MODE) {
         printk("%s: %u\r\n", name, value[0]);
     } else {

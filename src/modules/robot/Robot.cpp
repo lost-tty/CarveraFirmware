@@ -708,8 +708,8 @@ void Robot::on_gcode_received(Gcode *argument)
 
     enum MOTION_MODE_T motion_mode= NONE;
 
-    if( gcode->has_g) {
-        switch( gcode->g ) {
+    if( gcode->has_g()) {
+        switch( gcode->g() ) {
             case 0:  motion_mode = SEEK;    break;
             case 1:  motion_mode = LINEAR;  break;
             case 2:  motion_mode = CW_ARC;  break;
@@ -786,9 +786,9 @@ void Robot::on_gcode_received(Gcode *argument)
 
             case 54: case 55: case 56: case 57: case 58: case 59:
                 // select WCS 0-8: G54..G59, G59.1, G59.2, G59.3
-                current_wcs = gcode->g - 54;
-                if(gcode->g == 59 && gcode->subcode > 0) {
-                    current_wcs += gcode->subcode;
+                current_wcs = gcode->g() - 54;
+                if(gcode->g() == 59 && gcode->subcode() > 0) {
+                    current_wcs += gcode->subcode();
                     if(current_wcs >= MAX_WCS) current_wcs = MAX_WCS - 1;
                 }
                 break;
@@ -824,15 +824,15 @@ void Robot::on_gcode_received(Gcode *argument)
                 }
                 break;
 
-            case 90: if(gcode->subcode == 0) this->absolute_mode = true; else if(gcode->subcode == 1) this->absolute_arc_centre = true; break;
-            case 91: if(gcode->subcode == 0) this->absolute_mode = false; else if(gcode->subcode == 1) this->absolute_arc_centre = false; break;
+            case 90: if(gcode->subcode() == 0) this->absolute_mode = true; else if(gcode->subcode() == 1) this->absolute_arc_centre = true; break;
+            case 91: if(gcode->subcode() == 0) this->absolute_mode = false; else if(gcode->subcode() == 1) this->absolute_arc_centre = false; break;
 
             case 92: {
-                if(gcode->subcode == 1 || gcode->subcode == 2 || gcode->get_num_args() == 0) {
+                if(gcode->subcode() == 1 || gcode->subcode() == 2 || gcode->get_num_args() == 0) {
                     // reset G92 offsets to 0
                     g92_offset = wcs_t(0, 0, 0);
 
-                } else if (gcode->subcode == 4) {
+                } else if (gcode->subcode() == 4) {
                     // G92.4 is a smoothie special it sets manual homing for X,Y,Z
                     // do a manual homing based on given coordinates, no endstops required
                     if(gcode->has_letter('X')){ THEROBOT.reset_axis_position(gcode->get_value('X'), X_AXIS); }
@@ -869,7 +869,7 @@ void Robot::on_gcode_received(Gcode *argument)
                     	}
                     }
 
-                } else if (gcode->subcode == 3) {
+                } else if (gcode->subcode() == 3) {
                     // initialize G92 to the specified values, only used for saving it with M500
                     float x= 0, y= 0, z= 0;
                     if(gcode->has_letter('X')) x= gcode->get_value('X');
@@ -877,7 +877,7 @@ void Robot::on_gcode_received(Gcode *argument)
                     if(gcode->has_letter('Z')) z= gcode->get_value('Z');
                     g92_offset = wcs_t(x, y, z);
 
-                } else if (gcode->subcode == 5) {
+                } else if (gcode->subcode() == 5) {
                     // set laser mode offset
                 	setLaserOffset();
                 } else {
@@ -888,7 +888,7 @@ void Robot::on_gcode_received(Gcode *argument)
                 }
 
                 #if MAX_ROBOT_ACTUATORS > 3
-                if(gcode->subcode == 0 && gcode->get_num_args() > 0) {
+                if(gcode->subcode() == 0 && gcode->get_num_args() > 0) {
                     for (int i = A_AXIS; i < n_motors; i++) {
                         // ABC just need to set machine_position and compensated_machine_position if specified
                         char axis= 'A'+i-3;
@@ -934,7 +934,7 @@ void Robot::motors_on(Gcode *gcode)
 // M18 with axis letters disables those motors, M18 alone and M84 disable all of them
 void Robot::motors_off(Gcode *gcode)
 {
-    if(gcode->m == 18 && gcode->get_num_args() > 0) {
+    if(gcode->m() == 18 && gcode->get_num_args() > 0) {
         uint32_t bm= 0;
         for (int i = 0; i < n_motors; ++i) {
             char axis= (i <= Z_AXIS ? 'X'+i : 'A'+(i-3));
@@ -967,9 +967,9 @@ void Robot::steps_per_mm(Gcode *gcode)
 void Robot::report_position(Gcode *gcode)
 {
     static const char *tags[]{"C", "WCS", "MCS", "APOS", "MP", "CMP"};
-    if(gcode->subcode > COMPENSATED) return;
+    if(gcode->subcode() > COMPENSATED) return;
     char buf[80];
-    format_position((position_source)gcode->subcode, tags[gcode->subcode], buf, sizeof(buf));
+    format_position((position_source)gcode->subcode(), tags[gcode->subcode()], buf, sizeof(buf));
     printk("%s\n", buf);
 }
 
@@ -978,9 +978,9 @@ void Robot::max_feedrates(Gcode *gcode)
 {
     if(gcode->get_num_args() == 0) {
         for (size_t i = X_AXIS; i <= Z_AXIS; i++) {
-            printk(" %c: %g ", 'X' + i, gcode->subcode == 0 ? this->max_speeds[i] : actuators[i]->get_max_rate());
+            printk(" %c: %g ", 'X' + i, gcode->subcode() == 0 ? this->max_speeds[i] : actuators[i]->get_max_rate());
         }
-        if(gcode->subcode == 1) {
+        if(gcode->subcode() == 1) {
             for (size_t i = A_AXIS; i < n_motors; i++) {
                 printk(" %c: %g ", 'A' + i - A_AXIS, actuators[i]->get_max_rate());
             }
@@ -995,12 +995,12 @@ void Robot::max_feedrates(Gcode *gcode)
     for (size_t i = X_AXIS; i <= Z_AXIS; i++) {
         if (gcode->has_letter('X' + i)) {
             float v= gcode->get_value('X'+i);
-            if(gcode->subcode == 0) this->max_speeds[i]= v;
-            else if(gcode->subcode == 1) actuators[i]->set_max_rate(v);
+            if(gcode->subcode() == 0) this->max_speeds[i]= v;
+            else if(gcode->subcode() == 1) actuators[i]->set_max_rate(v);
         }
     }
 
-    if(gcode->subcode == 1) {
+    if(gcode->subcode() == 1) {
         // ABC axis only handle actuator max speeds
         for (size_t i = A_AXIS; i < n_motors; i++) {
             int c= 'A' + i - A_AXIS;
@@ -1015,7 +1015,7 @@ void Robot::max_feedrates(Gcode *gcode)
     }
 
     // this format is deprecated
-    if(gcode->subcode == 0 && (gcode->has_letter('A') || gcode->has_letter('B') || gcode->has_letter('C'))) {
+    if(gcode->subcode() == 0 && (gcode->has_letter('A') || gcode->has_letter('B') || gcode->has_letter('C'))) {
         printk("NOTE this format is deprecated, Use M203.1 instead\n");
         for (size_t i = X_AXIS; i <= Z_AXIS; i++) {
             if (gcode->has_letter('A' + i)) {
@@ -1025,7 +1025,7 @@ void Robot::max_feedrates(Gcode *gcode)
         }
     }
 
-    if(gcode->subcode == 1) check_max_actuator_speeds();
+    if(gcode->subcode() == 1) check_max_actuator_speeds();
 }
 
 // M204 Snnn the default acceleration, axis letters set one axis each
@@ -1120,7 +1120,7 @@ void Robot::speed_override(Gcode *gcode)
 // M331, M332: the vacuum follows the spindle, or it does not
 void Robot::vacuum_mode(Gcode *gcode)
 {
-    bool on= gcode->m == 331;
+    bool on= gcode->m() == 331;
     THEKERNEL->set_vacuum_mode(on);
 
     struct spindle_status ss;

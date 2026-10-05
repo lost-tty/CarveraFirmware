@@ -376,7 +376,7 @@ void CartGridStrategy::clear_bed(Gcode *gcode)
 // M374: save the grid, M374.1: delete the saved one
 void CartGridStrategy::save_grid_gcode(Gcode *gcode)
 {
-    if(gcode->subcode == 1) {
+    if(gcode->subcode() == 1) {
         // we use a different file format depending on whether it is square or not
         const char *filename= (this->new_file_format) ? GRIDFILE_NM : GRIDFILE;
         remove(filename);
@@ -392,7 +392,7 @@ void CartGridStrategy::save_grid_gcode(Gcode *gcode)
 // M375: load the grid, M375.1: show it
 void CartGridStrategy::load_grid_gcode(Gcode *gcode)
 {
-    if(gcode->subcode == 1) print_bed_level();
+    if(gcode->subcode() == 1) print_bed_level();
     else if(load_grid()) setAdjustFunction(true);
 }
 
@@ -407,8 +407,8 @@ void CartGridStrategy::set_probe_offsets(Gcode *gcode)
 
 bool CartGridStrategy::handleGcode(Gcode *gcode)
 {
-    if(gcode->has_g) {
-        if(gcode->g == 31 || gcode->g == 32) { // do a grid probe
+    if(gcode->has_g()) {
+        if(gcode->g() == 31 || gcode->g() == 32) { // do a grid probe
             // first wait for an empty queue i.e. no moves left
             THECONVEYOR.wait_for_idle();
 
@@ -425,7 +425,7 @@ bool CartGridStrategy::handleGcode(Gcode *gcode)
 
             return true;
 
-        }else if(gcode->g == 29) {
+        }else if(gcode->g() == 29) {
             // first wait for an empty queue i.e. no moves left
             THECONVEYOR.wait_for_idle();
 

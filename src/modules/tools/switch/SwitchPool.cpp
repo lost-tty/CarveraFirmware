@@ -123,9 +123,9 @@ bool SwitchPool::set_state(uint16_t name, bool on, float value)
 void SwitchPool::run_switch_gcode(Gcode *gcode)
 {
     for(Switch *s : switches) {
-        if(s->get_subcode() != gcode->subcode) continue;
-        if(s->get_on_mcode() == gcode->m) s->on_gcode(gcode);
-        else if(s->get_off_mcode() == gcode->m) s->off_gcode(gcode);
+        if(s->get_subcode() != gcode->subcode()) continue;
+        if(s->get_on_mcode() == gcode->m()) s->on_gcode(gcode);
+        else if(s->get_off_mcode() == gcode->m()) s->off_gcode(gcode);
     }
 }
 
