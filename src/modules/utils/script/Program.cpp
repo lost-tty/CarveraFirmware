@@ -126,14 +126,61 @@ bool Program::step(SerialMessage &msg)
     return false;
 }
 
-// in a sub: the last job line that ran
 unsigned Program::played_line()
 {
-    uint32_t at= machine_task.where().mark;
-    if(at != 0 && script::Source::segment(at) == 0)
-        played= at;
+    uint32_t at[script::Runner::MAX_DEPTH];
+    unsigned n= chain(machine_task.where().mark, at);
+    if(at[n - 1] != 0)
+        played= at[n - 1];
 
     return played;
+}
+
+unsigned Program::chain(uint32_t mark, uint32_t *out) const
+{
+    unsigned n= 0;
+    out[n++]= mark;
+    while(n < script::Runner::MAX_DEPTH && call_of(out[n - 1]) != 0) {
+        out[n]= calls[call_of(out[n - 1]) % CALLS].from;
+        n++;
+    }
+    return n;
+}
+
+int Program::file_of(uint32_t at) const
+{
+    int segment= call_of(at) == 0 ? source.job() : calls[call_of(at) % CALLS].segment;
+    return at != 0 && segment >= 0 && unsigned(segment) < source.segments.size() ? segment : -1;
+}
+
+std::string Program::file_line(int segment, unsigned line) const
+{
+    if(segment < 0)
+        return "";
+
+    char buf[16];
+    snprintf(buf, sizeof(buf), ":%u", line);
+    return source.basename(segment) + buf;
+}
+
+std::string Program::place(uint32_t at) const
+{
+    return file_line(file_of(at), line_of(at));
+}
+
+void Program::note_calls()
+{
+    for (unsigned level= 0; level < runner->depth(); level++) {
+        uint32_t entered= runner->entered(level);
+        Call &c= calls[entered % CALLS];
+        if(entered == 0 || c.entered == entered)
+            continue;
+
+        c.entered= entered;
+        c.segment= source.segment_of(runner->origin(level));
+        // the caller's next line follows its call
+        c.from= level > 0 ? mark_of(level - 1, runner->next_line(level - 1) - 1) : 0;
+    }
 }
 
 void Program::refused(uint32_t at)
@@ -150,7 +197,7 @@ void Program::refused(uint32_t at)
 
 void Program::stop_at(uint32_t at)
 {
-    std::string p= source.place(at);
+    std::string p= place(at);
     printk("job stopped at %s\n", p.empty() ? "a console line" : p.c_str());
     stop();
 }
@@ -170,11 +217,13 @@ bool Program::advance(SerialMessage &msg)
     }
 
     std::string err;
-    switch(runner->step(msg.message, err)) {
+    script::Runner::Result result= runner->step(msg.message, err);
+    note_calls();
+    switch(result) {
         case script::Runner::LINE: {
-            msg.mark= runner->mark();
+            msg.mark= mark_of(runner->depth() - 1, runner->last().line);
             if(trace)
-                printk("%s> %s\n", source.place(msg.mark).c_str(), msg.message.c_str());
+                printk("%s> %s\n", place(msg.mark).c_str(), msg.message.c_str());
 
             msg.params= &runner->parameters();
             return true;
@@ -199,7 +248,8 @@ bool Program::advance(SerialMessage &msg)
             return false;
         }
         case script::Runner::ERROR: {
-            std::string where= source.place(runner->mark()) + ": " + err;
+            std::string where= file_line(source.segment_of(runner->last().offset),
+                                         runner->last().line) + ": " + err;
             finish();
             printk("error:script %s %s\n", name.c_str(), where.c_str());
             halt(SCRIPT);
@@ -355,16 +405,15 @@ void Program::list_shell(void *self, const char *, std::string cmd, StreamOutput
         return;
     }
 
-    script::Source &src= me->source;
-    if(me->playing()) {
-        stream->printf("%s:\r\n", me->job_name());
-        me->list(stream, src.job(), me->played_line(), around);
-    }
-    uint32_t at= machine_task.where().mark;
-    unsigned segment= script::Source::segment(at);
-    if(segment != 0 && segment < src.segments.size()) {
-        stream->printf("%s:\r\n", src.basename(segment).c_str());
-        me->list(stream, segment, script::Source::line(at), around);
+    uint32_t at[script::Runner::MAX_DEPTH];
+    unsigned levels= me->chain(machine_task.where().mark, at);
+    while(levels-- > 0) {
+        int segment= me->file_of(at[levels]);
+        if(segment < 0)
+            continue;
+
+        stream->printf("%s:\r\n", me->source.basename(segment).c_str());
+        me->list(stream, segment, line_of(at[levels]), around);
     }
 }
 

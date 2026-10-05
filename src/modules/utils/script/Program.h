@@ -36,6 +36,7 @@ public:
 
     bool step(SerialMessage &msg);   // true: msg holds a line to dispatch
     unsigned played_line();          // the job line the machine has reached
+    std::string place(uint32_t mark) const;   // "file.ngc:12", empty for none
     void refused(uint32_t mark);
     bool yields() const { return !in_sub(); }
     bool takes_console() const { return !playing() || paused; }
@@ -64,6 +65,16 @@ private:
     bool frozen() const { return paused && !in_sub(); }
     void finish();
     void stop_at(uint32_t at);
+    void note_calls();
+    unsigned chain(uint32_t mark, uint32_t *out) const;   // the mark and its callers up to the job
+    static unsigned call_of(uint32_t mark) { return mark >> 24; }
+    static unsigned line_of(uint32_t mark) { return mark & 0xFFFFFF; }
+    uint32_t mark_of(unsigned level, unsigned line) const
+    {
+        return (runner->entered(level) & 0xFF) << 24 | line;
+    }
+    int file_of(uint32_t mark) const;
+    std::string file_line(int segment, unsigned line) const;
     void forget();
     void end_job();
     void halt(int reason);
@@ -76,6 +87,14 @@ private:
     StreamOutput *reply= nullptr;       // caller waiting for ok/error
     std::string name;                   // what runs, for messages
     unsigned played= 0;
+    // the calls by number, a mark's top byte; 0 is the job
+    struct Call {
+        uint32_t entered;   // the runner's number for it
+        int8_t segment;
+        uint32_t from;      // mark of the calling line, 0: the console
+    };
+    static const unsigned CALLS = 32;   // more than the motion queue can hold at once
+    Call calls[CALLS];
     uint32_t stop_after= 0;             // the queue mark the refused line was written before
     uint32_t stop_mark= 0;
     bool trace= false;

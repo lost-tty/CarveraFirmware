@@ -348,16 +348,6 @@ int main() {
         CHECK(r.step(line, err) == script::Runner::RETURNED && r.at_main());
         CHECK(r.step(line, err) == script::Runner::LINE && line == "G1");
     }
-    {
-        script::Source src;
-        add(src, "job", "G0\nG1\nG2\n", true);
-        add(src, "sub", "o<s> sub\nG3\no<s> endsub\n");
-        uint32_t job2 = src.mark(src.segments[0].base + 3, 2);
-        uint32_t sub2 = src.mark(src.segments[1].base + 9, 2);
-        CHECK(job2 == 2 && src.place(job2) == "script_test_job:2");
-        CHECK(script::Source::segment(sub2) == 1 && script::Source::line(sub2) == 2);
-        CHECK(src.place(sub2) == "script_test_sub:2" && src.place(0).empty());
-    }
     printf(failures ? "%d failures\n" : "all passed\n", failures);
     return failures != 0;
 }

@@ -77,22 +77,6 @@ std::string Source::located(const std::string &err, unsigned offset) const
     return basename(segment) + buf + err.substr(err.find(':') + 1);
 }
 
-uint32_t Source::mark(unsigned offset, unsigned line) const
-{
-    int i = segment_of(offset);
-    return i < 0 ? 0 : uint32_t(i) << 24 | line;
-}
-
-std::string Source::place(uint32_t mark) const
-{
-    if (mark == 0 || segment(mark) >= segments.size())
-        return "";
-
-    char buf[16];
-    snprintf(buf, sizeof(buf), ":%u", line(mark));
-    return basename(segment(mark)) + buf;
-}
-
 void Source::release()
 {
     if (fd != nullptr) fclose(fd);
@@ -603,6 +587,14 @@ bool Runner::push(int sub, const float *args, unsigned nargs, std::string &err)
     Frame &f = frames.back();
     f.at = sub < 0 ? 0 : library.source->next(library.subs[sub].offset);
     f.line = sub < 0 ? 1 : library.subs[sub].line + 1;
+    f.origin = sub < 0 ? 0 : library.subs[sub].offset;
+    f.entered = 0;
+    if (sub >= 0) {
+        if (++last_entered % 256 == 0)
+            ++last_entered;
+
+        f.entered = last_entered;
+    }
     f.base = this->args.size();
     f.testing = false;
     f.main = sub < 0;
@@ -643,7 +635,7 @@ bool Runner::start_main(unsigned offset, std::string &err)
     if (!push(-1, nullptr, 0, err))
         return false;
 
-    frames[0].at = main_start = offset;
+    frames[0].at = frames[0].origin = main_start = offset;
     return true;
 }
 

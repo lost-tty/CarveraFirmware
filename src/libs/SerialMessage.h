@@ -10,7 +10,7 @@ namespace gcode { class ParamStore; }
 struct SerialMessage {
         StreamOutput* stream;
         std::string message;
-        uint32_t mark;                     // script::Source::mark, 0 for none
+        uint32_t mark;                     // call << 24 | line, see Program; 0 for none
         const gcode::ParamStore *params;   // to evaluate with; null: the machine's
 };
 #endif
