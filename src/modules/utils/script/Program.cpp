@@ -121,7 +121,7 @@ bool Program::advance(SerialMessage &msg)
                 if(echo) printk("%u: %s\n", line, msg.message.c_str());
             } else if(trace) {
                 char buf[16];
-                snprintf(buf, sizeof(buf), "line %u:", runner->last().line);
+                snprintf(buf, sizeof(buf), "line %u:", unsigned(runner->last().line));
                 printk("%s> %s\n", library.located(buf, runner->last().offset).c_str(),
                        msg.message.c_str());
             }
