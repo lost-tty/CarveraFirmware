@@ -20,24 +20,6 @@
 #include "Program.h"
 
 
-// G/M codes a script may take over, by defining the sub in the machine script
-struct Trigger { char letter; uint16_t code; bool any_subcode; const char *sub; };
-static const Trigger TRIGGERS[]= {
-    {'M',   6, true,  "tool_change"},
-    {'M', 321, false, "laser_on"},
-    {'M', 322, false, "laser_off"},
-    {'M', 491, true,  "calibrate"},
-    {'M', 495, true,  "auto_work"},
-    {'M', 496, true,  "goto"},
-    {'G',  28, false, "g28"},
-    {'G',  80, false, "drill_cancel"},
-    {'G',  81, false, "drill"},
-    {'G',  82, false, "drill"},
-    {'G',  83, false, "drill"},
-    {'G',  98, false, "drill_retract_z"},
-    {'G',  99, false, "drill_retract_r"},
-};
-
 void Scripts::on_module_loaded()
 {
     gcode_dispatch.set_script_hook(this);
@@ -77,8 +59,9 @@ bool Scripts::run(const char *sub, const float *args, unsigned nargs, StreamOutp
     return program.call(sub, args, nargs, stream, err);
 }
 
-// M6 T3 -> o<tool_change> with #<t> = 3 and #<subcode> = 0; every word of the block becomes a #<letter>.
-// The sub is only pushed here, its first line runs on the next main loop; stream gets the ok when it is done.
+// M6 T3 -> o<m6> with #<t> = 3, G28.2 -> o<g28.2>: every word of the block becomes a #<letter>.
+// A code without a sub stays with its C++ handler. The sub is only pushed here, its first line runs
+// on the next main loop; stream gets the ok when it is done.
 bool Scripts::trigger(const Gcode &gcode, StreamOutput *stream, std::string &err)
 {
     // while a sub runs, only its own lines reach the dispatcher: they keep the codes' built-in
@@ -86,19 +69,21 @@ bool Scripts::trigger(const Gcode &gcode, StreamOutput *stream, std::string &err
     if(program.in_sub())
         return false;
 
-    if(!gcode.has_g() && !gcode.has_m()) return false;
-    const Trigger *t= nullptr;
-    for (const Trigger &e : TRIGGERS) {
-        bool code= (e.letter == 'G') ? (gcode.has_g() && gcode.g() == e.code) : (gcode.has_m() && gcode.m() == e.code);
-        if(code && (e.any_subcode || gcode.subcode() == 0)) t= &e;
-    }
-    // not scripted, the C++ handler takes it
-    if(t == nullptr || !loaded || program.macros().program().find_sub(t->sub) < 0)
+    const gcode::Word &c= gcode.command;
+    if(!loaded || c.letter == 0)
         return false;
 
-    if(!run(t->sub, nullptr, 0, stream, err)) return true;
-    program.set_local("code", t->code);
-    program.set_local("subcode", gcode.subcode());
+    char sub[16];
+    int n= snprintf(sub, sizeof(sub), "%c%u", c.letter, unsigned(c.value));
+    if(c.subcode != 0)
+        snprintf(sub + n, sizeof(sub) - n, ".%u", c.subcode);
+
+    if(program.macros().program().find_sub(sub) < 0)
+        return false;
+
+    if(!program.call(sub, nullptr, 0, stream, err))
+        return true;
+
     for (const gcode::Word &w : gcode.get_words()) {
         char local[2]= {(char)tolower(w.letter), 0};
         if(w.letter != 'G' && w.letter != 'M') program.set_local(local, w.value);

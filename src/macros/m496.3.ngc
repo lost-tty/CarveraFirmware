@@ -1,0 +1,5 @@
+(M496.3 goes to anchor 1)
+o<m496.3> sub
+  G53 G0 Z#<_clearance_z>
+  G53 G0 X#<_anchor1_x> Y#<_anchor1_y>
+o<m496.3> endsub

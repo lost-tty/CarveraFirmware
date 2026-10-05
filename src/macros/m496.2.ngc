@@ -1,0 +1,5 @@
+(M496.2 goes to the work origin)
+o<m496.2> sub
+  G53 G0 Z#<_clearance_z>
+  G90 G0 X0 Y0
+o<m496.2> endsub

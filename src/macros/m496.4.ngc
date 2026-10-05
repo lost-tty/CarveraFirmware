@@ -1,0 +1,5 @@
+(M496.4 goes to anchor 2)
+o<m496.4> sub
+  G53 G0 Z#<_clearance_z>
+  G53 G0 X[#<_anchor1_x> + #<_anchor2_offset_x>] Y[#<_anchor1_y> + #<_anchor2_offset_y>]
+o<m496.4> endsub

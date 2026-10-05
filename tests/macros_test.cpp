@@ -44,7 +44,7 @@ int main(int argc, char **argv) {
         CHECK(m.load(embedded.c_str(), nullptr, r, err));
         CHECK(err.empty());
         CHECK(r.embedded == files && r.replaced == 0 && r.added == 0 && r.fallback.empty());
-        CHECK(m.program().find_sub("tool_change") >= 0 && m.program().find_sub("atc_change") >= 0);
+        CHECK(m.program().find_sub("m6") >= 0 && m.program().find_sub("atc_change") >= 0);
         int sub = m.program().find_sub("atc_change");
         unsigned at = m.program().subs[sub].offset;
         CHECK(m.file(at) == "atc_change.ngc");                       // the first embedded file, alphabetically
@@ -93,7 +93,7 @@ int main(int argc, char **argv) {
         CHECK(r.fallback.empty() && r.added == 2); // with extra.ngc from above
         int huge = m.program().find_sub("huge");
         CHECK(huge >= 0 && m.program().subs[huge].line == 70001);
-        CHECK(m.program().find_sub("tool_change") >= 0);
+        CHECK(m.program().find_sub("m6") >= 0);
         remove((dir + "huge.ngc").c_str());
     }
     remove((dir + "g28.ngc").c_str()); remove((dir + "extra.ngc").c_str()); remove((dir + "notes.txt").c_str());

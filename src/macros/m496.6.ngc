@@ -1,0 +1,7 @@
+(M496.6 X Y goes to a machine position)
+o<m496.6> sub
+  G53 G0 Z#<_clearance_z>
+  o1 if [EXISTS[#<x>] AND EXISTS[#<y>]]
+    G53 G0 X#<x> Y#<y>
+  o1 endif
+o<m496.6> endsub

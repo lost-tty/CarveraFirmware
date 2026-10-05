@@ -1,4 +1,0 @@
-(G98)
-o<drill_retract_z> sub
-  #<_drill_to_r> = 0
-o<drill_retract_z> endsub

@@ -1,7 +1,7 @@
 (G80: lift clear before ordinary motion resumes)
-o<drill_cancel> sub
+o<g80> sub
   o1 if [EXISTS[#<_drill_on>] EQ 0]
-    o<drill_cancel> return
+    o<g80> return
   o1 endif
   o2 if [#<_drill_on> NE 0]
     G0 Z#<_cycle_initial>
@@ -12,4 +12,4 @@ o<drill_cancel> sub
     #<_drill_q> = 0
     #<_drill_p> = 0
   o2 endif
-o<drill_cancel> endsub
+o<g80> endsub

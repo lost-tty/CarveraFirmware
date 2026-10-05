@@ -3,10 +3,10 @@
 One O-word sub per file, compiled into the firmware. Copy a file to `/sd/macros/` to replace that sub, add a
 file to add a sub. `macro check` reloads and validates, `macro list` shows the subs, `macro params` the `#<_name>` values, `macro run <sub> [args]`
 runs one, `macro trace on` echoes every executed line, `list [n]` shows the lines around the one running. `(MSG, text)` prints text, `(DEBUG, text)` prints it with
-`#n` and `#<name>` replaced by their values. The firmware calls `tool_change` for M6, `calibrate` for M491, `auto_work` for M495, `goto` for M496,
-`g28` for G28, `laser_on`/`laser_off` for M321/M322; the words of the block arrive as `#<t>`, `#<x>`, ... and the
-subcode as `#<subcode>`, the triggering code as `#<code>`. `call` and `macro run` pass `#1..#30`. A sub that is not defined leaves the code to its
-C++ handler. Numbers are mm, machine coordinates unless G90 is used.
+`#n` and `#<name>` replaced by their values. A sub named after a G or M code takes that code over: `m6` runs for M6,
+`m496.3` for M496.3, `g28` for G28 but not for G28.2. The words of the block arrive as `#<t>`, `#<x>`, ... A code
+without a sub stays with its C++ handler. `call` and `macro run` pass `#1..#30`. Numbers are mm, machine
+coordinates unless G90 is used.
 
 A sub sets the modal state it needs and puts it back before `endsub`: a `G91` retract that ends without a
 `G90` carries on into the caller's next absolute move. Started on its own (`macro run`, boot) there is

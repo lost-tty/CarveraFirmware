@@ -1,0 +1,12 @@
+(M495.3 [D] [H] probes the corner)
+o<m495.3> sub
+  #<dia> = 3.175
+  #<hgt> = 9
+  o1 if [EXISTS[#<d>]]
+    #<dia> = #<d>
+  o1 endif
+  o2 if [EXISTS[#<h>]]
+    #<hgt> = #<h>
+  o2 endif
+  o<xyz_probe> call [#<dia>] [#<hgt>]
+o<m495.3> endsub

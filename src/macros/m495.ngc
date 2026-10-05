@@ -1,22 +1,10 @@
-(M495 X Y [C D margin] [O [F] z probe] [A B I J H leveling] [P go to origin]; M495.3 [D] [H] corner probe)
-o<auto_work> sub
-  o1 if [#<subcode> EQ 3]
-    #<dia> = 3.175
-    #<hgt> = 9
-    o2 if [EXISTS[#<d>]]
-      #<dia> = #<d>
-    o2 endif
-    o3 if [EXISTS[#<h>]]
-      #<hgt> = #<h>
-    o3 endif
-    o<xyz_probe> call [#<dia>] [#<hgt>]
-    o<auto_work> return
-  o1 endif
+(M495 X Y [C D margin] [O [F] z probe] [A B I J H leveling] [P go to origin])
+o<m495> sub
   o4 if [[EXISTS[#<x>] AND EXISTS[#<y>]] EQ 0]
-    o<auto_work> return
+    o<m495> return
   o4 endif
   o5 if [#<_laser_mode> NE 0]
-    o<auto_work> return
+    o<m495> return
   o5 endif
   #<margin> = [EXISTS[#<c>] AND EXISTS[#<d>]]
   #<zprobe> = EXISTS[#<o>]
@@ -48,4 +36,4 @@ o<auto_work> sub
     G53 G0 Z#<_clearance_z>
     G90 G0 X#<x> Y#<y>
   o13 endif
-o<auto_work> endsub
+o<m495> endsub

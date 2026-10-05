@@ -1,0 +1,25 @@
+(G83: G81 pecking down Q at a time)
+o<g83> sub
+  o1 if [EXISTS[#<z>]]
+    #<_drill_z> = #<z>
+  o1 endif
+  o2 if [EXISTS[#<r>]]
+    #<_drill_r> = #<r>
+  o2 endif
+  o3 if [EXISTS[#<f>]]
+    #<_drill_f> = #<f>
+  o3 endif
+  #<_drill_xy> = 0
+  o4 if [EXISTS[#<x>]]
+    #<_drill_x> = #<x>
+    #<_drill_xy> = 1
+  o4 endif
+  o5 if [EXISTS[#<y>]]
+    #<_drill_y> = #<y>
+    #<_drill_xy> = [#<_drill_xy> + 2]
+  o5 endif
+  o6 if [EXISTS[#<q>]]
+    #<_drill_q> = #<q>
+  o6 endif
+  o<drill> call [83]
+o<g83> endsub

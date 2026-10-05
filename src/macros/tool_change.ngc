@@ -1,4 +1,0 @@
-(M6 T<n>)
-o<tool_change> sub
-  o<atc_change> call [#<t>]
-o<tool_change> endsub

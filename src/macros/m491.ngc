@@ -1,0 +1,8 @@
+(M491 measures the tool)
+o<m491> sub
+  #<sx> = #5021
+  #<sy> = #5022
+  o<calibrate_at> call [#<_clearance_z>] [#<_active_tool> EQ 0]
+  G53 G0 Z#<_clearance_z>
+  G53 G0 X#<sx> Y#<sy>
+o<m491> endsub
