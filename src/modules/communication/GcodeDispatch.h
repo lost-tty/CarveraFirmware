@@ -36,7 +36,7 @@ class GcodeDispatch : public Module, public Killable
 public:
     void service();
     void kill() override {}
-    void cleanup() override { offered.clear(); }
+    void cleanup() override { buffered.clear(); }
     static bool run_mcode(Gcode &gcode);
     void report_settings(Gcode *);
     void say(Gcode *);   // M118
@@ -52,9 +52,9 @@ public:
     Parameters &parameters() { return params; }
     void set_script_hook(ScriptHook *hook) { scripts= hook; }
     void run_mdi(const SerialMessage &msg);
-    // queued console G-code; beside_job: accepted while a job plays
-    bool offer(const std::string &line, StreamOutput *stream, bool beside_job, std::string &err);
-    void drop_offered() { offered.clear(); }
+    // queued console G-code, also taken while a job plays
+    bool buffer(const std::string &line, StreamOutput *stream, std::string &err);
+    void drop_buffered() { buffered.clear(); }
     void program_end();
 private:
     enum Gate { PASS, HANDLED, REFUSED };
@@ -81,10 +81,10 @@ private:
     uint8_t modal_cycle;
     float cycle_initial;
     bool homed_check;
-    struct Offered {
+    struct Buffered {
         std::string line;
         StreamOutput *stream;
     };
-    std::deque<Offered> offered;
-    static const unsigned OFFER_LIMIT = 32; // a remote client must not grow it without bound
+    std::deque<Buffered> buffered;
+    static const unsigned BUFFER_LIMIT = 32; // a remote client must not grow it without bound
 };

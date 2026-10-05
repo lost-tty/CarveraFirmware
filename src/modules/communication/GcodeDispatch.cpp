@@ -189,10 +189,10 @@ void GcodeDispatch::service()
     if(machine_task.full())
         return;
 
-    if(!offered.empty() && program.yields()) {
-        Offered o= offered.front();
-        offered.pop_front();
-        run_line(SerialMessage{o.stream, o.line, 0, nullptr});
+    if(!buffered.empty() && program.yields()) {
+        Buffered b= buffered.front();
+        buffered.pop_front();
+        run_line(SerialMessage{b.stream, b.line, 0, nullptr});
         return;
     }
     SerialMessage msg{&THEKERNEL->streams, "", 0, nullptr};
@@ -200,18 +200,13 @@ void GcodeDispatch::service()
         program.refused(msg.line);
 }
 
-bool GcodeDispatch::offer(const std::string &line, StreamOutput *stream, bool beside_job,
-                          std::string &err)
+bool GcodeDispatch::buffer(const std::string &line, StreamOutput *stream, std::string &err)
 {
-    if(!beside_job && !program.takes_console()) {
-        err= "busy, a job or script is running";
-        return false;
-    }
-    if(offered.size() >= OFFER_LIMIT) {
+    if(buffered.size() >= BUFFER_LIMIT) {
         err= "busy, queue full, an abort clears it";
         return false;
     }
-    offered.push_back(Offered{line, stream});
+    buffered.push_back(Buffered{line, stream});
     return true;
 }
 
@@ -274,8 +269,12 @@ void GcodeDispatch::run_mdi(const SerialMessage &msg)
         run_line(msg);
         return;
     }
+    if(!program.takes_console()) {
+        printk("error:busy, a job or script is running\r\n");
+        return;
+    }
     std::string err;
-    if(!offer(msg.message, msg.stream, false, err))
+    if(!buffer(msg.message, msg.stream, err))
         printk("error:%s\r\n", err.c_str());
 }
 
