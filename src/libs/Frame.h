@@ -15,6 +15,7 @@ enum Type : uint8_t {
     LOAD_INFO   = 0x83,  // chunk of a list reply (ls, wlan)
     LOAD_FINISH = 0x84,  // list reply complete
     LOAD_ERROR  = 0x85,  // list reply failed
+    JOB         = 0x86,  // job status
     INFO        = 0x90,  // any other text, including "ok"
     // client -> firmware
     CTRL_SINGLE = 0xA1,  // one realtime byte: ? ! ~ ^X

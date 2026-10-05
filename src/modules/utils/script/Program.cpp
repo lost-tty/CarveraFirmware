@@ -129,11 +129,25 @@ bool Program::step(SerialMessage &msg)
 unsigned Program::played_line()
 {
     uint32_t at[script::Runner::MAX_DEPTH];
-    unsigned n= chain(machine_task.where().mark, at);
-    if(at[n - 1] != 0)
-        played= at[n - 1];
-
+    machine_chain(at);
     return played;
+}
+
+unsigned Program::heads(Head *out)
+{
+    uint32_t at[script::Runner::MAX_DEPTH];
+    unsigned levels= machine_chain(at), n= 0;
+    while(levels-- > 0) {
+        int segment= file_of(at[levels]);
+        if(segment < 0)
+            continue;
+
+        const script::Source::Segment &s= source.segments[segment];
+        bool job= segment == source.job();
+        unsigned line= line_of(at[levels]);
+        out[n++]= Head{s.path, s.size, line, job ? runner->main().line - 1 : line, job};
+    }
+    return n;
 }
 
 unsigned Program::chain(uint32_t mark, uint32_t *out) const
@@ -144,6 +158,17 @@ unsigned Program::chain(uint32_t mark, uint32_t *out) const
         out[n]= calls[call_of(out[n - 1]) % CALLS].from;
         n++;
     }
+    return n;
+}
+
+unsigned Program::machine_chain(uint32_t *out)
+{
+    unsigned n= chain(machine_task.where().mark, out);
+    if(out[n - 1] != 0)
+        played= out[n - 1];
+    else if(playing())
+        out[n - 1]= played;
+
     return n;
 }
 
@@ -366,11 +391,12 @@ void Program::forget()
 // coolant go off as after M2
 void Program::end_job()
 {
+    Outcome how= ending ? DONE : machine_task.is_halted() ? HALTED : STOPPED;
     ending= false;
     if(!playing())
         return;
 
-    player.job_ended();
+    player.job_ended(how);
     source.remove_job();
     pause_asked= false;
     machine_task.enforce_keepout();
@@ -406,7 +432,7 @@ void Program::list_shell(void *self, const char *, std::string cmd, StreamOutput
     }
 
     uint32_t at[script::Runner::MAX_DEPTH];
-    unsigned levels= me->chain(machine_task.where().mark, at);
+    unsigned levels= me->machine_chain(at);
     while(levels-- > 0) {
         int segment= me->file_of(at[levels]);
         if(segment < 0)

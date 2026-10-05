@@ -12,6 +12,8 @@
 class Gcode;
 #include "libs/McodeRegistry.h"
 #include "SimpleShell.h"
+#include "JobWatch.h"
+#include "Program.h"
 
 #include <stdio.h>
 #include <string>
@@ -43,12 +45,15 @@ class Player : public Module {
         void progress_report(Gcode *);
 
         McodeRegistry::Mcode m0, m1, m27, m333, m334, m600, m601;
-        void job_ended();
+        void job_ended(Program::Outcome how);
+        void job_status(string parameters, StreamOutput *stream);
+        void unwatch(StreamOutput *stream) { watch.remove(stream); }
 
     private:
         typedef void (Player::*command_t)(string, StreamOutput *);
         static const struct Cmd { const char *name; command_t fn; const char *help; } COMMANDS[];
-        SimpleShell::Registered shell_slots[7];
+        SimpleShell::Registered shell_slots[8];
+        static const SimpleShell::Sub<Player> JOB_SUBS[];
         void play_command( string parameters, StreamOutput* stream );
         void progress_command( string parameters, StreamOutput* stream );
         void abort_command( string parameters, StreamOutput* stream );
@@ -57,6 +62,9 @@ class Player : public Module {
         void resume_command( string parameters, StreamOutput* stream );
         void goto_command( string parameters, StreamOutput* stream );
         void buffer_command( string parameters, StreamOutput* stream );
+        void job_command( string parameters, StreamOutput* stream );
+        void job_watch( string parameters, StreamOutput* stream );
+        const char *phase_name() const;
         void test_command(string parameters, StreamOutput* stream );
 
         unsigned long calculate_elapsed_secs();
@@ -67,6 +75,15 @@ class Player : public Module {
 
         TickType_t run_ticks = 0, sampled_at = 0;
         bool m1_stops = false;   // M334 turns it on, M333 off
+        JobWatch watch{*this};
+        // owns the path; the job's goes when it ends
+        struct Last {
+            Program::Head head;
+            string path;
+            Program::Outcome how;
+            unsigned long secs;
+        };
+        Last last{{nullptr, 0, 0, 0, true}, "", Program::DONE, 0};
 };
 
 extern Player player;

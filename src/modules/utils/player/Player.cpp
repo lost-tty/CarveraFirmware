@@ -128,12 +128,15 @@ const Player::Cmd Player::COMMANDS[] = {
     {"resume",   &Player::resume_command,   "resume - resume a suspended job"},
     {"goto",     &Player::goto_command,     "goto line - jump to a line while suspended"},
     {"buffer",   &Player::buffer_command,   "buffer <gcode> - queue a gcode line to run before the next file line"},
+    {"job",      &Player::job_command,      "job status|watch"},
     {nullptr, nullptr, nullptr},
 };
 
 void Player::shell(void *self, const char *name, std::string args, StreamOutput *stream)
 {
-    if(machine_task.is_halted()) return;
+    if(machine_task.is_halted() && strcmp(name, "job") != 0)
+        return;
+
     Player *me= static_cast<Player *>(self);
     for (const Cmd *c= COMMANDS; c->name != nullptr; ++c) {
         if(strcmp(c->name, name) == 0) { (me->*(c->fn))(args, stream); return; }
@@ -253,12 +256,77 @@ void Player::progress_command( string parameters, StreamOutput *stream )
 void Player::on_main_loop(void *)
 {
     sample_runtime();
+    watch.tick();
+}
+
+const SimpleShell::Sub<Player> Player::JOB_SUBS[] = {
+    {"status", &Player::job_status, "job state"},
+    {"watch",  &Player::job_watch,  "on|off: push status changes"},
+    {nullptr, nullptr, nullptr},
+};
+
+void Player::job_command( string parameters, StreamOutput *stream )
+{
+    SimpleShell::dispatch(this, JOB_SUBS, "job", parameters, stream);
+}
+
+const char *Player::phase_name() const
+{
+    if (program.suspended())
+        return "pause";
+
+    return THEKERNEL->get_feed_hold() ? "hold" : "run";
+}
+
+// "<role> <phase> <outcome> <flags> <line> <read> <secs> <size> <path>"
+static void print_head(StreamOutput *stream, const char *phase, const char *outcome,
+                       unsigned long secs, const Program::Head &h)
+{
+    stream->printf("%s %s %s - %u %u %lu %lx %s\r\n", h.job ? "file" : "script", phase, outcome,
+                   h.line, h.read, secs, (unsigned long)h.size, h.path);
+}
+
+void Player::job_status( string, StreamOutput *stream )
+{
+    if (!program.busy() && last.path.empty()) {
+        stream->printf("none idle - - 0 0 0 - -\r\n");
+        return;
+    }
+    if (!program.busy()) {
+        static const char *const NAMES[] = {"done", "stopped", "halted"};
+        print_head(stream, "idle", NAMES[last.how], last.secs, last.head);
+        return;
+    }
+    Program::Head heads[script::Runner::MAX_DEPTH];
+    unsigned n = program.heads(heads);
+    unsigned long secs = calculate_elapsed_secs();
+    for (unsigned i = 0; i < n; i++) {
+        print_head(stream, phase_name(), "-", secs, heads[i]);
+    }
+}
+
+void Player::job_watch( string parameters, StreamOutput *stream )
+{
+    string what = shift_parameter(parameters);
+    if (what == "off") {
+        watch.remove(stream);
+        stream->printf("job watch off\r\n");
+    } else if (what != "on") {
+        stream->printf("error:job watch on|off\r\n");
+    } else if (watch.add(stream)) {
+        stream->printf("job watch on\r\n");
+    } else {
+        stream->printf("error:%d consoles watch already\r\n", JobWatch::WATCHERS);
+    }
 }
 
 // the job ended, was stopped or the machine halted
-void Player::job_ended()
+void Player::job_ended(Program::Outcome how)
 {
     unsigned long secs = calculate_elapsed_secs();
+    unsigned line = program.played_line();
+    last = Last{{nullptr, program.job_size(), line, line, true}, program.job_name(), how, secs};
+    last.head.path = last.path.c_str();
     printk("%s ran for %02lu:%02lu:%02lu\n", program.job_name(),
            secs / 3600, (secs % 3600) / 60, secs % 60);
     m1_stops = false;

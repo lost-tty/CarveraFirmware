@@ -37,6 +37,15 @@ public:
     bool step(SerialMessage &msg);   // true: msg holds a line to dispatch
     unsigned played_line();          // the job line the machine has reached
     std::string place(uint32_t mark) const;   // "file.ngc:12", empty for none
+    struct Head {
+        const char *path;
+        uint32_t size;
+        unsigned line;      // the machine's
+        unsigned read;      // the program's
+        bool job;
+    };
+    unsigned heads(Head *out);   // the job's first, then each sub the machine is in
+    enum Outcome { DONE, STOPPED, HALTED };
     void refused(uint32_t mark);
     bool yields() const { return !in_sub(); }
     bool takes_console() const { return !playing() || paused; }
@@ -67,6 +76,8 @@ private:
     void stop_at(uint32_t at);
     void note_calls();
     unsigned chain(uint32_t mark, uint32_t *out) const;   // the mark and its callers up to the job
+    // the job's last played line stands in for the console
+    unsigned machine_chain(uint32_t *out);
     static unsigned call_of(uint32_t mark) { return mark >> 24; }
     static unsigned line_of(uint32_t mark) { return mark & 0xFFFFFF; }
     uint32_t mark_of(unsigned level, unsigned line) const
