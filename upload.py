@@ -72,6 +72,8 @@ class Closed(ConnectionError):
 
 # answers the machine's requests for one file
 class Upload:
+    kind = 'upload'
+
     def __init__(self, data, remote):
         self.data = data
         self.remote = remote
@@ -184,16 +186,24 @@ def unpack_lz(data):
 
 # asks the machine for one file; a file uploaded packed comes back packed and is unpacked here
 class Download:
-    def __init__(self, remote):
+    kind = 'download'
+
+    def __init__(self, remote, key=None):
         self.remote = remote
+        self.key = key  # the caller's name for it
         self.md5 = None
         self.total = None
         self.chunks = []
+        self.progress = Progress(0)
+        self.began = None
         self.started = False
+        self.ended = False
+        self.cancel_sent = None
         self.result = None  # 'done', 'failed', 'cancelled' or 'refused'
         self.data = None
 
     def start(self):
+        self.began = time.monotonic()
         return [frame(CTRL_MULTI, f'download {self.remote}'.encode())]
 
     # the reply frame, b'' when the frame ends the transfer, None when it is not part of it
@@ -207,15 +217,18 @@ class Download:
             self.md5 = payload[:32].decode(errors='replace').lower()
             return frame(VIEW)
         if ftype == VIEW and len(payload) >= 6:
-            self.total = struct.unpack('>IH', payload[:6])[0]
+            self.total, chunk = struct.unpack('>IH', payload[:6])
+            self.progress = Progress(self.total * chunk)
             return frame(DATA, struct.pack('>I', 1)) if self.total else frame(END)
         if ftype == DATA and len(payload) >= 4:
             seq = struct.unpack('>I', payload[:4])[0]
             if seq != len(self.chunks) + 1:
                 return frame(DATA, struct.pack('>I', len(self.chunks) + 1))
             self.chunks.append(payload[4:])
+            self.progress.update(sum(len(c) for c in self.chunks))
             return frame(DATA, struct.pack('>I', seq + 1)) if seq < self.total else frame(END)
         if ftype == END:
+            self.ended = True
             self.finish()
             return b''
         if ftype == CAN:
@@ -266,28 +279,6 @@ class FrameReader:
             if not chunk:
                 raise Closed('connection closed')
             self.buf += chunk
-
-
-# one file on a connection of its own, so the console's stays free
-def fetch(host, port, remote, timeout=TIMEOUT):
-    sock = socket.create_connection((host, port), timeout=timeout)
-    try:
-        reader = FrameReader(sock)
-        dl = Download(remote)
-        for f in dl.start():
-            sock.sendall(f)
-        while dl.result is None:
-            ftype, payload = reader.next(timeout)
-            if ftype is None:
-                raise TimeoutError(f'no reply to the download of {remote}')
-            reply = dl.answer(ftype, payload)
-            if reply:
-                sock.sendall(reply)
-        if dl.result != 'done':
-            raise OSError(f'download of {remote} {dl.result}')
-        return dl.data
-    finally:
-        sock.close()
 
 
 def main():

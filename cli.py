@@ -2,14 +2,14 @@
 # Console to the machine over TCP using the Makera frame protocol. Needs prompt_toolkit.
 # Full screen: replies scroll above the input (PageUp/PageDown), the machine status sits below it.
 # While a file or script runs, its lines around the current one show beside the log when the terminal
-# is wide, above the input when it is tall; "job watch" names them, a second connection fetches each
-# file once. The running line is highlighted.
+# is wide, above the input when it is tall; "job watch" names them, and each file is downloaded once.
+# The running line is highlighted.
 # Typed and pasted lines queue up and go out one at a time: each waits until the machine has taken
 # the one before, so a paste never overruns its 128-byte line buffer. The prompt stays live meanwhile.
 # Ctrl-X aborts, Ctrl-P holds, Ctrl-O resumes: sent the moment the key is pressed, no Enter needed.
 # "?" "!" "~" and ^X typed as text also go out at once as realtime bytes, ahead of the queue.
-# Ctrl-C drops the queue, or cancels a running upload; with neither it clears the line. Ctrl-D quits.
-# While an upload runs the machine reads nothing else, so realtime keys are refused and lines wait.
+# Ctrl-C drops the queue, or cancels a running transfer; with neither it clears the line. Ctrl-D quits.
+# While a transfer runs the machine reads nothing else, so realtime keys are refused and lines wait.
 # A dropped or silent connection is reopened on its own, so "reset" comes back by itself.
 # Local commands start with "/", see /help.
 # Tab completes commands, local paths after /upload and paths on the machine (listed on first Tab).
@@ -18,7 +18,6 @@ import argparse
 import collections
 import glob
 import os
-import queue
 import re
 import socket
 import threading
@@ -39,13 +38,13 @@ from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import SearchToolbar
 
-from upload import fetch, frame, Closed, FrameReader, Upload, INFO, CTRL_MULTI, CAN
+from upload import frame, Closed, Download, FrameReader, Upload, INFO, CTRL_MULTI, CAN
 
 CTRL_SINGLE = 0xA1
 STATUS = 0x81
 LOAD_INFO, LOAD_FINISH, LOAD_ERROR, JOB = 0x83, 0x84, 0x85, 0x86
-NAMES = {0x82: 'diag', LOAD_INFO: 'load', LOAD_FINISH: 'load-end', LOAD_ERROR: 'load-err', JOB: 'job',
-         INFO: ''}
+LOAD_DONE = 'Load directory finished.'  # the machine's word that a listing ended, not a line of it
+FETCHED = 'Info: Download success:'  # follows each download the pane asked for
 # upload and download are left out: typed, they start a transfer this console does not drive
 SHELL = ('ls cd pwd cat echo rm mv mkdir reset dfu break help ftype version model mem task get '
          'set_temp switch net ap wlan diagnose sleep power remount calc_thermistor thermistors time test '
@@ -71,7 +70,7 @@ SEND_S = 10.0  # a send the machine does not take in this long ends the link
 SILENT_S = 15.0  # polls answer twice a second, so this much silence means the link is gone
 RETRY_S = (0.5, 1, 2, 4)  # backoff between attempts, the last one repeats
 STABLE_S = 5.0  # a link that lived this long starts the backoff over
-START_S = 10.0  # an upload the machine has not begun by then was refused without a word
+START_S = 10.0  # a transfer the machine has not begun by then was refused without a word
 CANCEL_S = 5.0  # a cancel the machine has not answered by then is given up on
 STUCK_S = 30.0  # a typed line with no receipt this long, while idle and quiet, is pointed out
 RESYNC_S = 8.0  # one of our own queries unanswered this long, with nothing else heard, lost its reply
@@ -153,7 +152,7 @@ class Console:
         if show is not None:
             self.show = show
         self.lock = threading.Lock()  # guards sock, the per-link state and every send
-        # wakes the sender on replies, upload ends, link changes and Ctrl-C; never held while taking lock
+        # wakes the sender on replies, transfer ends, link changes and Ctrl-C; never held while taking lock
         self.cond = threading.Condition()
         self.sock = None
         self.link = 'connecting'
@@ -164,7 +163,7 @@ class Console:
         self.modal = ''  # [G0 G54 G17 G21 G90 G94 M0 M5 M9 T0 F0. S0.] from $G
         self.listing = {}  # remote directory -> entries, filled by list_remote for completion
         self.listing_dir = None  # directory an ls for completion is running for
-        self.queue = collections.deque()  # lines and uploads waiting their turn
+        self.queue = collections.deque()  # lines and transfers waiting their turn
         self.current = None  # the item the sender is on
         self.current_sent = False  # it went out and waits for its receipt
         self.rejected = None  # an error the machine printed while the current line waited
@@ -172,12 +171,11 @@ class Console:
         self.heads = []  # what runs, from the job frames
         self.texts = {}  # (path, size) -> its lines; None while fetching, False when that failed
         self.failed = {}  # (path, size) -> when its fetch failed
-        self.fetches = queue.Queue()
         self.want_program = False  # the UI has room for the program pane
         self.last_modal = 0.0
         self.heard = time.monotonic()  # last frame other than a status
         self.reset_session()
-        for target in (self.supervisor, self.poller, self.sender, self.fetcher):
+        for target in (self.supervisor, self.poller, self.sender):
             threading.Thread(target=target, daemon=True).start()
 
     # per-link state, under lock: replies owed on the old link never arrive on the new one
@@ -187,7 +185,7 @@ class Console:
         self.watching = False  # "job watch on" went out on this link
         self.asked = 0  # $G sent on this link
         self.answered = 0  # $G replies seen; the nth reply is the receipt of the line before the nth $G
-        self.upload = None
+        self.transfer = None
         if self.listing_dir is not None:
             self.listing.pop(self.listing_dir, None)
             self.listing_dir = None
@@ -278,14 +276,15 @@ class Console:
         finally:
             with self.lock:
                 self.sock = None
-                up, self.upload = self.upload, None
+                up, self.transfer = self.transfer, None
             sock.close()
             with self.cond:
                 self.generation += 1
                 self.cond.notify_all()
             if up is not None:
                 up.result = up.result or 'interrupted'
-                self.show(f'upload interrupted after {up.progress.done} of {up.progress.size} bytes')
+                if isinstance(up, Upload):
+                    self.show(f'upload interrupted after {up.progress.done} of {up.progress.size} bytes')
 
     def reader(self, sock):
         r = FrameReader(sock)
@@ -308,17 +307,19 @@ class Console:
             return self.drop_reason or str(e)
 
     def on_frame(self, ftype, payload):
-        up = self.upload
+        up = self.transfer
         if up is not None:
             reply = up.answer(ftype, payload)
             if reply:
                 self.send(reply)
             if reply is None and up.result is not None:
                 self.print_frame(ftype, payload)  # the machine's own word before ours
-            if up.result is not None:
-                self.end_upload(up, {'done': f'upload complete, {up.progress.summary()}',
-                                     'failed': 'upload failed', 'refused': 'upload refused',
-                                     'cancelled': 'upload cancelled by machine'}[up.result])
+            if up.result is not None and isinstance(up, Upload):
+                self.end_transfer(up, {'done': f'upload complete, {up.progress.summary()}',
+                                       'failed': 'upload failed', 'refused': 'upload refused',
+                                       'cancelled': 'upload cancelled by machine'}[up.result])
+            elif up.result is not None:
+                self.end_transfer(up, None)
             if reply is not None or up.result is not None:
                 return
         if self.listing_dir is not None and ftype in (LOAD_INFO, LOAD_FINISH, LOAD_ERROR):
@@ -365,20 +366,18 @@ class Console:
         heads = self.heads
         return heads if heads and heads[0].phase != 'idle' else []
 
-    # each file a head names, once, on a connection of its own
-    def fetcher(self):
-        while not self.stopping:
-            key = self.fetches.get()
-            try:
-                data = fetch(self.host, self.port, key[0])
-                # numbered as the machine numbers them: by newline alone
-                self.texts[key] = [l.rstrip('\r') for l in data.decode(errors='replace').split('\n')]
-            except Exception as e:
-                if key not in self.failed:
-                    self.show(f'could not fetch {key[0]}: {e}')
-                self.texts[key] = False
-                self.failed[key] = time.monotonic()
+    # a download for the pane has ended, one way or the other
+    def fetched(self, dl):
+        if dl.result == 'done':
+            # numbered as the machine numbers them: by newline alone
+            self.texts[dl.key] = [l.rstrip('\r') for l in dl.data.decode(errors='replace').split('\n')]
+            return
+        if dl.key not in self.failed:
+            self.show(f'could not fetch {dl.remote}: {dl.result}')
+        self.texts[dl.key] = False
+        self.failed[dl.key] = time.monotonic()
 
+    # each file a head names, once
     def fetch_missing(self):
         now = time.monotonic()
         for h in self.shown_heads():
@@ -386,12 +385,16 @@ class Console:
             if key not in self.texts or (self.texts[key] is False
                                          and now - self.failed[key] >= REFETCH_S):
                 self.texts[key] = None
-                self.fetches.put(key)
+                self.enqueue(Download(h.path, key))
 
     def print_frame(self, ftype, payload):
-        text = payload.decode(errors='replace').rstrip()
-        tag = NAMES.get(ftype, 'status' if ftype == STATUS else '%02x' % ftype)
-        self.show(f'[{tag}] {text}' if tag else text)
+        text = payload.decode(errors='replace').replace('\r', '').rstrip()
+        if ftype == LOAD_FINISH and text == LOAD_DONE:
+            return
+        if ftype == INFO and text.startswith(FETCHED):
+            return
+        if text:
+            self.show(text)
 
     def poller(self):
         while not self.stopping:
@@ -407,13 +410,13 @@ class Console:
         return '|P:' in self.status or self.state in ('Run', 'Hold', 'Pause', 'Wait')
 
     def poll(self):
-        up = self.upload
+        up = self.transfer
         now = time.monotonic()
         if up is not None:
             if up.cancel_sent is not None and now - up.cancel_sent > CANCEL_S:
-                self.end_upload(up, 'upload cancel not answered by the machine, dropped here')
+                self.end_transfer(up, f'{up.kind} cancel not answered by the machine, dropped here')
             elif not up.started and now - up.began > START_S:
-                self.cancel_upload(up, f'upload not begun by the machine within {START_S:.0f} s')
+                self.cancel_transfer(up, f'{up.kind} not begun by the machine within {START_S:.0f} s')
             return
         if not self.connected:
             return
@@ -438,15 +441,15 @@ class Console:
             pass  # the supervisor reports it
 
     def realtime(self, byte):
-        up = self.upload
+        up = self.transfer
         if up is not None and up.started:
             if byte == b'?':
-                raise OSError('upload running, the machine reads nothing else until it ends')
+                raise OSError(f'{up.kind} running, the machine reads nothing else until it ends')
             # the machine hears nothing else during a transfer: end it, then send the key
             threading.Thread(target=self.realtime_after_cancel, args=(up, byte), daemon=True).start()
             if up.ended:
-                return 'upload unpacking on the machine, the key follows when it is done'
-            return 'upload cancelled first, the key follows'
+                return f'{up.kind} finishing on the machine, the key follows when it is done'
+            return f'{up.kind} cancelled first, the key follows'
         with self.lock:
             if byte == b'?':
                 self.want_status = True
@@ -459,9 +462,9 @@ class Console:
 
     def realtime_after_cancel(self, up, byte):
         if not up.ended:
-            self.cancel_upload(up, 'upload cancelled for a realtime key')
+            self.cancel_transfer(up, f'{up.kind} cancelled for a realtime key')
         with self.cond:
-            self.cond.wait_for(lambda: self.upload is not up, SILENT_S if up.ended else CANCEL_S + 1)
+            self.cond.wait_for(lambda: self.transfer is not up, SILENT_S if up.ended else CANCEL_S + 1)
         try:
             self.realtime(byte)
             self.show(f'{REALTIME_NAMES.get(byte, byte)} sent')
@@ -474,10 +477,10 @@ class Console:
     # sends line (None for a bare poll) with a $G behind it; the machine takes lines in order,
     # so the $G's reply is the line's receipt. One at a time, so the machine's 127-byte line buffer
     # never holds more than a line and its $G. Returns the answered count that marks the receipt,
-    # None while another is in flight or an upload holds the machine.
+    # None while another is in flight or a transfer holds the machine.
     def ask(self, line, kind):
         with self.lock:
-            if self.asks or self.upload is not None:
+            if self.asks or self.transfer is not None:
                 return None
             if kind in ('show', 'hide'):
                 self.rejected = None  # from here on an error is this line's
@@ -493,7 +496,7 @@ class Console:
             return self.asked
 
     def list_remote(self, directory):
-        if self.listing_dir is not None or not self.connected or self.upload is not None:
+        if self.listing_dir is not None or not self.connected or self.transfer is not None:
             return
         if len(f'ls {directory}'.encode()) > LINE_MAX:
             return
@@ -507,49 +510,51 @@ class Console:
             self.listing_dir = None
             self.listing.pop(directory, None)
 
-    def start_upload(self, up, stops):
+    def start_transfer(self, up, stops):
         with self.lock:
             # the slot is empty, so every line before it was taken and FILE_START is next in line
             if self.stops != stops:
                 raise Stopped
             if self.sock is None:
                 raise OSError('not connected')
-            if self.asks or self.upload is not None:
+            if self.asks or self.transfer is not None:
                 return False
             frames = up.start()
             up.cancel_sent = None
-            self.upload = up
+            self.transfer = up
             try:
                 for f in frames:
                     self.send_locked(f)
             except OSError:
-                self.upload = None
+                self.transfer = None
                 raise
-        self.show(f'uploading -> {up.remote}: {len(up.data)} bytes, {up.total} packets')
+        if isinstance(up, Upload):
+            self.show(f'uploading -> {up.remote}: {len(up.data)} bytes, {up.total} packets')
         return True
 
-    def end_upload(self, up, message):
+    def end_transfer(self, up, message):
         with self.lock:
-            if self.upload is not up:
+            if self.transfer is not up:
                 return
-            self.upload = None
+            self.transfer = None
         up.result = up.result or 'cancelled'
-        if up.result == 'done':
+        if up.result == 'done' and isinstance(up, Upload):
             self.listing.clear()  # the card changed
             self.texts = {k: v for k, v in self.texts.items() if k[0] != up.remote}
-        self.show(message)
+        if message:
+            self.show(message)
         self.wake()
 
     # the machine ends it and says so; only one that never began is ended here
-    def cancel_upload(self, up, message):
+    def cancel_transfer(self, up, message):
         if not up.started:
             try:
                 self.send(frame(CAN))
             except OSError:
                 pass
-            self.end_upload(up, message)
+            self.end_transfer(up, message)
         elif up.ended:
-            self.show('upload unpacking on the machine, it cannot be cancelled now')
+            self.show(f'{up.kind} finishing on the machine, it cannot be cancelled now')
         elif up.cancel_sent is None:
             up.cancel_sent = time.monotonic()
             try:
@@ -566,18 +571,22 @@ class Console:
     # Ctrl-C: returns what it did, or None when there was nothing to stop
     def interrupt(self):
         with self.cond:
-            dropped = len(self.queue)
+            fetches = [i for i in self.queue if isinstance(i, Download)]
+            dropped = len(self.queue) - len(fetches)
             self.queue.clear()
             current = self.current
             sent = self.current_sent
             self.stops += 1
             self.cond.notify_all()
-        up = self.upload
+        for dl in fetches:
+            dl.result = 'cancelled'
+            self.fetched(dl)
+        up = self.transfer
         if up is not None:
-            self.cancel_upload(up, 'upload cancelled')
+            self.cancel_transfer(up, f'{up.kind} cancelled')
         if isinstance(current, str) and sent:
             return f'stopped: "{current}" went out, not yet taken; {dropped} queued not sent'
-        if current is not None and current is not up:
+        if current is not None and current is not up and not isinstance(current, Download):
             dropped += 1
         if dropped:
             return f'stopped: {dropped} queued not sent'
@@ -600,7 +609,7 @@ class Console:
                 with self.cond:
                     dropped = len(self.queue)
                     self.queue.clear()
-                what = item if isinstance(item, str) else f'/upload {item.remote}'
+                what = item if isinstance(item, str) else f'{item.kind} {item.remote}'
                 rest = f'; {dropped} queued not sent' if dropped else ''
                 # a reset or dfu ends the link by design, and an error the machine printed is on screen:
                 # alone they need no word
@@ -613,15 +622,20 @@ class Console:
                 self.current_sent = False
 
     def run(self, item, stops):
-        # lines wait for the link, an upload and the slot rather than fail
-        free = lambda: self.connected and not self.asks and self.upload is None
-        if isinstance(item, Upload):
-            while True:
-                self.wait_until(free, stops, None)
-                if self.start_upload(item, stops):
-                    break
-            self.wait_until(lambda: self.upload is not item, stops, None)
-            if item.result != 'done':
+        # lines wait for the link, a transfer and the slot rather than fail
+        free = lambda: self.connected and not self.asks and self.transfer is None
+        if isinstance(item, (Upload, Download)):
+            try:
+                while True:
+                    self.wait_until(free, stops, None)
+                    if self.start_transfer(item, stops):
+                        break
+                self.wait_until(lambda: self.transfer is not item, stops, None)
+            finally:
+                if isinstance(item, Download):
+                    item.result = item.result or 'cancelled'
+                    self.fetched(item)
+            if isinstance(item, Upload) and item.result != 'done':
                 raise Rejected(f'upload {item.result}')  # what follows may count on the file
             return
         while True:
@@ -713,15 +727,15 @@ def status_block(con, progress=True):
             out.append((body, '\n' + line))
     if con.modal:
         out.append(('class:dim', '\n' + con.modal.strip('[]')))
-    upload = con.upload
-    if upload is not None:
-        out.append(('class:run', f'\nupload {upload.progress.line()}   Ctrl-C cancels'))
+    up = con.transfer
+    if up is not None:
+        out.append(('class:run', f'\n{up.kind} {up.progress.line()}   Ctrl-C cancels'))
     current, queued = con.current, len(con.queue)
     if isinstance(current, str):
         if con.current_sent:
             what = 'waiting for the machine to take'
         else:
-            what = 'waiting for the link, then' if not live else 'waiting for the upload, then'
+            what = 'waiting for the link, then' if not live else 'waiting for the transfer, then'
         out.append(('class:hold', f'\n{what}: {current}'
                     + (f'   {queued} more queued' if queued else '') + '   Ctrl-C drops'))
         ask = con.asks[0] if con.asks else None
