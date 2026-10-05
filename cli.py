@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # Console to the machine over TCP using the Makera frame protocol. Needs prompt_toolkit.
-# Full screen: replies scroll above the input (PageUp/PageDown), the machine status sits below it.
+# Full screen: replies scroll above the input (PageUp/PageDown, the wheel), the machine status below it.
+# The wheel scrolls the log, and dragging over it with the left button copies those lines; Ctrl-T
+# gives the mouse to the terminal for its own selection, and back.
 # While a file or script runs, its lines around the current one show beside the log when the terminal
 # is wide, above the input when it is tall; "job watch" names them, and each file is downloaded once.
 # The running line is highlighted.
@@ -15,11 +17,14 @@
 # Tab completes commands, local paths after /upload and paths on the machine (listed on first Tab).
 # History lives in ~/.carvera_cli_history; Up/Down, Ctrl-R and the usual line editing come from prompt_toolkit.
 import argparse
+import base64
 import collections
 import glob
 import os
 import re
+import shutil
 import socket
+import subprocess
 import threading
 import time
 
@@ -33,6 +38,7 @@ from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout import (ConditionalContainer, DynamicContainer, Float, FloatContainer, HSplit, Layout,
                                    VSplit, Window)
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.mouse_events import MouseButton, MouseEventType
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import BeforeInput
@@ -95,6 +101,7 @@ STYLE = Style.from_dict({
     'header': 'bg:#2d2d30 #dddddd bold',
     'current': 'bg:#264f78',
     'caller': 'bg:#3a3d41',
+    'selected': 'reverse',
     'gutter': '#606060',
     'ahead': '#4ec9b0',
     'mark-run': '#55cc55 bold',
@@ -862,6 +869,42 @@ def log_style(text):
     return ''
 
 
+WHEEL_LINES = 3  # log lines per notch of the mouse wheel
+
+
+# the window's own wheel scrolling would be pulled back by the log's cursor at the end
+class LogControl(FormattedTextControl):
+    def __init__(self, ui, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.ui = ui
+
+    def mouse_handler(self, mouse_event):
+        kind = mouse_event.event_type
+        if kind == MouseEventType.SCROLL_UP:
+            self.ui.scroll_by(WHEEL_LINES)
+        elif kind == MouseEventType.SCROLL_DOWN:
+            self.ui.scroll_by(-WHEEL_LINES)
+        elif kind == MouseEventType.MOUSE_DOWN and mouse_event.button == MouseButton.LEFT:
+            self.ui.select(mouse_event.position.y, start=True)
+        elif kind == MouseEventType.MOUSE_MOVE and mouse_event.button == MouseButton.LEFT:
+            self.ui.select(mouse_event.position.y)
+        elif kind == MouseEventType.MOUSE_UP:
+            self.ui.select(mouse_event.position.y, done=True)
+        else:
+            return NotImplemented
+        return None
+
+
+# the local clipboard if there is a tool for it, else the terminal's through OSC 52
+def copy_to_clipboard(text, output):
+    for tool in (['pbcopy'], ['wl-copy'], ['xclip', '-selection', 'clipboard']):
+        if shutil.which(tool[0]):
+            subprocess.run(tool, input=text.encode(), check=False)
+            return
+    output.write_raw('\x1b]52;c;' + base64.b64encode(text.encode()).decode() + '\x07')
+    output.flush()
+
+
 class Ui:
     LOG_MAX = 5000  # lines kept for scrolling back
     LOG_RENDER = 400  # lines handed to the window; it shows the bottom of them
@@ -877,6 +920,10 @@ class Ui:
 
     def attach(self, con):
         self.con = con
+        self.mouse = True  # on, the wheel scrolls and a drag copies log lines; off, the terminal has the mouse
+        self.selection = None  # log lines dragged over: (first, last)
+        self.dragging = False
+        self.log_start = 0  # the log line the window's first row shows
         con.redraw = lambda: self.app.invalidate() if self.app is not None else None
         self.input = Buffer(history=FileHistory(HISTORY_FILE), completer=CarveraCompleter(con),
                             complete_while_typing=False, multiline=False, accept_handler=self.accept)
@@ -886,7 +933,7 @@ class Ui:
             BufferControl(self.input, lexer=GcodeLexer(), search_buffer_control=search.control,
                           preview_search=True, input_processors=[BeforeInput('> ', style='class:prompt')]),
             height=lambda: Dimension.exact(min(10, self.input.document.line_count)), wrap_lines=True)
-        self.log_window = Window(FormattedTextControl(self.log_text, get_cursor_position=self.log_end),
+        self.log_window = Window(LogControl(self, self.log_text, get_cursor_position=self.log_end),
                                  wrap_lines=True)
         self.program_window = Window(FormattedTextControl(self.program_text), wrap_lines=False)
         # the program pane's header carries the play progress when it shows
@@ -912,6 +959,7 @@ class Ui:
                                             content=CompletionsMenu(max_height=12, scroll_offset=1))])
         self.app = Application(layout=Layout(root, focused_element=self.input_window),
                                key_bindings=self.keys(), style=STYLE, full_screen=True,
+                               mouse_support=Condition(lambda: self.mouse),
                                refresh_interval=POLL_S)
 
     def size(self):
@@ -943,7 +991,7 @@ class Ui:
         with self.lock:
             self.log.extend(lines)
             if self.scroll:
-                self.scroll = min(self.scroll + len(lines), len(self.log) - 1)  # hold the view still
+                self.scroll = min(self.scroll + len(lines), self.scroll_limit())  # hold the view still
         if self.app is not None:
             self.app.invalidate()
         else:
@@ -953,10 +1001,16 @@ class Ui:
     def log_text(self):
         with self.lock:
             end = len(self.log) - self.scroll
-            lines = [self.log[i] for i in range(max(0, end - self.LOG_RENDER), end)]
+            self.log_start = max(0, end - self.LOG_RENDER)
+            lines = [self.log[i] for i in range(self.log_start, end)]
+            sel = self.selection
         out = []
         for i, line in enumerate(lines):
-            out.extend(line)
+            n = self.log_start + i
+            if sel is not None and min(sel) <= n <= max(sel):
+                out.extend((style + ' class:selected', text) for style, text in line)
+            else:
+                out.extend(line)
             if i < len(lines) - 1:
                 out.append(('', '\n'))
         if self.scroll:
@@ -968,9 +1022,32 @@ class Ui:
 
     def page(self, direction):
         rows = max(1, self.log_window.render_info.window_height - 2) if self.log_window.render_info else 10
+        self.scroll_by(direction * rows)
+
+    # the left button down starts a selection, moving with it held extends it, letting go copies it
+    def select(self, row, start=False, done=False):
         with self.lock:
-            self.scroll = max(0, min(self.scroll + direction * rows, len(self.log) - 1))
+            if not start and not self.dragging:
+                return
+            n = max(0, min(self.log_start + row, len(self.log) - 1))
+            self.selection = (n, n) if start else (self.selection[0], n)
+            self.dragging = not done
+            first, last = min(self.selection), max(self.selection)
+            text = '\n'.join(''.join(t for _, t in self.log[i]) for i in range(first, last + 1))
+        if done:
+            copy_to_clipboard(text, self.app.output)
         self.app.invalidate()
+
+    def scroll_by(self, lines):
+        with self.lock:
+            self.scroll = max(0, min(self.scroll + lines, self.scroll_limit()))
+        self.app.invalidate()
+
+    # the oldest line at the top and the marker on the bottom row, under lock
+    def scroll_limit(self):
+        info = self.log_window.render_info if self.app is not None else None
+        height = info.window_height if info else 10
+        return max(0, len(self.log) - height + 1)
 
     def program_text(self):
         con = self.con
@@ -1047,6 +1124,12 @@ class Ui:
         @keys.add('c-o')
         def _(event):
             send(b'~', 'resume sent')
+
+        @keys.add('c-t')
+        def _(event):
+            self.mouse = not self.mouse
+            self.say('mouse on: the wheel scrolls the log, a drag copies lines' if self.mouse
+                     else 'mouse off: the terminal selects text, Ctrl-T for the wheel again', 'class:hold')
 
         @keys.add('c-c')
         def _(event):
