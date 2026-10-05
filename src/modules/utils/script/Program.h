@@ -64,6 +64,7 @@ public:
     void resume();
     enum Step { INTO, OVER, OUT };
     void step(Step how);   // resume, pause before the next line on that level
+    bool step_running() const;
     void ask_pause() { pause_asked= playing(); }  // at the next job line
     bool cancel_pause();
     bool jump(unsigned line, std::string &err);

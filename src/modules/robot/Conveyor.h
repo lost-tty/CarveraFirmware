@@ -52,6 +52,7 @@ public:
     enum Fence : uint8_t { FENCE_LINE, FENCE_PASS, FENCE_LIFT };
     void ask_fence(Fence op);   // done on the next pass of the machine task
     bool fence_settled() const { return fence.asked == fence.done; }
+    bool fence_reached() const { return !fence.on || (int32_t)(finished - fence.edge) >= 0; }
     struct Fenced { bool any; uint32_t mark; };   // the first block behind the fence
     Fenced fenced() const;
     void drop_queue(void);   // ISR, while standing: the flushed queue goes in one move

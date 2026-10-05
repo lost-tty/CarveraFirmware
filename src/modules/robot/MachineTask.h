@@ -71,7 +71,6 @@ public:
 
     bool post_jog(const float delta[], uint8_t naxis, float scale, bool held= false);
     bool is_jogging() const { return jogging; }
-    bool standing() const;
     void abort_jog();
 
     bool post_move(const float delta[], float rate_mm_s);

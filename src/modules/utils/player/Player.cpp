@@ -507,8 +507,8 @@ void Player::step_command(string parameters, StreamOutput *stream)
     if (program.loaded() && !homed(stream))
         return;
 
-    if (!machine_task.standing()) {
-        stream->printf("error:still moving, step when it stands\r\n");
+    if (program.step_running()) {
+        stream->printf("error:the last step still runs\r\n");
         return;
     }
 

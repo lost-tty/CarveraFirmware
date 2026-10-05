@@ -390,10 +390,15 @@ unsigned Program::depth_of(uint32_t mark) const
     return at[n - 1] == 0 && !playing() ? n - 1 : n;
 }
 
+bool Program::step_running() const
+{
+    return stepper.fencing && (!THECONVEYOR.fence_settled() || !THECONVEYOR.fence_reached());
+}
+
 // lines queued before the suspend pass the conveyor's fence one by one
 void Program::step(Step how)
 {
-    if(stepper.fencing && !THECONVEYOR.fence_settled())
+    if(step_running())
         return;
 
     unsigned depth= depth_of(standing());
