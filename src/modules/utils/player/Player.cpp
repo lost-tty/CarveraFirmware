@@ -501,5 +501,10 @@ void Player::step_command(string parameters, StreamOutput *stream)
     if (program.loaded() && !homed(stream))
         return;
 
+    if (!machine_task.standing()) {
+        stream->printf("error:still moving, step when it stands\r\n");
+        return;
+    }
+
     program.step(how == "over" ? Program::OVER : how == "out" ? Program::OUT : Program::INTO);
 }

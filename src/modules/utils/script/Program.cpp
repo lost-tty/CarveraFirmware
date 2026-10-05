@@ -179,7 +179,7 @@ uint32_t Program::standing() const
         return stepper.held.mark;
 
     Conveyor::Fenced f= THECONVEYOR.fenced();
-    return f.any ? f.mark : machine_task.where().mark;
+    return f.any && f.mark != 0 ? f.mark : machine_task.where().mark;
 }
 
 unsigned Program::shown_chain(uint32_t *out)

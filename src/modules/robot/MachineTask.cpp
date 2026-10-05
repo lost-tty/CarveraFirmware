@@ -129,6 +129,12 @@ MachineTask::Where MachineTask::where() const
     return {THECONVEYOR.last_executed(), false};
 }
 
+bool MachineTask::standing() const
+{
+    StepTicker::Motion m= THEKERNEL->step_ticker.motion();
+    return acting == 0 && ticketing == 0 && m != StepTicker::MOVING && m != StepTicker::BRAKING;
+}
+
 bool MachineTask::homed() const
 {
     return THEROBOT.is_homed_all_axes();

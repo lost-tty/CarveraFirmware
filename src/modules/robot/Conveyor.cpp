@@ -440,6 +440,11 @@ unsigned int Conveyor::past_line(unsigned int i) const
 
 void Conveyor::apply_fence()
 {
+    // moves a running code queues itself, like the clamp homing or a laser sweep, have mark 0:
+    // they pass, or the code would wait on them until the next step
+    while(fence.on && fence.at != queue.head_i && queue.item_ref(fence.at)->mark == 0) {
+        place_fence(queue.next(fence.at));
+    }
     if(fence.done == fence.asked)
         return;
 
