@@ -134,6 +134,7 @@ private:
     void serve_tickets();
     void finish_clear();
     volatile bool jogging{false};
+    volatile bool jog_moving{false};
     volatile bool position_lost{false};
     volatile unsigned int acting{0}, ticketing{0};
     volatile uint32_t ticket_from{0};

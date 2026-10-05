@@ -163,6 +163,11 @@ bool Player::open_job(const string &path, StreamOutput *stream)
         return false;
     }
 
+    if (machine_task.is_jogging()) {
+        stream->printf("error:busy, jogging\r\n");
+        return false;
+    }
+
     string err;
     if (!program.load_job(path, err)) {
         stream->printf("%s\r\n", err.c_str());

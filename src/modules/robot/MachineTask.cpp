@@ -163,6 +163,9 @@ bool MachineTask::post_jog(const float delta[], uint8_t naxis, float scale, bool
     if(xTaskGetCurrentTaskHandle() == handle) return false;
     if(naxis > k_max_actuators || halted) return false;
 
+    if(program.playing())
+        return false;
+
     if(held && jogging) {
         // the same jog posted again while it runs continues it
         bool same= naxis == jog_running.naxis && scale == jog_running.scale;
@@ -192,9 +195,12 @@ bool MachineTask::post_jog(const float delta[], uint8_t naxis, float scale, bool
 // the operator let go, or the client went quiet: brake, and tick() drops the rest of the move
 void MachineTask::abort_jog()
 {
-    if(!jogging) return;
+    if(!jogging)
+        return;
+
     jogging= false;
-    if(!THECONVEYOR.is_idle()) THEKERNEL->step_ticker.stop_jog();
+    if(jog_moving)
+        THEKERNEL->step_ticker.stop_jog();
 }
 
 bool MachineTask::post_move(const float delta[], float rate_mm_s)
@@ -273,10 +279,11 @@ void MachineTask::serve_tickets()
         if(t.kind == Ticket::JOG_HELD) {
             // the jog this takes over from is braking, and its flush would take a block queued now
             THECONVEYOR.wait_for_idle();
+            jog_moving= jogging;
             float delta[k_max_actuators];
             if(jogging && (!THEROBOT.jog_travel(t.move.delta, t.move.naxis, delta) ||
                            !THEROBOT.jog_move(delta, t.move.naxis, t.move.scale))) {
-                jogging= false;
+                jogging= jog_moving= false;
             }
         } else if(t.kind == Ticket::JOG) {
             THEROBOT.jog_move(t.move.delta, t.move.naxis, t.move.scale);
@@ -328,7 +335,8 @@ void MachineTask::tick()
 {
     if(!on_task()) __debugbreak();
 
-    if(jogging && THECONVEYOR.is_idle()) jogging= false;
+    if(THECONVEYOR.is_idle())
+        jogging= jog_moving= false;
 
     // here, not in the loop: a wait for the queue runs the tick itself and cannot end before this
     StepTicker &ticker= THEKERNEL->step_ticker;
@@ -359,7 +367,7 @@ void MachineTask::halt(uint8_t why, const char *what)
         position_lost= fault || m == StepTicker::MOVING || m == StepTicker::BRAKING;
     }
     halted= true;
-    jogging= false;
+    jogging= jog_moving= false;
     Killable::kill_all();
     pending= true;
 }
