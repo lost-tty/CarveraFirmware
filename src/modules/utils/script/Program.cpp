@@ -115,22 +115,22 @@ bool Program::call_line(const std::string &text, StreamOutput *stream, std::stri
     return can_call(err) && runner->call_line(text, sub, err) && called(sub, stream, on_job);
 }
 
-bool Program::step(SerialMessage &msg)
+Program::Next Program::step(SerialMessage &msg)
 {
     follow_fence();
     if(!busy() || machine_task.is_halted() || frozen())
-        return false;
+        return NOTHING;
 
     if(!stopping)
         return advance(msg);
 
     // the job is over, it just has to finish moving
     if(!machine_task.motion_passed(stop_after))
-        return false;
+        return NOTHING;
 
     stopping= false;
     stop_at(stop_mark);
-    return false;
+    return NOTHING;
 }
 
 unsigned Program::played_line()
@@ -261,24 +261,24 @@ void Program::stop_at(uint32_t at)
     stop();
 }
 
-bool Program::advance(SerialMessage &msg)
+Program::Next Program::advance(SerialMessage &msg)
 {
     if(pause_asked && runner->at_main()) {
         pause_asked= false;
         suspend();
         printk("Suspended, resume to continue playing\n");
-        return false;
+        return NOTHING;
     }
 
     if(holding()) {
         msg= stepper.held;
         stepper.held.mark= 0;
-        return true;
+        return LINE;
     }
 
     if(!runner->running()) {
         if(machine_task.idle()) end_job();
-        return false;
+        return NOTHING;
     }
 
     std::string err;
@@ -294,19 +294,19 @@ bool Program::advance(SerialMessage &msg)
             if(stops_before(runner->depth())) {
                 stepper.held= msg;
                 pause= ALL;
-                return false;
+                return NOTHING;
             }
-            return true;
+            return LINE;
         }
         case script::Runner::MESSAGE:
             printk("%s\n", msg.message.c_str());
-            return false;
+            return MORE;
         case script::Runner::RETURNED:
             if(nested) {
                 finish();
                 name= job_name();
             }
-            return false;
+            return MORE;
         case script::Runner::DONE: {
             float reason= runner->aborted();
             finish();
@@ -315,20 +315,20 @@ bool Program::advance(SerialMessage &msg)
                 printk("error:script %s aborted (%d)\n", name.c_str(), (int)reason);
                 halt(reason > 0 && reason < 255 ? (int)reason : SCRIPT);
             }
-            return false;
+            return MORE;
         }
         case script::Runner::WAIT:
-            return false;
+            return NOTHING;
         case script::Runner::ERROR: {
             std::string where= file_line(source.segment_of(runner->last().offset),
                                          runner->last().line) + ": " + err;
             finish();
             printk("error:script %s %s\n", name.c_str(), where.c_str());
             halt(SCRIPT);
-            return false;
+            return NOTHING;
         }
     }
-    return false;
+    return NOTHING;
 }
 
 const char *Program::job_name() const

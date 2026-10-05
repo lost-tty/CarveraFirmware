@@ -9,6 +9,7 @@
 
 #include "libs/Kernel.h"
 #include "libs/Logging.h"
+#include "libs/MainWake.h"
 #include "libs/Settings.h"
 #include "Robot.h"
 #include "Conveyor.h"
@@ -205,6 +206,7 @@ void GcodeDispatch::service()
         if(!run(std::move(r.plan), r.from) && mark != 0)
             program.refused(mark);
 
+        wake_main();
         return;
     }
     if(!buffered.empty() && program.yields()) {
@@ -212,12 +214,23 @@ void GcodeDispatch::service()
         buffered.pop_front();
         if(!run_line(SerialMessage{b.stream, b.text, 0, nullptr}) && params.behind())
             buffered.push_front(b);
+        else
+            wake_main();
 
         return;
     }
     SerialMessage msg{&THEKERNEL->streams, "", 0, nullptr};
-    if(!program.step(msg) || run_line(msg))
+    Program::Next next= program.step(msg);
+    if(next == Program::MORE)
+        wake_main();
+
+    if(next != Program::LINE)
         return;
+
+    if(run_line(msg)) {
+        wake_main();
+        return;
+    }
 
     if(params.behind()) {
         program.park(msg);

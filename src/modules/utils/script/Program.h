@@ -32,7 +32,8 @@ public:
     // false: the code stays with its handler; err: the sub did not start
     bool remap(const char *sub, const gcode::Words &words, std::string &err);
 
-    bool step(SerialMessage &msg);   // true: msg holds a line to dispatch
+    enum Next : uint8_t { NOTHING, LINE, MORE };
+    Next step(SerialMessage &msg);
     unsigned played_line();          // the job line the machine has reached
     std::string place(uint32_t mark) const;   // "file.ngc:12", empty for none
     struct Head {
@@ -75,7 +76,7 @@ public:
 private:
     bool can_call(std::string &err) const;
     bool called(const std::string &sub, StreamOutput *reply, bool on_job);
-    bool advance(SerialMessage &msg);
+    Next advance(SerialMessage &msg);
     bool frozen() const { return pause == ALL || (pause == JOB && !in_sub()); }
     void finish();
     void stop_at(uint32_t at);
