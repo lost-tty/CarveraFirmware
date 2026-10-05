@@ -135,6 +135,7 @@ private:
     volatile bool jogging{false};
     volatile bool position_lost{false};
     volatile unsigned int acting{0}, ticketing{0};
+    volatile uint32_t ticket_from{0};
 
     static const uint16_t k_stack_words = 576;
     static const UBaseType_t k_priority = 2;

@@ -122,7 +122,7 @@ MachineTask::Where MachineTask::where() const
     }
 
     unsigned int t= ticketing;
-    if(t != 0 && !THECONVEYOR.blocks_pending()) {
+    if(t != 0 && THECONVEYOR.passed(ticket_from)) {
         return {t, true};
     }
 
@@ -277,6 +277,7 @@ void MachineTask::serve_tickets()
         } else if(t.kind == Ticket::MOVE) {
             THEROBOT.delta_move_sync(t.move.delta, t.move.scale, t.move.naxis);
         } else {
+            ticket_from= THECONVEYOR.queue_mark();
             ticketing= t.gcode.mark;
             t.job(t.gcode, OnMachine{});
             if(ticketing != 0) {
