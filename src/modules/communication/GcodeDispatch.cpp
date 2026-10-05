@@ -353,9 +353,7 @@ void GcodeDispatch::program_end()
 
 static float wcs_z()
 {
-    float mpos[3];
-    THEROBOT.get_real_machine_position(mpos);
-    Robot::wcs_t pos= THEROBOT.mcs2wcs(mpos);
+    Robot::wcs_t pos= THEROBOT.mcs2wcs(THEROBOT.get_axis_position());
     return THEROBOT.from_millimeters(std::get<Z_AXIS>(pos));
 }
 
