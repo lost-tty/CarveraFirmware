@@ -279,6 +279,13 @@ bool GcodeDispatch::safe_while_running(const gcode::Words &words)
     return found_one;
 }
 
+// $H: an alarm does not stand in the way of homing
+void GcodeDispatch::home(StreamOutput *stream)
+{
+    machine_task.unlock(stream);
+    run_mdi(SerialMessage{stream, "G28.2", 0, nullptr});
+}
+
 // lines safe beside a running program go at once, the rest is queued
 void GcodeDispatch::run_mdi(const SerialMessage &msg)
 {

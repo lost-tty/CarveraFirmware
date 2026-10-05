@@ -216,10 +216,7 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
                 break;
 
             case 'H':
-                {
-                    machine_task.unlock(new_message.stream);
-                    gcode_dispatch.run_mdi(SerialMessage{new_message.stream, "G28.2", 0});
-                }
+                gcode_dispatch.home(new_message.stream);
                 break;
 
             case 'S':

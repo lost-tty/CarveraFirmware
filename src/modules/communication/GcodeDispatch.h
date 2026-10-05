@@ -45,6 +45,7 @@ public:
     bool homed_check_enabled() const { return homed_check; }
     Parameters &parameters() { return params; }
     void run_mdi(const SerialMessage &msg);
+    void home(StreamOutput *stream);
     // queued console G-code, also taken while a job plays
     bool buffer(const std::string &line, StreamOutput *stream, std::string &err);
     void drop_buffered() { buffered.clear(); }
