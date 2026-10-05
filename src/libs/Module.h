@@ -8,18 +8,7 @@
 #ifndef MODULE_H
 #define MODULE_H
 
-// See : http://smoothieware.org/listofevents
-// When adding a new event the virtual method needs to be defined in class Module and the method pointer need to be defined in
-// Module.cpp:16 in the same order
-enum _EVENT_ENUM {
-    ON_MAIN_LOOP,
-    NUMBER_OF_DEFINED_EVENTS
-};
-
-class Module;
 class Gcode;
-typedef void (Module::*ModuleCallback)(void *argument);
-extern const ModuleCallback kernel_callback_functions[NUMBER_OF_DEFINED_EVENTS];
 
 // Module base class
 // All modules must extend this class, see http://smoothieware.org/moduleexample
@@ -30,14 +19,8 @@ public:
     virtual ~Module();
     virtual void on_module_loaded() {};
 
-    void register_for_event(_EVENT_ENUM event_id);
-    void unregister_for_event(_EVENT_ENUM event_id);
-
     Module *next_gcode_handler= nullptr; // GcodeDispatch threads its handler list through this
 
-    // event callbacks, not every module will implement all of these
-    // there should be one for each _EVENT_ENUM
-    virtual void on_main_loop(void *) {};
     virtual void on_gcode_received(Gcode *) {};
 };
 

@@ -32,7 +32,7 @@ class Player : public Module {
 
     public:
         void on_module_loaded();
-        void on_main_loop(void *) override;
+        void service();
         static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
         bool m1_stops_program() const { return m1_stops; }
         bool get_progress(struct pad_progress &p);

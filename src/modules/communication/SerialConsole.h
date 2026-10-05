@@ -26,7 +26,7 @@ class SerialConsole : public Module, public FrameConsole {
 
         void on_module_loaded();
         void on_serial_char_received();
-        void on_main_loop(void * argument);
+        void service();
 
         int putc(int c);
         int getc(void);

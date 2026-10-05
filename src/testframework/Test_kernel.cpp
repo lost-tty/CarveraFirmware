@@ -36,7 +36,6 @@ This is aprt of the Smoothie test framework, it generates a Mockable Kernl so ke
 
 Kernel* Kernel::instance;
 
-// The kernel is the central point in Smoothie : it stores modules, and handles event calls
 Kernel::Kernel(){
     instance= this; // setup the Singleton instance of the kernel
 
@@ -67,44 +66,6 @@ void Kernel::add_module(Module* module){
     module->on_module_loaded();
 }
 
-// Adds a hook for a given module and event
-void Kernel::register_for_event(_EVENT_ENUM id_event, Module *mod){
-    this->hooks[id_event].push_back(mod);
-}
-
-static std::map<_EVENT_ENUM, std::function<void(void*)> > event_callbacks;
-
-// Call a specific event with an argument
-void Kernel::call_event(_EVENT_ENUM id_event, void * argument){
-    for (auto m : hooks[id_event]) {
-        (m->*kernel_callback_functions[id_event])(argument);
-    }
-    if(event_callbacks.find(id_event) != event_callbacks.end()){
-        event_callbacks[id_event](argument);
-    }else{
-        printf("call_event for event: %d not handled\n", id_event);
-    }
-}
-
-// These are used by tests to test for various things. basically mocks
-bool Kernel::kernel_has_event(_EVENT_ENUM id_event, Module *mod)
-{
-    for (auto m : hooks[id_event]) {
-        if(m == mod) return true;
-    }
-    return false;
-}
-
-void Kernel::unregister_for_event(_EVENT_ENUM id_event, Module *mod)
-{
-    for (auto i = hooks[id_event].begin(); i != hooks[id_event].end(); ++i) {
-        if(*i == mod) {
-            hooks[id_event].erase(i);
-            return;
-        }
-    }
-}
-
 void test_kernel_setup_config(const char* start, const char* end)
 {
     THEKERNEL->config= new Config(new FirmConfigSource("rom", start, end) );
@@ -116,15 +77,4 @@ void test_kernel_teardown()
 {
     delete THEKERNEL->config;
     THEKERNEL->config= nullptr;
-    event_callbacks.clear();
-}
-
-void test_kernel_trap_event(_EVENT_ENUM id_event, std::function<void(void*)> fnc)
-{
-    event_callbacks[id_event]= fnc;
-}
-
-void test_kernel_untrap_event(_EVENT_ENUM id_event)
-{
-    event_callbacks.erase(id_event);
 }

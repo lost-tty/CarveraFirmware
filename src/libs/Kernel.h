@@ -55,11 +55,6 @@ class Kernel {
         void init();
 
         void add_module(Module* module);
-        void register_for_event(_EVENT_ENUM id_event, Module *module);
-        void call_event(_EVENT_ENUM id_event, void * argument= nullptr);
-
-        bool kernel_has_event(_EVENT_ENUM id_event, Module *module);
-        void unregister_for_event(_EVENT_ENUM id_event, Module *module);
 
         bool is_using_leds() const { return use_leds; }
         void configure(const void *cfg);
@@ -97,9 +92,7 @@ class Kernel {
         uint8_t get_state();
 
     private:
-        // When a module asks to be called for a specific event ( a hook ), this is where that request is remembered
         mbed::I2C* i2c;
-        std::array<std::vector<Module*>, NUMBER_OF_DEFINED_EVENTS> hooks;
 
         struct {
             bool feed_hold:1;

@@ -84,7 +84,6 @@ void Kernel::configure(const void *cfg)
 }
 
 
-// The kernel is the central point in Smoothie : it stores modules, and handles event calls
 void Kernel::init()
 {
     feed_hold = false;
@@ -454,18 +453,10 @@ void Kernel::add_module(Module* module)
     module->on_module_loaded();
 }
 
-// Adds a hook for a given module and event
-void Kernel::register_for_event(_EVENT_ENUM id_event, Module *mod)
-{
-    this->hooks[id_event].push_back(mod);
-}
-
-// Call a specific event with an argument
-
-
 void Kernel::serve_io()
 {
     watchdog.alive();
+    serial->service();
     usb_host.service();
     wifi_provider.service();
     wireless_probe.service();
@@ -477,32 +468,6 @@ void Kernel::serve_main()
     machine_task.trace();
     serve_io();
     gcode_dispatch.service();
-    call_event(ON_MAIN_LOOP);
-}
-
-void Kernel::call_event(_EVENT_ENUM id_event, void * argument)
-{
-    for (auto m : hooks[id_event]) {
-        (m->*kernel_callback_functions[id_event])(argument);
-    }
-}
-
-// These are used by tests to test for various things. basically mocks
-bool Kernel::kernel_has_event(_EVENT_ENUM id_event, Module *mod)
-{
-    for (auto m : hooks[id_event]) {
-        if(m == mod) return true;
-    }
-    return false;
-}
-
-void Kernel::unregister_for_event(_EVENT_ENUM id_event, Module *mod)
-{
-    for (auto i = hooks[id_event].begin(); i != hooks[id_event].end(); ++i) {
-        if(*i == mod) {
-            hooks[id_event].erase(i);
-            return;
-        }
-    }
+    player.service();
 }
 

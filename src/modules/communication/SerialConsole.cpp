@@ -30,9 +30,6 @@ void SerialConsole::on_module_loaded() {
     // We want to be called every time a new char is received
     this->serial->attach(this, &SerialConsole::on_serial_char_received, mbed::Serial::RxIrq);
 
-    // We only call the command dispatcher in the main loop, nowhere else
-    this->register_for_event(ON_MAIN_LOOP);
-
     // Add to the pack of streams kernel can call to, for example for broadcasting
     THEKERNEL->streams.append_stream(this);
 }
@@ -46,7 +43,8 @@ void SerialConsole::on_serial_char_received() {
     }
 }
 
-void SerialConsole::on_main_loop(void * argument){
+void SerialConsole::service()
+{
     while (!transferring && rx_raw.size() > 0) {
         char chunk[32];
         size_t n = 0;

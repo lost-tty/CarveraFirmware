@@ -44,7 +44,6 @@ void Player::on_module_loaded()
 {
     for (unsigned i= 0; COMMANDS[i].name != nullptr; i++) SimpleShell::add_command(shell_slots[i], COMMANDS[i].name, &Player::shell, this, COMMANDS[i].help);
     GcodeDispatch::add_handler(this);
-    register_for_event(ON_MAIN_LOOP);
     ADD_MCODE(m0, 0, BARRIER, Player::program_stop);
     ADD_MCODE(m27, 27, BESIDE_JOB, Player::progress_report);
     ADD_MCODE(m333, 333, IMMEDIATE, Player::optional_stop_mode);
@@ -291,7 +290,7 @@ void Player::progress_command( string parameters, StreamOutput *stream )
     }
 }
 
-void Player::on_main_loop(void *)
+void Player::service()
 {
     sample_runtime();
     watch.tick();
