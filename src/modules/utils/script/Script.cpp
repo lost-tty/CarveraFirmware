@@ -629,6 +629,30 @@ bool Runner::call(const char *sub, const float *args, unsigned nargs, std::strin
     return push(index, args, nargs, err);
 }
 
+std::string Runner::frame_args(unsigned level) const
+{
+    const Frame &f = frames[level];
+    std::string out;
+    char buf[Library::MAX_LABEL + 24];
+    for (unsigned n = 0; n < MAX_ARGS; n++) {
+        if (!(f.has_arg & (1u << n)))
+            continue;
+
+        snprintf(buf, sizeof(buf), "%s%u=%g", out.empty() ? "" : " ", n + 1,
+                 (double)args[f.base + n]);
+        out += buf;
+    }
+    for (const Named &v : named) {
+        if (v.depth != level)
+            continue;
+
+        snprintf(buf, sizeof(buf), "%s%s=%g", out.empty() ? "" : " ", v.name.c_str(),
+                 (double)v.value);
+        out += buf;
+    }
+    return out;
+}
+
 bool Runner::start_main(unsigned offset, std::string &err)
 {
     reset();

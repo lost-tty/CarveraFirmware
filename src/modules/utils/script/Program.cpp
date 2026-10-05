@@ -61,7 +61,7 @@ bool Program::run_sub(const char *sub)
     return false;
 }
 
-bool Program::start_job(const std::string &path, std::string &err)
+bool Program::load_job(const std::string &path, std::string &err)
 {
     script::Source &src= source;
     library.reset();
@@ -75,11 +75,16 @@ bool Program::start_job(const std::string &path, std::string &err)
     }
     name= path;
     played= 0;
+    paused= waiting= true;
     return true;
 }
 
 bool Program::can_call(std::string &err) const
 {
+    if(holding()) {
+        err= "paused before a line, step or resume first";
+        return false;
+    }
     if(!in_sub())
         return true;
 
@@ -129,23 +134,28 @@ bool Program::step(SerialMessage &msg)
 unsigned Program::played_line()
 {
     uint32_t at[script::Runner::MAX_DEPTH];
-    machine_chain(at);
+    unsigned n= chain(machine_task.where().mark, at);
+    if(at[n - 1] != 0)
+        played= at[n - 1];
+
     return played;
 }
 
 unsigned Program::heads(Head *out)
 {
     uint32_t at[script::Runner::MAX_DEPTH];
-    unsigned levels= machine_chain(at), n= 0;
-    while(levels-- > 0) {
-        int segment= file_of(at[levels]);
+    unsigned depth= shown_chain(at), n= 0;
+    for (unsigned i= depth; i-- > 0;) {
+        // the outermost is the job's when one plays, even before its first line
+        bool job= i == depth - 1 && playing();
+        int segment= job ? source.job() : file_of(at[i]);
         if(segment < 0)
             continue;
 
         const script::Source::Segment &s= source.segments[segment];
-        bool job= segment == source.job();
-        unsigned line= line_of(at[levels]);
-        out[n++]= Head{s.path, s.size, line, job ? runner->main().line - 1 : line, job};
+        unsigned line= line_of(at[i]);
+        out[n++]= Head{s.path, s.size, line, job ? runner->main().line - 1 : line, job,
+                       job ? 0 : frame_of(at[i])};
     }
     return n;
 }
@@ -161,15 +171,23 @@ unsigned Program::chain(uint32_t mark, uint32_t *out) const
     return n;
 }
 
-unsigned Program::machine_chain(uint32_t *out)
+unsigned Program::shown_chain(uint32_t *out)
 {
-    unsigned n= chain(machine_task.where().mark, out);
-    if(out[n - 1] != 0)
-        played= out[n - 1];
-    else if(playing())
-        out[n - 1]= played;
+    unsigned n= chain(holding() ? held.msg.mark : machine_task.where().mark, out);
+    if(out[n - 1] == 0 && playing())
+        out[n - 1]= played_line();
 
     return n;
+}
+
+int Program::frame_of(uint32_t at) const
+{
+    for (unsigned level= 0; level < runner->depth(); level++) {
+        uint32_t entered= runner->entered(level);
+        if(entered != 0 && (entered & 0xFF) == call_of(at))
+            return level;
+    }
+    return -1;
 }
 
 int Program::file_of(uint32_t at) const
@@ -236,6 +254,12 @@ bool Program::advance(SerialMessage &msg)
         return false;
     }
 
+    if(holding()) {
+        msg= held.msg;
+        held.depth= 0;
+        return true;
+    }
+
     if(!runner->running()) {
         if(machine_task.idle()) end_job();
         return false;
@@ -251,6 +275,11 @@ bool Program::advance(SerialMessage &msg)
                 printk("%s> %s\n", place(msg.mark).c_str(), msg.message.c_str());
 
             msg.params= &runner->parameters();
+            if(runner->depth() <= stop_depth) {
+                held= Held{msg, runner->depth()};
+                paused= true;
+                return false;
+            }
             return true;
         }
         case script::Runner::MESSAGE:
@@ -314,8 +343,16 @@ void Program::suspend()
 
 void Program::resume()
 {
-    paused= false;
+    stop_depth= 0;
+    paused= waiting= false;
     machine_task.hold(false);
+}
+
+void Program::step(Step how)
+{
+    unsigned depth= holding() ? held.depth : runner->depth();
+    resume();
+    stop_depth= how == INTO ? EVERY : how == OVER ? depth : depth - 1;
 }
 
 bool Program::cancel_pause()
@@ -329,7 +366,11 @@ bool Program::cancel_pause()
 
 bool Program::jump(unsigned to, std::string &err)
 {
-    return runner->goto_main(to, err);
+    if(!runner->goto_main(to, err))
+        return false;
+
+    held.depth= 0;
+    return true;
 }
 
 // false: nothing is queued ahead of it, so the caller stops the job itself
@@ -356,7 +397,9 @@ void Program::stop()
         finish();
     }
     end_job();
-    paused= false;
+    stop_depth= 0;
+    held.depth= 0;
+    paused= waiting= false;
     stopping= false;
     gcode_dispatch.program_end();
 }
@@ -432,7 +475,7 @@ void Program::list_shell(void *self, const char *, std::string cmd, StreamOutput
     }
 
     uint32_t at[script::Runner::MAX_DEPTH];
-    unsigned levels= me->machine_chain(at);
+    unsigned levels= me->shown_chain(at);
     while(levels-- > 0) {
         int segment= me->file_of(at[levels]);
         if(segment < 0)

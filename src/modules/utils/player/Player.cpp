@@ -126,9 +126,10 @@ const Player::Cmd Player::COMMANDS[] = {
     {"abort",    &Player::abort_command,    "abort - stop the machine, held or not, and close the file if one is playing"},
     {"suspend",  &Player::suspend_command,  "suspend [h] - suspend the job, h keeps the spindle on"},
     {"resume",   &Player::resume_command,   "resume - resume a suspended job"},
+    {"step",     &Player::step_command,     "step [over|out] - next line, over a sub, out of it"},
     {"goto",     &Player::goto_command,     "goto line - jump to a line while suspended"},
     {"buffer",   &Player::buffer_command,   "buffer <gcode> - queue a gcode line to run before the next file line"},
-    {"job",      &Player::job_command,      "job status|watch"},
+    {"job",      &Player::job_command,      "job status|watch|load"},
     {nullptr, nullptr, nullptr},
 };
 
@@ -153,37 +154,55 @@ void Player::buffer_command( string parameters, StreamOutput *stream )
     stream->printf("Command buffered: %s\r\n", parameters.c_str());
 }
 
-// Play a gcode file by considering each line as if it was received on the serial console
-void Player::play_command( string parameters, StreamOutput *stream )
+bool Player::open_job(const string &path, StreamOutput *stream)
 {
-    string path = absolute_from_relative(shift_parameter(parameters), stream);
-
     if (program.busy() || program.suspended()) {
         stream->printf("Currently printing, abort print first\r\n");
-        return;
-    }
-
-    if (!machine_task.homed()) {
-        stream->printf("error:Machine has not been homed, home first\r\n");
-        return;
+        return false;
     }
 
     string err;
-    if (!program.start_job(path, err)) {
+    if (!program.load_job(path, err)) {
         stream->printf("%s\r\n", err.c_str());
-        return;
+        return false;
     }
 
-    stream->printf("Playing %s\r\n", path.c_str());
     THECONVEYOR.clear_executed();
+    run_ticks = 0;
+    sampled_at = xTaskGetTickCount();
+    return true;
+}
 
+static bool homed(StreamOutput *stream)
+{
+    if (machine_task.homed())
+        return true;
+
+    stream->printf("error:Machine has not been homed, home first\r\n");
+    return false;
+}
+
+void Player::play_command( string parameters, StreamOutput *stream )
+{
+    string path = absolute_from_relative(shift_parameter(parameters), stream);
+    if (!homed(stream) || !open_job(path, stream))
+        return;
+
+    program.resume();
+    stream->printf("Playing %s\r\n", path.c_str());
     if (program.job_size() == 0) {
         stream->printf("WARNING - Could not get file size\r\n");
     } else {
         stream->printf("  File size %u\r\n", program.job_size());
     }
-    run_ticks = 0;
-    sampled_at = xTaskGetTickCount();
+}
+
+void Player::job_load( string parameters, StreamOutput *stream )
+{
+    string path = absolute_from_relative(shift_parameter(parameters), stream);
+    if (open_job(path, stream)) {
+        stream->printf("Loaded %s\r\n", path.c_str());
+    }
 }
 
 // Goto a certain line when playing a file
@@ -262,6 +281,7 @@ void Player::on_main_loop(void *)
 const SimpleShell::Sub<Player> Player::JOB_SUBS[] = {
     {"status", &Player::job_status, "job state"},
     {"watch",  &Player::job_watch,  "on|off: push status changes"},
+    {"load",   &Player::job_load,   "<file>: load without starting"},
     {nullptr, nullptr, nullptr},
 };
 
@@ -272,24 +292,36 @@ void Player::job_command( string parameters, StreamOutput *stream )
 
 const char *Player::phase_name() const
 {
+    if (program.loaded())
+        return "loaded";
+
     if (program.suspended())
         return "pause";
 
     return THEKERNEL->get_feed_hold() ? "hold" : "run";
 }
 
+static const char *flags()
+{
+    return program.stepping() ? "single" : "-";
+}
+
 // "<role> <phase> <outcome> <flags> <line> <read> <secs> <size> <path>"
 static void print_head(StreamOutput *stream, const char *phase, const char *outcome,
                        unsigned long secs, const Program::Head &h)
 {
-    stream->printf("%s %s %s - %u %u %lu %lx %s\r\n", h.job ? "file" : "script", phase, outcome,
-                   h.line, h.read, secs, (unsigned long)h.size, h.path);
+    stream->printf("%s %s %s %s %u %u %lu %lx %s\r\n", h.job ? "file" : "script", phase,
+                   outcome, flags(), h.line, h.read, secs, (unsigned long)h.size, h.path);
+    string args = program.args(h);
+    if (!args.empty()) {
+        stream->printf("args %s\r\n", args.c_str());
+    }
 }
 
 void Player::job_status( string, StreamOutput *stream )
 {
     if (!program.busy() && last.path.empty()) {
-        stream->printf("none idle - - 0 0 0 - -\r\n");
+        stream->printf("none idle - %s 0 0 0 - -\r\n", flags());
         return;
     }
     if (!program.busy()) {
@@ -325,7 +357,8 @@ void Player::job_ended(Program::Outcome how)
 {
     unsigned long secs = calculate_elapsed_secs();
     unsigned line = program.played_line();
-    last = Last{{nullptr, program.job_size(), line, line, true}, program.job_name(), how, secs};
+    last = Last{{nullptr, program.job_size(), line, line, true, -1}, program.job_name(), how,
+                secs};
     last.head.path = last.path.c_str();
     printk("%s ran for %02lu:%02lu:%02lu\n", program.job_name(),
            secs / 3600, (secs % 3600) / 60, secs % 60);
@@ -431,6 +464,28 @@ void Player::resume_command(string parameters, StreamOutput *stream )
         return;
     }
 
+    if (program.loaded() && !homed(stream))
+        return;
+
     program.resume();
     stream->printf("Playing file resumed\n");
+}
+
+void Player::step_command(string parameters, StreamOutput *stream)
+{
+    string how = shift_parameter(parameters);
+    if (how != "" && how != "over" && how != "out") {
+        stream->printf("error:step [over|out]\r\n");
+        return;
+    }
+
+    if (!program.suspended()) {
+        stream->printf("Not suspended\n");
+        return;
+    }
+
+    if (program.loaded() && !homed(stream))
+        return;
+
+    program.step(how == "over" ? Program::OVER : how == "out" ? Program::OUT : Program::INTO);
 }

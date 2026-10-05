@@ -6,11 +6,10 @@
 #include "libs/Killable.h"
 #include "GcodeDispatch.h"
 #include "Macros.h"
+#include "libs/SerialMessage.h"
 
 #include <deque>
 #include <string>
-
-struct SerialMessage;
 
 class Program : public Module, public Killable {
 public:
@@ -26,7 +25,7 @@ public:
     SimpleShell::Registered list_slot, trace_slot, macro_slot;
 
     Macros &macros() { return files; }
-    bool start_job(const std::string &path, std::string &err);
+    bool load_job(const std::string &path, std::string &err);   // waits for resume
     bool call(const char *sub, const float *args, unsigned nargs, StreamOutput *reply,
               std::string &err);
     bool call_line(const std::string &line, StreamOutput *reply, std::string &err);
@@ -43,7 +42,9 @@ public:
         unsigned line;      // the machine's
         unsigned read;      // the program's
         bool job;
+        int frame;          // the runner's, -1: returned
     };
+    std::string args(const Head &h) const { return h.frame < 0 ? "" : runner->frame_args(h.frame); }
     unsigned heads(Head *out);   // the job's first, then each sub the machine is in
     enum Outcome { DONE, STOPPED, HALTED };
     void refused(uint32_t mark);
@@ -57,8 +58,12 @@ public:
     unsigned job_read() const;
 
     bool suspended() const { return paused; }
+    bool loaded() const { return waiting; }
+    bool stepping() const { return stop_depth != 0; }
     void suspend();
     void resume();
+    enum Step { INTO, OVER, OUT };
+    void step(Step how);   // resume, pause before the next line on that level
     void ask_pause() { pause_asked= playing(); }  // at the next job line
     bool cancel_pause();
     bool jump(unsigned line, std::string &err);
@@ -71,13 +76,13 @@ private:
     bool can_call(std::string &err) const;
     bool called(const std::string &sub, StreamOutput *reply, bool on_job);
     bool advance(SerialMessage &msg);
-    bool frozen() const { return paused && !in_sub(); }
+    bool frozen() const { return paused && (stepping() || !in_sub()); }
     void finish();
     void stop_at(uint32_t at);
     void note_calls();
     unsigned chain(uint32_t mark, uint32_t *out) const;   // the mark and its callers up to the job
-    // the job's last played line stands in for the console
-    unsigned machine_chain(uint32_t *out);
+    // from the line paused before, else the machine's; the console's outermost is the job's
+    unsigned shown_chain(uint32_t *out);
     static unsigned call_of(uint32_t mark) { return mark >> 24; }
     static unsigned line_of(uint32_t mark) { return mark & 0xFFFFFF; }
     uint32_t mark_of(unsigned level, unsigned line) const
@@ -85,6 +90,7 @@ private:
         return (runner->entered(level) & 0xFF) << 24 | line;
     }
     int file_of(uint32_t mark) const;
+    int frame_of(uint32_t mark) const;
     std::string file_line(int segment, unsigned line) const;
     void forget();
     void end_job();
@@ -109,6 +115,16 @@ private:
     uint32_t stop_after= 0;             // the queue mark the refused line was written before
     uint32_t stop_mark= 0;
     bool trace= false;
+    static const unsigned EVERY = ~0u;
+    unsigned stop_depth= 0;             // pause before a line at most this deep
+    // the line paused before
+    struct Held {
+        SerialMessage msg;
+        unsigned depth;     // 0: none
+    };
+    Held held{{nullptr, "", 0, nullptr}, 0};
+    bool holding() const { return held.depth != 0; }
+    bool waiting= false;
     bool nested= false;                 // a sub runs on the job
     bool ending= false;                 // the job is read to its end, the machine finishes it
     bool paused= false;

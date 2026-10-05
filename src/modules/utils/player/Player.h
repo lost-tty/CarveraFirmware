@@ -52,14 +52,17 @@ class Player : public Module {
     private:
         typedef void (Player::*command_t)(string, StreamOutput *);
         static const struct Cmd { const char *name; command_t fn; const char *help; } COMMANDS[];
-        SimpleShell::Registered shell_slots[8];
+        SimpleShell::Registered shell_slots[9];
         static const SimpleShell::Sub<Player> JOB_SUBS[];
         void play_command( string parameters, StreamOutput* stream );
+        bool open_job(const string &path, StreamOutput *stream);
+        void job_load( string parameters, StreamOutput* stream );
         void progress_command( string parameters, StreamOutput* stream );
         void abort_command( string parameters, StreamOutput* stream );
         void suspend_command( string parameters, StreamOutput* stream );
         void suspend_now();
         void resume_command( string parameters, StreamOutput* stream );
+        void step_command( string parameters, StreamOutput* stream );
         void goto_command( string parameters, StreamOutput* stream );
         void buffer_command( string parameters, StreamOutput* stream );
         void job_command( string parameters, StreamOutput* stream );
@@ -83,7 +86,7 @@ class Player : public Module {
             Program::Outcome how;
             unsigned long secs;
         };
-        Last last{{nullptr, 0, 0, 0, true}, "", Program::DONE, 0};
+        Last last{{nullptr, 0, 0, 0, true, -1}, "", Program::DONE, 0};
 };
 
 extern Player player;

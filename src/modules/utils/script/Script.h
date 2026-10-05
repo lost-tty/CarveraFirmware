@@ -119,6 +119,7 @@ public:
     unsigned next_line(unsigned level) const { return frames[level].line; }
     // new on each call, 0 for the job; the low byte of a sub's is never 0
     uint32_t entered(unsigned level) const { return frames[level].entered; }
+    std::string frame_args(unsigned level) const;   // "1=5 depth=2"
     // for the dispatcher: the running sub's arguments and #<name>s, then the machine's
     const gcode::ParamStore &parameters() const { return store; }
     float aborted() const { return abort_reason; } // non-zero after an abort ended the script
