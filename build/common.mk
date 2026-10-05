@@ -358,7 +358,7 @@ $(OUTDIR)/%.o : %.s makefile
 
 # the machine scripts as one cpio archive, served by MacroFS under /macros
 MACROS = $(sort $(wildcard macros/*.ngc))
-$(OUTDIR)/macros.cpio : $(MACROS) makefile ../build/macros.sh
+$(OUTDIR)/macros.cpio : $(MACROS) macros makefile ../build/macros.sh
 	$(Q) $(MKDIR) $(call convert-slash,$(dir $@)) $(QUIET)
 	$(Q) $(SHELL) ../build/macros.sh $(MACROS) > $@
 
