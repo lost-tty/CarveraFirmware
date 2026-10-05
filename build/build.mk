@@ -41,10 +41,6 @@
 #               preprocessed assembly language sources.
 #   AS_FLAGS: Additional assembler flags used when building assembly language
 #             sources.
-#   NO_FLOAT_SCANF: When set to 1, scanf() will not support %f specifier to
-#                   input floating point values.  Reduces code size.
-#   NO_FLOAT_PRINTF: When set to 1, scanf() will not support %f specifier to
-#                    output floating point values.  Reduces code size.
 #   VERBOSE: When set to 1, all build commands will be displayed to console.
 #            It defaults to 0 which suppresses the output of the build tool
 #            command lines themselves.

@@ -232,12 +232,6 @@ LDFLAGS = $(DEVICE_FLAGS) -specs=$(BUILD_DIR)/startfile.spec
 LDFLAGS += -Wl,-Map=$(OUTDIR)/$(PROJECT).map,--cref,--gc-sections,--wrap=_isatty,--wrap=_malloc_r,--wrap=realloc,--wrap=_free_r$(MRI_WRAPS)
 LDFLAGS += -T$(LSCRIPT)  -L $(EXTERNAL_DIR)/gcc/LPC1768
 #LDFLAGS += -L $(BUILD_DIR) -lM8266WIFI
-ifneq "$(NO_FLOAT_SCANF)" "1"
-LDFLAGS += -u _scanf_float
-endif
-ifneq "$(NO_FLOAT_PRINTF)" "1"
-LDFLAGS += -u _printf_float
-endif
 
 
 #  Compiler/Assembler/Linker Paths

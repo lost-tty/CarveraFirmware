@@ -24,8 +24,6 @@ DEVICE=LPC11U24
 ARCHITECTURE=armv6-m
 DEVICE_FLAGS=-mcpu=cortex-m0 -mthumb
 DEVICE_CFLAGS=$(DEVICE_FLAGS)
-NO_FLOAT_SCANF?=1
-NO_FLOAT_PRINTF?=1
 
 
 # MRI enabled builds aren't supported on LPC11U24 so force Release build.

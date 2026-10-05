@@ -317,7 +317,7 @@ int main() {
     // Create a FreeRTOS task main loop
     TaskHandle_t xHandle = xTaskCreateStatic(
         vTaskMainLoop,        // Task function
-        "MainLoop",           // Task name (for debugging)
+        "Main",               // Task name (for debugging)
         MAINLOOP_STACK_SIZE,  // Stack size (in words, not bytes)
         NULL,                 // Task parameters (none)
         1,                    // Task priority

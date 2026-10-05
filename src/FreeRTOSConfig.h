@@ -4,7 +4,7 @@
 
 #include "system_LPC17xx.h"
 
-#define configUSE_NEWLIB_REENTRANT      1
+#define configUSE_NEWLIB_REENTRANT      0
 #define configUSE_PREEMPTION            1
 #define configUSE_IDLE_HOOK	            1
 #define configUSE_TICK_HOOK             0
@@ -16,7 +16,7 @@
 #define configCPU_CLOCK_HZ              ( ( unsigned long ) SystemCoreClock )
 #define configTICK_RATE_HZ              ( ( portTickType ) 1000 )
 #define configMINIMAL_STACK_SIZE        ( ( unsigned short ) 40 )
-#define configMAX_TASK_NAME_LEN	        ( 12 )
+#define configMAX_TASK_NAME_LEN	        ( 8 )
 #define configUSE_TRACE_FACILITY        1
 // `task` shows each task's share of the CPU; the microsecond ticker is the clock
 #include <stdint.h>
