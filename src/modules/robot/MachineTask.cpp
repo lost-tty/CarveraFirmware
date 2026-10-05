@@ -10,6 +10,7 @@ uint8_t Profile::used= 0;
 #include "Endstops.h"
 #include "Program.h"
 #include "libs/Kernel.h"
+#include "libs/MainWake.h"
 #include "libs/StepTicker.h"
 #include "libs/Watchdog.h"
 #include "libs/Killable.h"
@@ -250,7 +251,7 @@ void MachineTask::ask_drain()
 void MachineTask::drop_all()
 {
     uint8_t slot;
-    while(xQueueReceive(full_slots, &slot, 0) == pdTRUE) xQueueSend(free_slots, &slot, 0);
+    while(xQueueReceive(full_slots, &slot, 0) == pdTRUE) free_slot(slot);
 }
 
 void MachineTask::serve_tickets()
@@ -260,7 +261,7 @@ void MachineTask::serve_tickets()
         // a job that returns into a pending stop must not be followed by the next one: the loop
         // that runs the stop comes after this
         if(interrupted()) {
-            xQueueSend(free_slots, &slot, 0);
+            free_slot(slot);
             drop_all();
             return;
         }
@@ -268,7 +269,7 @@ void MachineTask::serve_tickets()
         xEventGroupClearBits(state, k_idle);
 
         Ticket t= ring[slot];
-        xQueueSend(free_slots, &slot, 0);   // the copy is ours, the slot can be refilled
+        free_slot(slot);   // the copy is ours, the slot can be refilled
 
         if(t.kind == Ticket::JOG_HELD) {
             // the jog this takes over from is braking, and its flush would take a block queued now
@@ -469,11 +470,20 @@ void MachineTask::finish_clear()
     xEventGroupClearBits(state, k_halted);
 }
 
+void MachineTask::free_slot(uint8_t slot)
+{
+    xQueueSend(free_slots, &slot, 0);
+    wake_main();
+}
+
 void MachineTask::loop()
 {
     while(true) {
         // halt() runs in interrupts and cannot touch an event group, so the bit follows here
-        if(halted) xEventGroupSetBits(state, k_halted);
+        if(halted && !(xEventGroupGetBits(state) & k_halted)) {
+            xEventGroupSetBits(state, k_halted);
+            wake_main();
+        }
 
         dispatch_halt();
         if(clearing) finish_clear();
@@ -494,12 +504,16 @@ void MachineTask::loop()
         serve_tickets();
 
         vTaskSuspendAll();
+        EventBits_t was= xEventGroupGetBits(state);
         bool quiet= !draining && !stopping && !clearing
                  && uxQueueMessagesWaiting(full_slots) == 0 && THECONVEYOR.is_idle();
         if(quiet) xEventGroupSetBits(state, k_idle);
         if(THEKERNEL->get_feed_hold()) xEventGroupSetBits(state, k_held);
         else xEventGroupClearBits(state, k_held);
+        bool changed= (xEventGroupGetBits(state) ^ was) & (k_idle | k_held);
         xTaskResumeAll();
+        if(changed)
+            wake_main();
 
         tick();
     }

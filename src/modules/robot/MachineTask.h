@@ -131,6 +131,7 @@ private:
     static void run(void *);
     void loop();
     void serve_tickets();
+    void free_slot(uint8_t slot);
     void finish_clear();
     volatile bool jogging{false};
     volatile bool jog_moving{false};
