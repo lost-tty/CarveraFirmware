@@ -88,6 +88,9 @@ void Conveyor::cleanup()
 bool Conveyor::can_blend(uint32_t w) const
 {
     if(queue.is_empty() || fed_i == queue.head_i) return false;
+    if(fence.on && fence.at == queue.head_i)
+        return false;
+
     if(pending_actions.waiting_after(queued)) return false;
     if(fed_i != queue.prev(queue.head_i)) return true;
     // a block being fed can still blend while in its plateau, with the window not yet written
@@ -186,7 +189,7 @@ void Conveyor::sweep()
 {
     float rest= THEKERNEL->planner.rest_speed();
     float next2= rest * rest;
-    unsigned int i= queue.head_i;
+    unsigned int i= end_i();
     while(i != fed_i) {
         i= queue.prev(i);
         if(i == fed_i) break;
@@ -203,21 +206,22 @@ void Conveyor::feed_stream()
 {
     StepTicker &ticker= THEKERNEL->step_ticker;
 
-    if(flush || fed_i == queue.head_i) {
+    unsigned int end= end_i();
+    if(flush || fed_i == end) {
         return;
     }
     sweep();
     float rest= THEKERNEL->planner.rest_speed();
     float rest2= rest * rest;
 
-    while(fed_i != queue.head_i) {
+    while(fed_i != end) {
         Block *b= queue.item_ref(fed_i);
         if(!b->is_ready) {
             break;
         }
 
         unsigned int n= queue.next(fed_i);
-        float exit2= n == queue.head_i ? rest2 : limit2[n];
+        float exit2= n == end ? rest2 : limit2[n];
         if(!fed_started) {
             fed_exit2= exit2;
             if(!span_of(fed_i, fed_from, entry2, fed_exit2, fed)) {
@@ -278,10 +282,12 @@ void Conveyor::feed_stream()
             }
             while(chain_j < j) {
                 chain_i= queue.next(chain_i);
-                if(chain_i == queue.head_i) return false;
+                if(chain_i == end)
+                    return false;
+
                 if(!queue.item_ref(chain_i)->is_ready) return false;
                 unsigned int after= queue.next(chain_i);
-                float exit2= after == queue.head_i ? rest2 : limit2[after];
+                float exit2= after == end ? rest2 : limit2[after];
                 if(!span_of(chain_i, 0, chain_exit2, exit2, out)) return false;
                 chain_exit2= exit2;
                 chain_j++;
@@ -303,12 +309,12 @@ void Conveyor::feed_stream()
         if(fed_steps >= up && fed_steps < plateau_end) {
             uint32_t steps= plateau_end - fed_steps;
             float cap2= b->nominal_speed * b->nominal_speed;
-            if(n != queue.head_i) {
+            if(n != end) {
                 float junction= queue.item_ref(n)->max_entry_speed;
                 if(junction * junction < cap2) cap2= junction * junction;
             }
             // while the exit speed can still rise, write only the margin ahead
-            bool open= n == queue.head_i || fed_exit2 < cap2;
+            bool open= n == end || fed_exit2 < cap2;
             uint32_t most= open ? margin : (uint32_t)(hz * k_written_ahead_s);
             uint32_t queued= ticker.steps().ticks_queued();
             if(queued >= most) {
@@ -340,6 +346,7 @@ void Conveyor::feed_stream()
 
 void Conveyor::service()
 {
+    apply_fence();
     // running is false while the main task drains: then every block goes to the ticker at once
     feed_stream();
 
@@ -349,6 +356,7 @@ void Conveyor::service()
     // so the planner is now ahead of the machine and has to be pulled back
     if(flush && queue.is_empty()) {
         pending_actions.clear();
+        fence.on= false;
         flush= false;
         fed_i= queue.head_i;
         fed_from= 0;
@@ -381,6 +389,7 @@ void Conveyor::collect()
     // a halt has already stopped the outputs: an action now would switch one back on
     if(machine_task.is_halted()) {
         pending_actions.clear();
+        fence.on= false;
         fed_i= queue.isr_tail_i;
         fed_from= 0;
         fed_steps= 0;
@@ -389,11 +398,107 @@ void Conveyor::collect()
         StepCompress::rewind();
     }
 
+    run_actions();
+}
+
+void Conveyor::run_actions()
+{
     // an action handler reaches the conveyor again through its own calls; it must not recurse here
     if(in_actions != nullptr) return;
     in_actions= xTaskGetCurrentTaskHandle();
-    pending_actions.run_upto(finished);
+    if(fence.on) {
+        pending_actions.run_upto(finished, fence.edge, fence.edge_mark);
+    } else {
+        pending_actions.run_upto(finished);
+    }
     in_actions= nullptr;
+}
+
+void Conveyor::ask_fence(Fence op)
+{
+    fence.op= op;
+    fence.asked++;
+}
+
+Conveyor::Fenced Conveyor::fenced() const
+{
+    unsigned int i= fence.at;
+    if(!fence.on || i == queue.head_i)
+        return Fenced{false, 0};
+
+    return Fenced{true, queue.item_ref(i)->mark};
+}
+
+unsigned int Conveyor::past_line(unsigned int i) const
+{
+    uint32_t mark= queue.item_ref(i)->mark;
+    do {
+        i= queue.next(i);
+    } while(i != queue.head_i && queue.item_ref(i)->mark == mark);
+    return i;
+}
+
+void Conveyor::apply_fence()
+{
+    if(fence.done == fence.asked)
+        return;
+
+    switch(fence.op) {
+        case FENCE_LINE:
+            if(!fence_after_playing())
+                return;
+
+            break;
+        case FENCE_PASS:
+            if(fence.on && fence.at != queue.head_i)
+                place_fence(past_line(fence.at));
+
+            break;
+        case FENCE_LIFT:
+            fence.on= false;
+            break;
+    }
+    fence.done= fence.asked;
+    run_actions();
+}
+
+// false while braking: a held block is written again on resume, an idle one is not written yet
+bool Conveyor::fence_after_playing()
+{
+    StepTicker &ticker= THEKERNEL->step_ticker;
+    StepTicker::Motion m= ticker.motion();
+    bool unwritten= m == StepTicker::IDLE && fed_i == queue.isr_tail_i && !fed_started;
+    if(m != StepTicker::HELD && !unwritten)
+        return false;
+
+    unsigned int i= queue.isr_tail_i;
+    if(i != queue.head_i) {
+        const Block *b= queue.item_ref(i);
+        uint32_t at= m == StepTicker::HELD ? ticker.held_path() : fed_from;
+        bool in_corner= at + b->blend_out > b->steps_event_count();
+        i= past_line(i);
+        // stopped in the corner into the next line, that line ends first
+        if(in_corner && i != queue.head_i && queue.prev(i) == queue.isr_tail_i)
+            i= past_line(i);
+    }
+    place_fence(i);
+    return true;
+}
+
+// the blocks from i on are unfed: their corner at the fence can still become a stop
+void Conveyor::place_fence(unsigned int i)
+{
+    unsigned int behind= (queue.head_i + BLOCK_QUEUE_LENGTH - i) % BLOCK_QUEUE_LENGTH;
+    fence.edge= queued - behind;
+    fence.edge_mark= i == queue.isr_tail_i ? executed : queue.item_ref(queue.prev(i))->mark;
+    if(i != queue.head_i)
+        queue.item_ref(i)->blend_in= 0;
+
+    if(i != queue.isr_tail_i)
+        queue.item_ref(queue.prev(i))->blend_out= 0;
+
+    fence.at= i;
+    fence.on= true;
 }
 
 void Conveyor::executed_unless_overtaken(uint32_t block, uint32_t mark)

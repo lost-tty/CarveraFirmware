@@ -59,7 +59,7 @@ public:
 
     bool suspended() const { return paused; }
     bool loaded() const { return waiting; }
-    bool stepping() const { return stop_depth != 0; }
+    bool stepping() const { return stepper.stop_depth != 0; }
     void suspend();
     void resume();
     enum Step { INTO, OVER, OUT };
@@ -81,6 +81,11 @@ private:
     void stop_at(uint32_t at);
     void note_calls();
     unsigned chain(uint32_t mark, uint32_t *out) const;   // the mark and its callers up to the job
+    unsigned depth_of(uint32_t mark) const;   // as the runner's depth was for it
+    void follow_fence();
+    void lift_fence();
+    void release();   // the hold, and a loaded job's wait
+    uint32_t standing() const;   // the line the job stands before, else the machine's
     // from the line paused before, else the machine's; the console's outermost is the job's
     unsigned shown_chain(uint32_t *out);
     static unsigned call_of(uint32_t mark) { return mark >> 24; }
@@ -116,14 +121,14 @@ private:
     uint32_t stop_mark= 0;
     bool trace= false;
     static const unsigned EVERY = ~0u;
-    unsigned stop_depth= 0;             // pause before a line at most this deep
-    // the line paused before
-    struct Held {
-        SerialMessage msg;
-        unsigned depth;     // 0: none
+    struct Stepper {
+        unsigned stop_depth= 0;                        // pause before a line at most this deep
+        SerialMessage held{nullptr, "", 0, nullptr};   // the line paused before
+        bool fencing= false;                           // asked the conveyor for a fence
     };
-    Held held{{nullptr, "", 0, nullptr}, 0};
-    bool holding() const { return held.depth != 0; }
+    Stepper stepper;
+    bool holding() const { return stepper.held.mark != 0; }
+    bool stops_before(unsigned depth) const { return depth <= stepper.stop_depth; }
     bool waiting= false;
     bool nested= false;                 // a sub runs on the job
     bool ending= false;                 // the job is read to its end, the machine finishes it

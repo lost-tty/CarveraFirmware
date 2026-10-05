@@ -73,10 +73,11 @@ void BlockActions::run(const Pending &p)
 }
 
 // the queue retires in order, so everything that comes due is at the front
-void BlockActions::run_upto(uint32_t finished_block)
+void BlockActions::run_upto(uint32_t finished_block, uint32_t edge, uint32_t edge_mark)
 {
     // each one leaves the list before it runs: a handler that queues a move re-enters through collect
-    while (count > 0 && pending[0].after_block <= finished_block) {
+    while (count > 0 && pending[0].after_block <= finished_block
+           && (pending[0].after_block < edge || pending[0].mark == edge_mark)) {
         Pending due = pending[0];
         for (uint8_t i = 1; i < count; i++) pending[i - 1] = pending[i];
         count--;

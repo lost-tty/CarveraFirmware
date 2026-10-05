@@ -6,6 +6,7 @@
 #include "libs/Logging.h"
 #include "modules/tools/atc/ATCHandler.h"
 #include "modules/robot/MachineTask.h"
+#include "modules/robot/Conveyor.h"
 #include "Player.h"
 #include "MacroFS.h"
 #include "ScriptsPublicAccess.h"
@@ -116,6 +117,7 @@ bool Program::call_line(const std::string &text, StreamOutput *stream, std::stri
 
 bool Program::step(SerialMessage &msg)
 {
+    follow_fence();
     if(!busy() || machine_task.is_halted() || frozen())
         return false;
 
@@ -171,9 +173,18 @@ unsigned Program::chain(uint32_t mark, uint32_t *out) const
     return n;
 }
 
+uint32_t Program::standing() const
+{
+    if(holding())
+        return stepper.held.mark;
+
+    Conveyor::Fenced f= THECONVEYOR.fenced();
+    return f.any ? f.mark : machine_task.where().mark;
+}
+
 unsigned Program::shown_chain(uint32_t *out)
 {
-    unsigned n= chain(holding() ? held.msg.mark : machine_task.where().mark, out);
+    unsigned n= chain(standing(), out);
     if(out[n - 1] == 0 && playing())
         out[n - 1]= played_line();
 
@@ -255,8 +266,8 @@ bool Program::advance(SerialMessage &msg)
     }
 
     if(holding()) {
-        msg= held.msg;
-        held.depth= 0;
+        msg= stepper.held;
+        stepper.held.mark= 0;
         return true;
     }
 
@@ -275,8 +286,8 @@ bool Program::advance(SerialMessage &msg)
                 printk("%s> %s\n", place(msg.mark).c_str(), msg.message.c_str());
 
             msg.params= &runner->parameters();
-            if(runner->depth() <= stop_depth) {
-                held= Held{msg, runner->depth()};
+            if(stops_before(runner->depth())) {
+                stepper.held= msg;
                 paused= true;
                 return false;
             }
@@ -343,16 +354,70 @@ void Program::suspend()
 
 void Program::resume()
 {
-    stop_depth= 0;
-    paused= waiting= false;
+    lift_fence();
+    stepper.stop_depth= 0;
+    paused= false;
+    release();
+}
+
+void Program::release()
+{
+    waiting= false;
     machine_task.hold(false);
 }
 
+void Program::lift_fence()
+{
+    if(!stepper.fencing)
+        return;
+
+    THECONVEYOR.ask_fence(Conveyor::FENCE_LIFT);
+    stepper.fencing= false;
+}
+
+unsigned Program::depth_of(uint32_t mark) const
+{
+    uint32_t at[script::Runner::MAX_DEPTH];
+    unsigned n= chain(mark, at);
+    // without a job, a console call has no frame under it
+    return at[n - 1] == 0 && !playing() ? n - 1 : n;
+}
+
+// lines queued before the suspend pass the conveyor's fence one by one
 void Program::step(Step how)
 {
-    unsigned depth= holding() ? held.depth : runner->depth();
-    resume();
-    stop_depth= how == INTO ? EVERY : how == OVER ? depth : depth - 1;
+    if(stepper.fencing && !THECONVEYOR.fence_settled())
+        return;
+
+    unsigned depth= depth_of(standing());
+    if(stepper.fencing || (!holding() && !machine_task.idle())) {
+        THECONVEYOR.ask_fence(stepper.fencing ? Conveyor::FENCE_PASS : Conveyor::FENCE_LINE);
+        stepper.fencing= true;
+        paused= true;
+        release();
+    } else {
+        resume();
+    }
+    stepper.stop_depth= how == INTO ? EVERY : how == OVER ? depth : depth - 1;
+}
+
+void Program::follow_fence()
+{
+    if(!stepper.fencing || !THECONVEYOR.fence_settled())
+        return;
+
+    Conveyor::Fenced f= THECONVEYOR.fenced();
+    if(f.any) {
+        if(!stops_before(depth_of(f.mark)))
+            THECONVEYOR.ask_fence(Conveyor::FENCE_PASS);
+
+        return;
+    }
+    if(machine_task.work_pending())
+        return;
+
+    lift_fence();
+    paused= false;
 }
 
 bool Program::cancel_pause()
@@ -369,7 +434,8 @@ bool Program::jump(unsigned to, std::string &err)
     if(!runner->goto_main(to, err))
         return false;
 
-    held.depth= 0;
+    // the stop that follows drops the queue and the fence with it
+    stepper= Stepper{};
     return true;
 }
 
@@ -397,8 +463,7 @@ void Program::stop()
         finish();
     }
     end_job();
-    stop_depth= 0;
-    held.depth= 0;
+    stepper= Stepper{};
     paused= waiting= false;
     stopping= false;
     gcode_dispatch.program_end();

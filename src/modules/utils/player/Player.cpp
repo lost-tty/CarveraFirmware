@@ -135,8 +135,10 @@ const Player::Cmd Player::COMMANDS[] = {
 
 void Player::shell(void *self, const char *name, std::string args, StreamOutput *stream)
 {
-    if(machine_task.is_halted() && strcmp(name, "job") != 0)
+    if(machine_task.is_halted() && strcmp(name, "job") != 0) {
+        stream->printf("error:Alarm lock\n");
         return;
+    }
 
     Player *me= static_cast<Player *>(self);
     for (const Cmd *c= COMMANDS; c->name != nullptr; ++c) {
@@ -184,7 +186,13 @@ static bool homed(StreamOutput *stream)
 
 void Player::play_command( string parameters, StreamOutput *stream )
 {
-    string path = absolute_from_relative(shift_parameter(parameters), stream);
+    string name = shift_parameter(parameters);
+    if (name.empty()) {
+        resume_command("", stream);
+        return;
+    }
+
+    string path = absolute_from_relative(name, stream);
     if (!homed(stream) || !open_job(path, stream))
         return;
 
@@ -479,7 +487,8 @@ void Player::step_command(string parameters, StreamOutput *stream)
         return;
     }
 
-    if (!program.suspended()) {
+    // a feed hold on a job counts as suspended
+    if (!program.suspended() && !(program.playing() && THEKERNEL->get_feed_hold())) {
         stream->printf("Not suspended\n");
         return;
     }

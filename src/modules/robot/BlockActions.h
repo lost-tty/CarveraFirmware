@@ -21,7 +21,8 @@ public:
 
     // false: it could not be held, so the caller runs it now rather than losing it
     bool hold(const McodeRegistry::Mcode *code, const Gcode &gcode, uint32_t after_block);
-    void run_upto(uint32_t finished_block);
+    // of those on the edge block, only the ones of its line run
+    void run_upto(uint32_t finished_block, uint32_t edge= ~0u, uint32_t edge_mark= 0);
     void clear() { count= 0; taken= 0; }
     bool empty() const { return count == 0; }
     bool waiting_after(uint32_t block) const

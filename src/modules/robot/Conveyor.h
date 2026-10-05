@@ -48,6 +48,12 @@ public:
     void flush_queue(void);
 
     void resume_held();
+
+    enum Fence : uint8_t { FENCE_LINE, FENCE_PASS, FENCE_LIFT };
+    void ask_fence(Fence op);   // done on the next pass of the machine task
+    bool fence_settled() const { return fence.asked == fence.done; }
+    struct Fenced { bool any; uint32_t mark; };   // the first block behind the fence
+    Fenced fenced() const;
     void drop_queue(void);   // ISR, while standing: the flushed queue goes in one move
     bool flushing() const { return flush; }
     void force_queue();   // a jog runs now, not after the pre-load wait
@@ -92,6 +98,12 @@ private:
     static const uint32_t k_feed_ahead_ms= 60;
     static const uint32_t k_written_ahead_s= 20;   // far below the 171 s a 32-bit tick count covers
     void feed_stream();
+    unsigned int end_i() const { return fence.on ? fence.at : queue.head_i; }
+    unsigned int past_line(unsigned int i) const;
+    void apply_fence();
+    bool fence_after_playing();
+    void place_fence(unsigned int i);
+    void run_actions();
 
     static const UBaseType_t k_notify_index = 1;
     bool wait_for_block(bool &halted);
@@ -114,6 +126,14 @@ private:
     float fed_exit2{0.0F};
     float entry2{0.0F};
     float limit2[BLOCK_QUEUE_LENGTH];
+    struct FenceState {
+        volatile Fence op{FENCE_LIFT};
+        volatile uint8_t asked{0}, done{0};
+        volatile bool on{false};
+        volatile unsigned int at{0};
+        uint32_t edge{0}, edge_mark{0};   // the last block before it, and its line
+    };
+    FenceState fence;
     void sweep();
     bool span_of(unsigned int i, uint32_t from, float entry2, float &exit2,
                  StepCompress::Span &s) const;
