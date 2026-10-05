@@ -70,7 +70,7 @@ void ZProbe::on_module_loaded()
     ADD_MCODE(m670, 670, IMMEDIATE, ZProbe::set_probe_settings);
 
     // we read the probe in this timer
-    this->probe_trigger_time = 0;
+    this->signalled = false;
 
 }
 
@@ -372,6 +372,7 @@ void ZProbe::probe_XYZ(Gcode *gcode)
 // just probe / calibrate Z using calibrate pin
 void ZProbe::calibrate_Z(Gcode *gcode)
 {
+    signalled= false;
     float z= 0;
     if(gcode->has_letter('Z')) {
         z= gcode->get_value('Z');
@@ -431,9 +432,7 @@ void ZProbe::calibrate_Z(Gcode *gcode)
     }
 
     // M492.3 reads this as "the wireless probe is alive": only a probe that signalled is
-    if (probe_watch.hit && probe_watch.witnessed && probe_idle) {
-    	this->probe_trigger_time = us_ticker_read();
-    }
+    signalled= probe_watch.hit && probe_watch.witnessed && probe_idle;
 
 }
 

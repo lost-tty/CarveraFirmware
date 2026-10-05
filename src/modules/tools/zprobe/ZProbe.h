@@ -42,7 +42,7 @@ public:
 
     bool getProbeStatus() const { return this->probe_pin.get(); }
     bool getCalibrateStatus() const { return this->calibrate_pin.get(); }
-    uint32_t getProbeTriggerTime() const { return probe_trigger_time; }
+    bool probe_signalled() const { return signalled; }   // the wireless probe, in the last G38.6
     float getSlowFeedrate() const { return slow_feedrate; }
     float getFastFeedrate() const { return fast_feedrate; }
     float getProbeHeight() const { return probe_height; }
@@ -65,7 +65,7 @@ private:
     Pin calibrate_pin;
     std::vector<LevelingStrategy*> strategies;
 
-    uint32_t probe_trigger_time;
+    bool signalled;
     Settings::Sink settings_slot;
     McodeRegistry::Mcode m670;
 

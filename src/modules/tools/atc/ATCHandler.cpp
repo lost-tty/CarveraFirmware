@@ -143,7 +143,7 @@ bool ATCHandler::probe_detect() {
     // First wait for the queue to be empty
     THECONVEYOR.wait_for_idle();
 
-    return us_ticker_read() - zprobe.getProbeTriggerTime() < 5 * 1000 * 1000;
+    return zprobe.probe_signalled();
 }
 
 void ATCHandler::home_clamp()
