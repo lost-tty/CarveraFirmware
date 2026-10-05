@@ -13,6 +13,8 @@
 # Ctrl-C drops the queue, or cancels a running transfer; with neither it clears the line. Ctrl-D quits.
 # While a transfer runs the machine reads nothing else, so realtime keys are refused and lines wait.
 # A dropped or silent connection is reopened on its own, so "reset" comes back by itself.
+# A line or upload only goes out on the link it was entered on: entered with no link it is refused,
+# and a lost link drops everything still queued.
 # Local commands start with "/", see /help.
 # Tab completes commands, local paths after /upload and paths on the machine (listed on first Tab).
 # History lives in ~/.carvera_cli_history; Up/Down, Ctrl-R and the usual line editing come from prompt_toolkit.
@@ -25,6 +27,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
 
@@ -75,6 +78,7 @@ DEFAULT_PORT = 2222
 # FrameConsole's line buffer holds 127 bytes: a line, its newline and the "$G\n" behind it must fit
 LINE_MAX = 120
 INFO_TAIL_S = 1.0  # a line cut at a frame's end waits this long for its rest
+BEACON_PORT = 3333  # where the machines announce themselves (wifi.udp_send_port)
 POLL_S = 0.5  # status poll, also keeps the machine from dropping an idle connection (wifi.tcp_timeout_s)
 MODAL_S = 2.0  # $G poll for the modal state, which the status frame does not carry
 CONNECT_S = 5.0
@@ -87,39 +91,41 @@ CANCEL_S = 5.0  # a cancel the machine has not answered by then is given up on
 STUCK_S = 30.0  # a typed line with no receipt this long, while idle and quiet, is pointed out
 RESYNC_S = 8.0  # one of our own queries unanswered this long, with nothing else heard, lost its reply
 REFETCH_S = 30.0  # a file that could not be fetched is asked for again after this long
+BUSY_S = 1.0  # and one refused for another client's transfer after this long
 HISTORY_FILE = os.path.expanduser('~/.carvera_cli_history')
 STATE_STYLE = {'Idle': 'idle', 'Run': 'run', 'Home': 'run', 'Jog': 'run', 'Hold': 'hold', 'Pause': 'hold',
                'Wait': 'hold', 'Alarm': 'alarm', 'Sleep': 'dim'}
 STYLE = Style.from_dict({
     'bottom-toolbar': 'noreverse',
     'link': 'bold',
-    'down': '#ff5555 bold',
-    'idle': '#55cc55 bold',
-    'run': '#55aaff bold',
-    'hold': '#ddbb33 bold',
-    'alarm': '#ff5555 bold',
-    'dim': '#888888',
-    'sep': '#444444',
-    'prompt': '#55aaff bold',
-    'header': 'bg:#2d2d30 #dddddd bold',
-    'current': 'bg:#264f78',
-    'caller': 'bg:#3a3d41',
+    'down': 'ansired bold',
+    'idle': 'ansigreen bold',
+    'run': 'ansibrightblue bold',
+    'hold': 'ansiyellow bold',
+    'alarm': 'ansired bold',
+    'dim': 'ansibrightblack',
+    'sep': 'ansibrightblack',
+    'prompt': 'ansibrightblue bold',
+    'header': 'bold',
+    'current': 'bold underline',
+    'caller': 'underline',
     'selected': 'reverse',
-    'gutter': '#606060',
-    'ahead': '#4ec9b0',
-    'mark-run': '#55cc55 bold',
-    'mark-hold': '#ddbb33 bold',
-    'mark-halt': '#ff5555 bold',
-    'comment': '#6a9955 italic',
-    'g': '#569cd6 bold',
-    'm': '#c586c0 bold',
-    'tool': '#ce9178 bold',
-    'feed': '#4ec9b0',
-    'axis': '#dcdcaa',
-    'lineno': '#808080',
-    'oword': '#c586c0 italic',
-    'param': '#9cdcfe',
-    'cmd': '#4fc1ff bold',
+    'gutter': 'ansibrightblack',
+    'ahead': 'ansicyan',
+    'mark-run': 'ansigreen bold',
+    'mark-hold': 'ansiyellow bold',
+    'mark-halt': 'ansired bold',
+    'comment': 'ansigreen italic',
+    'g': 'ansiblue bold',
+    'm': 'ansimagenta bold',
+    'tool': 'ansired',
+    'feed': 'ansicyan',
+    'axis': 'ansiyellow',
+    'lineno': 'ansibrightblack',
+    'oword': 'ansimagenta italic',
+    'param': 'ansiblue',
+    'cmd': 'ansibrightcyan bold',
+    'selected-option': 'ansibrightblue bold',
 })
 
 
@@ -193,14 +199,15 @@ class Console:
         self.modal = ''  # [G0 G54 G17 G21 G90 G94 M0 M5 M9 T0 F0. S0.] from $G
         self.listing = {}  # remote directory -> entries, filled by list_remote for completion
         self.listing_dir = None  # directory an ls for completion is running for
-        self.queue = collections.deque()  # lines and transfers waiting their turn
+        self.queue = collections.deque()  # (generation, item): lines and transfers waiting their turn
         self.current = None  # the item the sender is on
         self.current_sent = False  # it went out and waits for its receipt
         self.rejected = None  # an error the machine printed while the current line waited
         self.stops = 0  # Ctrl-C count, a wait started before a stop gives up
         self.heads = []  # what runs, from the job frames
         self.texts = {}  # (path, size) -> its lines; None while fetching, False when that failed
-        self.failed = {}  # (path, size) -> when its fetch failed
+        self.failed = {}  # (path, size) -> when to fetch it again
+        self.waiting = set()  # (path, size) refused while another transfer ran
         self.want_program = False  # the UI has room for the program pane
         self.last_modal = 0.0
         self.heard = time.monotonic()  # last frame other than a status
@@ -310,7 +317,12 @@ class Console:
             sock.close()
             with self.cond:
                 self.generation += 1
+                dropped, fetches = self.drop_queue()
                 self.cond.notify_all()
+            for dl in fetches:
+                self.fetched(dl)
+            if dropped:
+                self.show(f'{dropped} queued not sent: the link they were entered on is gone')
             if up is not None:
                 up.result = up.result or 'interrupted'
                 if isinstance(up, Upload):
@@ -414,20 +426,25 @@ class Console:
         if dl.result == 'done':
             # numbered as the machine numbers them: by newline alone
             self.texts[dl.key] = [l.rstrip('\r') for l in dl.data.decode(errors='replace').split('\n')]
+            self.waiting.discard(dl.key)
             self.redraw()
             return
-        if dl.key not in self.failed:
+        busy = dl.result == 'refused' and 'another transfer' in dl.reason
+        if not busy and dl.key not in self.failed:
             self.show(f'could not fetch {dl.remote}: {dl.result}')
         self.texts[dl.key] = False
-        self.failed[dl.key] = time.monotonic()
+        self.failed[dl.key] = time.monotonic() + (BUSY_S if busy else REFETCH_S)
+        if busy:
+            self.waiting.add(dl.key)
+        else:
+            self.waiting.discard(dl.key)
 
     # each file a head names, once
     def fetch_missing(self):
         now = time.monotonic()
         for h in self.shown_heads():
             key = (h.path, h.size)
-            if key not in self.texts or (self.texts[key] is False
-                                         and now - self.failed[key] >= REFETCH_S):
+            if key not in self.texts or (self.texts[key] is False and now >= self.failed[key]):
                 self.texts[key] = None
                 self.enqueue(Download(h.path, key))
 
@@ -466,9 +483,10 @@ class Console:
             return
         ask = self.asks[0] if self.asks else None
         # our own queries are answered at once and only go out when the line before was taken, so one
-        # unanswered while nothing else arrives lost its reply; a reconnect starts the count over
+        # unanswered this long lost its reply, whatever else arrived meanwhile (job frames and info
+        # lines keep coming); a reconnect starts the count over
         if (ask is not None and ask.kind in ('poll', 'watch', 'ls') and not self.running
-                and now - ask.since > RESYNC_S and now - self.heard > RESYNC_S):
+                and now - ask.since > RESYNC_S):
             self.drop('a reply went missing, reconnecting to resync')
             return
         try:
@@ -490,7 +508,8 @@ class Console:
             if byte == b'?':
                 raise OSError(f'{up.kind} running, the machine reads nothing else until it ends')
             # the machine hears nothing else during a transfer: end it, then send the key
-            threading.Thread(target=self.realtime_after_cancel, args=(up, byte), daemon=True).start()
+            threading.Thread(target=self.realtime_after_cancel, args=(up, byte, self.generation),
+                             daemon=True).start()
             if up.ended:
                 return f'{up.kind} finishing on the machine, the key follows when it is done'
             return f'{up.kind} cancelled first, the key follows'
@@ -504,11 +523,15 @@ class Console:
                 raise
         return None
 
-    def realtime_after_cancel(self, up, byte):
+    def realtime_after_cancel(self, up, byte, generation):
         if not up.ended:
             self.cancel_transfer(up, f'{up.kind} cancelled for a realtime key')
         with self.cond:
             self.cond.wait_for(lambda: self.transfer is not up, SILENT_S if up.ended else CANCEL_S + 1)
+            gone = self.generation != generation
+        if gone:
+            self.show(f'{REALTIME_NAMES.get(byte, byte)} not sent: the link went down')
+            return
         try:
             self.realtime(byte)
             self.show(f'{REALTIME_NAMES.get(byte, byte)} sent')
@@ -522,8 +545,11 @@ class Console:
     # so the $G's reply is the line's receipt. One at a time, so the machine's 127-byte line buffer
     # never holds more than a line and its $G. Returns the answered count that marks the receipt,
     # None while another is in flight or a transfer holds the machine.
-    def ask(self, line, kind):
+    def ask(self, line, kind, generation=None):
         with self.lock:
+            # a line entered on another link never goes out on this one
+            if generation is not None and self.generation != generation:
+                raise Lost('the link it was entered on is gone')
             if self.asks or self.transfer is not None:
                 return None
             if kind in ('show', 'hide'):
@@ -554,13 +580,13 @@ class Console:
             self.listing_dir = None
             self.listing.pop(directory, None)
 
-    def start_transfer(self, up, stops):
+    def start_transfer(self, up, stops, generation):
         with self.lock:
             # the slot is empty, so every line before it was taken and FILE_START is next in line
             if self.stops != stops:
                 raise Stopped
-            if self.sock is None:
-                raise OSError('not connected')
+            if self.sock is None or self.generation != generation:
+                raise Lost('the link it was entered on is gone')
             if self.asks or self.transfer is not None:
                 return False
             frames = up.start()
@@ -609,21 +635,29 @@ class Console:
 
     def enqueue(self, item):
         with self.cond:
-            self.queue.append(item)
+            if not self.connected:
+                raise OSError('not connected, not sent')
+            self.queue.append((self.generation, item))
             self.cond.notify_all()
+
+    # under cond: empties the queue; the lines and uploads it held, and its downloads to end
+    def drop_queue(self):
+        fetches = [i for _, i in self.queue if isinstance(i, Download)]
+        dropped = len(self.queue) - len(fetches)
+        self.queue.clear()
+        for dl in fetches:
+            dl.result = 'cancelled'
+        return dropped, fetches
 
     # Ctrl-C: returns what it did, or None when there was nothing to stop
     def interrupt(self):
         with self.cond:
-            fetches = [i for i in self.queue if isinstance(i, Download)]
-            dropped = len(self.queue) - len(fetches)
-            self.queue.clear()
+            dropped, fetches = self.drop_queue()
             current = self.current
             sent = self.current_sent
             self.stops += 1
             self.cond.notify_all()
         for dl in fetches:
-            dl.result = 'cancelled'
             self.fetched(dl)
         up = self.transfer
         if up is not None:
@@ -641,18 +675,19 @@ class Console:
             with self.cond:
                 while not self.queue:
                     self.cond.wait()
-                item = self.queue.popleft()
+                generation, item = self.queue.popleft()
                 self.current = item
                 self.current_sent = False
                 stops = self.stops
             try:
-                self.run(item, stops)
+                self.run(item, stops, generation)
             except Stopped:
                 pass  # interrupt() has said so
             except Exception as e:
                 with self.cond:
-                    dropped = len(self.queue)
-                    self.queue.clear()
+                    dropped, fetches = self.drop_queue()
+                for dl in fetches:
+                    self.fetched(dl)
                 what = item if isinstance(item, str) else f'{item.kind} {item.remote}'
                 rest = f'; {dropped} queued not sent' if dropped else ''
                 # a reset or dfu ends the link by design, and an error the machine printed is on screen:
@@ -665,14 +700,14 @@ class Console:
                 self.current = None
                 self.current_sent = False
 
-    def run(self, item, stops):
-        # lines wait for the link, a transfer and the slot rather than fail
+    def run(self, item, stops, generation):
+        # an item waits for its turn on its own link, never for another one
         free = lambda: self.connected and not self.asks and self.transfer is None
         if isinstance(item, (Upload, Download)):
             try:
                 while True:
-                    self.wait_until(free, stops, None)
-                    if self.start_transfer(item, stops):
+                    self.wait_until(free, stops, generation)
+                    if self.start_transfer(item, stops, generation):
                         break
                 self.wait_until(lambda: self.transfer is not item, stops, None)
             finally:
@@ -683,13 +718,12 @@ class Console:
                 raise Rejected(f'upload {item.result}')  # what follows may count on the file
             return
         while True:
-            self.wait_until(free, stops, None)
-            generation = self.generation
+            self.wait_until(free, stops, generation)
             try:
-                receipt = self.ask(item, 'show' if item == '$G' else 'hide')
+                receipt = self.ask(item, 'show' if item == '$G' else 'hide', generation)
             except OSError:
                 if not self.connected:
-                    continue  # the link went between the wait and the send; it comes back
+                    raise Lost('the link went down before it was sent')
                 raise
             if receipt is not None:
                 break
@@ -1094,7 +1128,13 @@ class Ui:
             out.append(('class:header', head.ljust(width)))
             lines = con.texts.get((h.path, h.size))
             if lines is None or lines is False:
-                out.append(('class:dim', '\n fetching' if lines is None else '\n not readable'))
+                if lines is None:
+                    why = 'fetching'
+                elif (h.path, h.size) in con.waiting:
+                    why = 'waiting for another transfer'
+                else:
+                    why = 'not readable'
+                out.append(('class:dim', '\n ' + why))
                 continue
             # the whole file when it fits, else a full window with the current line in the middle
             first = min(max(1, h.line - per // 2), max(1, len(lines) - per + 1))
@@ -1278,11 +1318,104 @@ def port_number(text):
     return port
 
 
+# "name,ip,port,busy": each announcement goes to heard(address, name) until stop is set
+def listen_for_machines(sock, heard, stop):
+    sock.settimeout(0.2)
+    while not stop.is_set():
+        try:
+            data, _ = sock.recvfrom(256)
+        except socket.timeout:
+            continue
+        except OSError:
+            return
+        f = data.decode(errors='replace').strip().split(',')
+        if len(f) == 4 and f[2].isdigit():
+            heard((f[1], int(f[2])), f[0])
+
+
+# the machines as they announce themselves, the newest at the bottom; Enter connects
+def choose_machine():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if hasattr(socket, 'SO_REUSEPORT'):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    try:
+        sock.bind(('', BEACON_PORT))
+    except OSError as e:
+        sys.exit(f'cannot listen on UDP {BEACON_PORT}: {e}; give a host')
+
+    lock = threading.Lock()
+    machines = {}  # (ip, port) -> name, in the order heard
+    selected = 0
+
+    def heard(address, name):
+        with lock:
+            changed = machines.get(address) != name
+            machines[address] = name
+        if changed:
+            app.invalidate()
+
+    def text():
+        out = [('', f'connect to (Up/Down, Enter; Ctrl-C quits), listening on UDP {BEACON_PORT}\n')]
+        with lock:
+            if not machines:
+                out.append(('class:dim', '  nothing heard yet\n'))
+            for i, ((ip, port), name) in enumerate(machines.items()):
+                here = i == selected
+                out.append(('class:selected-option' if here else '',
+                            f'{">" if here else " "} {name:20} {ip}:{port}\n'))
+        return out
+
+    keys = KeyBindings()
+
+    @keys.add('up')
+    def _(event):
+        nonlocal selected
+        selected = max(0, selected - 1)
+
+    @keys.add('down')
+    def _(event):
+        nonlocal selected
+        with lock:
+            selected = min(max(0, len(machines) - 1), selected + 1)
+
+    @keys.add('enter')
+    def _(event):
+        with lock:
+            chosen = list(machines)[selected] if machines else None
+        if chosen is not None:
+            event.app.exit(result=chosen)
+
+    @keys.add('c-c')
+    @keys.add('c-d')
+    def _(event):
+        event.app.exit(result=None)
+
+    app = Application(layout=Layout(Window(FormattedTextControl(text), dont_extend_height=True)),
+                      key_bindings=keys, full_screen=False,
+                      style=STYLE)
+    stop = threading.Event()
+    listener = threading.Thread(target=listen_for_machines, args=(sock, heard, stop), daemon=True)
+    listener.start()
+    try:
+        chosen = app.run()
+    finally:
+        stop.set()
+        listener.join()
+        sock.close()
+    if chosen is None:
+        sys.exit(0)
+    return chosen
+
+
 def main():
-    p = argparse.ArgumentParser(description='Console to the machine (Makera frame protocol).')
-    p.add_argument('host')
+    p = argparse.ArgumentParser(description='Console to the machine (Makera frame protocol). '
+                                'Without a host it lists the machines announcing themselves.')
+    p.add_argument('host', nargs='?')
     p.add_argument('port', type=port_number, nargs='?', default=DEFAULT_PORT)
     args = p.parse_args()
+    if args.host is None:
+        args.host, args.port = choose_machine()
     try:
         args.host.encode('idna')
     except UnicodeError:

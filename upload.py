@@ -200,6 +200,7 @@ class Download:
         self.ended = False
         self.cancel_sent = None
         self.result = None  # 'done', 'failed', 'cancelled' or 'refused'
+        self.reason = ''  # the machine's refusal
         self.data = None
 
     def start(self):
@@ -209,8 +210,10 @@ class Download:
     # the reply frame, b'' when the frame ends the transfer, None when it is not part of it
     def answer(self, ftype, payload):
         if ftype == INFO:
-            if not self.started and payload.decode(errors='replace').lower().startswith('error'):
+            text = payload.decode(errors='replace').strip()
+            if not self.started and text.lower().startswith('error'):
                 self.result = 'refused'
+                self.reason = text
             return None
         if ftype == MD5:
             self.started = True
