@@ -14,9 +14,11 @@
 #include "mbed.h"
 #include "tusb.h"
 #include <cstdio>
-#include <cstdarg>
 #include <cstring>
 #include "modules/robot/MachineTask.h"
+#include "GcodeDispatch.h"
+#include "Player.h"
+#include "SerialMessage.h"
 
 #define switch_checksum CHECKSUM("switch")
 #define state_checksum  CHECKSUM("state")
@@ -65,6 +67,20 @@ static bool in_report(const hid_keyboard_report_t& r, uint8_t key)
     return false;
 }
 
+static bool tool_of(uint8_t key, int8_t &tool)
+{
+    if (key == HID_KEY_GRAVE || key == HID_KEY_EUROPE_2)
+        tool = -1;
+    else if (key == HID_KEY_0)
+        tool = 0;
+    else if (key >= HID_KEY_1 && key <= HID_KEY_9)
+        tool = key - HID_KEY_1 + 1;
+    else
+        return false;
+
+    return true;
+}
+
 void Pendant::set_device(uint8_t addr, uint8_t idx, bool is_present)
 {
     dev_addr = addr;
@@ -107,8 +123,33 @@ void Pendant::on_report(const hid_keyboard_report_t& report)
     if (held == nullptr) set_jog(nullptr);
     else if (held != jogging) set_jog(cont != shifted ? held : nullptr);
 
-    for (uint8_t k : report.keycode) if (k != 0 && !in_report(prev, k)) key_down(k, shifted);
+    bool t_held = in_report(report, HID_KEY_T);
+    for (uint8_t k : report.keycode) {
+        if (k == 0 || in_report(prev, k))
+            continue;
+
+        if (!t_held || !t_chord(k))
+            key_down(k, shifted);
+    }
     prev = report;
+}
+
+bool Pendant::t_chord(uint8_t key)
+{
+    int8_t tool = 0;
+    if (key != HID_KEY_O && key != HID_KEY_C && !tool_of(key, tool))
+        return false;
+
+    if (machine_task.is_halted())
+        return true;
+
+    if (key == HID_KEY_O)
+        post(Request::LOOSEN);
+    else if (key == HID_KEY_C)
+        post(Request::CLAMP);
+    else
+        post(Request::TOOL, tool);
+    return true;
 }
 
 void Pendant::set_jog(const Key *k)
@@ -121,30 +162,89 @@ void Pendant::set_jog(const Key *k)
         return;
     }
 
+    if (!jog_axis(k->axis, k->dir, cont_speeds[speed], true))
+        jogging = nullptr;
+}
+
+bool Pendant::jog_axis(char axis, float delta, float scale, bool held)
+{
     uint8_t n = THEROBOT.get_number_registered_motors();
-    int i = k->axis >= 'X' ? k->axis - 'X' : k->axis - 'A' + 3;
-    if (i < 0 || i >= n) { jogging = nullptr; return; }
+    int i = axis >= 'X' ? axis - 'X' : axis - 'A' + 3;
+    if (i < 0 || i >= n)
+        return false;
 
-    float delta[k_max_actuators] = {0};
-    delta[i] = k->dir;
-
-    // nothing queued, so there is nothing to stop and the key can be pressed again
-    if (!machine_task.post_jog(delta, n, cont_speeds[speed], true)) jogging = nullptr;
+    float deltas[k_max_actuators] = {0};
+    deltas[i] = delta;
+    return machine_task.post_jog(deltas, n, scale, held);
 }
 
 void Pendant::step(char axis, int8_t dir)
 {
-    line("$J %c%.3f", axis, dir * step_sizes[mode]);
+    if (!jog_axis(axis, dir * step_sizes[mode], 1.0f, false))
+        printk("error:jog refused\n");
 }
 
-void Pendant::line(const char* fmt, ...)
+Pendant::Pendant()
 {
-    char buf[32];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    host.queue_line(buf);
+    requests = xQueueCreateStatic(k_requests, sizeof(Request), request_store, &request_q);
+}
+
+void Pendant::post(Request::What what, int32_t value)
+{
+    Request r{what, value};
+    if (xQueueSend(requests, &r, 0) != pdTRUE)
+        printk("error:pendant busy, key dropped\n");
+}
+
+static void mdi(const char *fmt, int32_t value = 0)
+{
+    char text[16];
+    snprintf(text, sizeof(text), fmt, (int)value);
+    gcode_dispatch.run_mdi(SerialMessage{&THEKERNEL->streams, text, 0, nullptr});
+}
+
+void Pendant::serve()
+{
+    Request r;
+    if (xQueueReceive(requests, &r, 0) != pdTRUE)
+        return;
+
+    StreamOutput *all = &THEKERNEL->streams;
+    switch (r.what) {
+        case Request::UNLOCK:
+            machine_task.unlock(all);
+            break;
+        case Request::HOME:
+            gcode_dispatch.home(all);
+            break;
+        case Request::PARK:
+            mdi("G28");
+            break;
+        case Request::SUSPEND:
+            player.suspend(all);
+            break;
+        case Request::RESUME:
+            player.resume(all);
+            break;
+        case Request::SPINDLE_ON:
+            mdi("M3 S%d", r.value);
+            break;
+        case Request::SPINDLE_OFF:
+            mdi("M5");
+            break;
+        case Request::FEED:
+            mdi("M220 S%d", r.value);
+            break;
+        case Request::CLAMP:
+            mdi("M490.1");
+            break;
+        case Request::LOOSEN:
+            mdi("M490.2");
+            break;
+        case Request::TOOL:
+            mdi("M6 T%d", r.value);
+            break;
+    }
 }
 
 void Pendant::key_down(uint8_t key, bool shifted)
@@ -179,27 +279,29 @@ void Pendant::key_down(uint8_t key, bool shifted)
                 feed_pct = feed_pct + 10 * k.dir;
                 if (feed_pct < 10) feed_pct = 10;
                 if (feed_pct > 200) feed_pct = 200;
-                line("M220 S%d", feed_pct);
+                post(Request::FEED, feed_pct);
                 break;
             case HOLD:
                 if (THEKERNEL->is_feed_hold_enabled()) machine_task.hold(!THEKERNEL->get_feed_hold());
-                else line(program.suspended() ? "resume" : "suspend");
+                else post(program.suspended() ? Request::RESUME : Request::SUSPEND);
                 break;
             case ABORT:
                 machine_task.halt(MANUAL, "stopped from pendant");
                 break;
-            case UNLOCK:  line("$X"); break;
-            case HOME:    line("$H"); break;
-            case PARK:    line("G28"); break;
-            case RESUME:  line("resume"); break;
+            case UNLOCK:  post(Request::UNLOCK); break;
+            case HOME:    post(Request::HOME); break;
+            case PARK:    post(Request::PARK); break;
+            case RESUME:  post(Request::RESUME); break;
             case VACUUM:  toggle_switch("vacuum"); break;
             case LIGHT:   toggle_switch("light"); break;
             case SPINDLE: {
                 struct spindle_status ss;
                 if (spindle_control == nullptr) break;
                 spindle_control->get_status(&ss);
-                if (ss.state) line("M5");
-                else if (ss.target_rpm > 0) line("M3 S%d", (int)ss.target_rpm);
+                if (ss.state)
+                    post(Request::SPINDLE_OFF);
+                else if (ss.target_rpm > 0)
+                    post(Request::SPINDLE_ON, (int32_t)ss.target_rpm);
                 break;
             }
         }

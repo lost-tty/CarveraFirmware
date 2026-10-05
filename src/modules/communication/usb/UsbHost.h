@@ -2,7 +2,6 @@
 #define USBHOST_H
 
 #include "Module.h"
-#include "libs/RingBuffer.h"
 #include "Pendant.h"
 
 #include "FreeRTOS.h"
@@ -10,11 +9,8 @@
 
 class UsbHost : public Module {
     public:
-        UsbHost() : pendant(*this) {}
         void on_module_loaded();
-        void on_main_loop(void* argument);
-
-        void queue_line(const char* line);
+        void service() { pendant.serve(); }
         void on_hid_report(uint8_t dev_addr, uint8_t idx, const uint8_t* report, uint16_t len);
         void on_hid_mount(uint8_t dev_addr, uint8_t idx, bool present);
         void on_hid_protocol(uint8_t idx, uint8_t protocol);
@@ -32,7 +28,6 @@ class UsbHost : public Module {
         TaskHandle_t handle{nullptr};
 
         Pendant pendant;
-        RingBuffer<char, 128> lines;
         bool running = false;
         bool reenumerated = false;
 };

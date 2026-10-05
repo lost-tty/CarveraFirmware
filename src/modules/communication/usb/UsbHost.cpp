@@ -1,6 +1,5 @@
 #include "UsbHost.h"
 #include "FreeRTOS.h"
-#include "SimpleShell.h"
 #include "libs/Kernel.h"
 #include "libs/Logging.h"
 #include "libs/Pin.h"
@@ -62,8 +61,6 @@ void UsbHost::on_module_loaded()
     if (hcd_port_connect_status(0)) hcd_event_device_attach(0, false);
 
     handle= xTaskCreateStatic(run, "USB", k_stack_words, this, tskIDLE_PRIORITY + 1, stack, &task);
-
-    register_for_event(ON_MAIN_LOOP);
 }
 
 // LPC1768 USB block as OHCI host on port 1 (P0.29/P0.30)
@@ -129,26 +126,4 @@ void UsbHost::on_hid_report(uint8_t dev_addr, uint8_t idx, const uint8_t* report
     if (tuh_hid_interface_protocol(dev_addr, idx) == HID_ITF_PROTOCOL_KEYBOARD && len >= sizeof(hid_keyboard_report_t)) {
         pendant.on_report(*reinterpret_cast<const hid_keyboard_report_t*>(report));
     }
-}
-
-void UsbHost::queue_line(const char* line)
-{
-    int len = strlen(line);
-    if (len + 1 > lines.capacity() - (int)lines.size()) return;
-
-    for (int i = 0; i < len; i++) lines.push_back(line[i]);
-    lines.push_back('\n');
-}
-
-void UsbHost::on_main_loop(void*)
-{
-    if (lines.size() == 0) return;
-    std::string line;
-    char c;
-    do {
-        lines.pop_front(c);
-        if (c != '\n') line += c;
-    } while (c != '\n' && lines.size() > 0);
-
-    SimpleShell::run(line, &THEKERNEL->streams);
 }

@@ -466,6 +466,7 @@ void Kernel::register_for_event(_EVENT_ENUM id_event, Module *mod)
 void Kernel::serve_io()
 {
     watchdog.alive();
+    usb_host.service();
     wifi_provider.service();
     wireless_probe.service();
     simpleshell.service_transfer();

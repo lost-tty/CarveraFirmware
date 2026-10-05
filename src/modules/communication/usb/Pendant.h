@@ -4,31 +4,47 @@
 #include <cstdint>
 #include "class/hid/hid.h"
 
-class UsbHost;
+#include "FreeRTOS.h"
+#include "queue.h"
 
 // USB keyboard or numpad as jog pendant. Key table in Pendant.cpp.
 class Pendant {
     public:
-        Pendant(UsbHost& host) : host(host) {}
+        Pendant();
         void on_report(const hid_keyboard_report_t& report);
         void set_device(uint8_t dev_addr, uint8_t idx, bool present);
         void on_protocol(uint8_t idx, uint8_t protocol);
         void tick();
         bool has_device() const { return present && boot_protocol; }
+        void serve();
 
     private:
-        enum Action : uint8_t { JOG, MODE, HOLD, ABORT, HOME, PARK, SPINDLE, VACUUM, LIGHT, UNLOCK, RESUME, FEED, CONT };
+        enum Action : uint8_t {
+            JOG, MODE, HOLD, ABORT, HOME, PARK, SPINDLE, VACUUM, LIGHT, UNLOCK, RESUME, FEED, CONT
+        };
         struct Key { uint8_t key; bool shifted; Action action; char axis; int8_t dir; };
         static const Key keys[];
 
         void key_down(uint8_t key, bool shifted);
+        bool t_chord(uint8_t key);
         void set_jog(const Key *k);
+        bool jog_axis(char axis, float delta, float scale, bool held);
         void step(char axis, int8_t dir);
         void toggle_switch(const char* name);
         void update_leds(uint32_t now);
-        void line(const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 
-        UsbHost& host;
+        struct Request {
+            enum What : uint8_t {
+                UNLOCK, HOME, PARK, SUSPEND, RESUME, SPINDLE_ON, SPINDLE_OFF, FEED, CLAMP, LOOSEN,
+                TOOL
+            } what;
+            int32_t value;
+        };
+        void post(Request::What what, int32_t value = 0);
+        static const UBaseType_t k_requests = 4;
+        uint8_t request_store[k_requests * sizeof(Request)];
+        StaticQueue_t request_q;
+        QueueHandle_t requests;
         hid_keyboard_report_t prev = {};
         uint8_t mode = 2;               // which of step_sizes a tap moves
         uint8_t speed = 2;              // which of cont_speeds a held key runs at
