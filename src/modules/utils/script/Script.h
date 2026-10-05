@@ -40,6 +40,11 @@ public:
     std::string basename(unsigned segment) const;
     // "line N: ..." -> "file.ngc:N: ..."
     std::string located(const std::string &err, unsigned offset) const;
+    // the segment in the top 8 bits, the line below; 0: none
+    uint32_t mark(unsigned offset, unsigned line) const;
+    std::string place(uint32_t mark) const;   // "file.ngc:12", empty for none
+    static unsigned segment(uint32_t mark) { return mark >> 24; }
+    static unsigned line(uint32_t mark) { return mark & 0xFFFFFF; }
     std::vector<Segment> segments;
 
 private:
@@ -114,6 +119,7 @@ public:
     };
     // where the line step() last returned stood, or where its error was raised
     Place last() const { return last_place; }
+    uint32_t mark() const { return library.source->mark(last_place.offset, last_place.line); }
     // for the dispatcher: the running sub's arguments and #<name>s, then the machine's
     const gcode::ParamStore &parameters() const { return store; }
     float aborted() const { return abort_reason; } // non-zero after an abort ended the script

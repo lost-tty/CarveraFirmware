@@ -64,6 +64,7 @@ bool Program::run_sub(const char *sub)
 bool Program::start_job(const std::string &path, std::string &err)
 {
     script::Source &src= source;
+    library.reset();
     if(!src.add_job(path)) {
         err= "File not found: " + path;
         return false;
@@ -73,7 +74,7 @@ bool Program::start_job(const std::string &path, std::string &err)
         return false;
     }
     name= path;
-    line= 0;
+    played= 0;
     return true;
 }
 
@@ -121,12 +122,21 @@ bool Program::step(SerialMessage &msg)
         return false;
 
     stopping= false;
-    printk("job stopped at line %u\n", stop_line);
-    stop();
+    stop_at(stop_mark);
     return false;
 }
 
-void Program::refused(unsigned at)
+// in a sub: the last job line that ran
+unsigned Program::played_line()
+{
+    uint32_t at= machine_task.where().mark;
+    if(at != 0 && script::Source::segment(at) == 0)
+        played= at;
+
+    return played;
+}
+
+void Program::refused(uint32_t at)
 {
     // a halt inside stops everything, so nothing is left to stop here
     if(!busy())
@@ -135,7 +145,13 @@ void Program::refused(unsigned at)
     if(stop_after_queued(at))
         return;
 
-    printk("job stopped at line %u\n", at);
+    stop_at(at);
+}
+
+void Program::stop_at(uint32_t at)
+{
+    std::string p= source.place(at);
+    printk("job stopped at %s\n", p.empty() ? "a console line" : p.c_str());
     stop();
 }
 
@@ -155,16 +171,14 @@ bool Program::advance(SerialMessage &msg)
 
     std::string err;
     switch(runner->step(msg.message, err)) {
-        case script::Runner::LINE:
-            // a sub's lines belong to the job line that called it
-            msg.line= runner->at_main() ? (line= runner->last().line) : line;
-            if(trace) {
-                script::Runner::Place at= runner->last();
-                printk("%s:%u> %s\n", source.basename(source.segment_of(at.offset)).c_str(),
-                       unsigned(at.line), msg.message.c_str());
-            }
+        case script::Runner::LINE: {
+            msg.mark= runner->mark();
+            if(trace)
+                printk("%s> %s\n", source.place(msg.mark).c_str(), msg.message.c_str());
+
             msg.params= &runner->parameters();
             return true;
+        }
         case script::Runner::MESSAGE:
             printk("%s\n", msg.message.c_str());
             return false;
@@ -185,7 +199,7 @@ bool Program::advance(SerialMessage &msg)
             return false;
         }
         case script::Runner::ERROR: {
-            std::string where= source.located(err, runner->last().offset);
+            std::string where= source.place(runner->mark()) + ": " + err;
             finish();
             printk("error:script %s %s\n", name.c_str(), where.c_str());
             halt(SCRIPT);
@@ -240,15 +254,11 @@ bool Program::cancel_pause()
 
 bool Program::jump(unsigned to, std::string &err)
 {
-    if(!runner->goto_main(to, err))
-        return false;
-
-    line= to - 1;
-    return true;
+    return runner->goto_main(to, err);
 }
 
 // false: nothing is queued ahead of it, so the caller stops the job itself
-bool Program::stop_after_queued(unsigned int at)
+bool Program::stop_after_queued(uint32_t at)
 {
     uint32_t mark= machine_task.motion_mark();
     if(machine_task.motion_passed(mark))
@@ -258,7 +268,7 @@ bool Program::stop_after_queued(unsigned int at)
         return true;
 
     stop_after= mark;
-    stop_line= at;
+    stop_mark= at;
     stopping= true;
     return true;
 }
@@ -312,7 +322,6 @@ void Program::end_job()
 
     player.job_ended();
     source.remove_job();
-    line= 0;
     pause_asked= false;
     machine_task.enforce_keepout();
     forget();
@@ -349,12 +358,13 @@ void Program::list_shell(void *self, const char *, std::string cmd, StreamOutput
     script::Source &src= me->source;
     if(me->playing()) {
         stream->printf("%s:\r\n", me->job_name());
-        me->list(stream, src.job(), machine_task.where().line, around);
+        me->list(stream, src.job(), me->played_line(), around);
     }
-    if(me->in_sub()) {
-        int segment= src.segment_of(me->runner->last().offset);
+    uint32_t at= machine_task.where().mark;
+    unsigned segment= script::Source::segment(at);
+    if(segment != 0 && segment < src.segments.size()) {
         stream->printf("%s:\r\n", src.basename(segment).c_str());
-        me->list(stream, segment, me->runner->last().line, around);
+        me->list(stream, segment, script::Source::line(at), around);
     }
 }
 

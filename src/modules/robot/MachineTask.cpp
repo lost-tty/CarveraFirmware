@@ -96,9 +96,9 @@ bool MachineTask::motion_passed(uint32_t mark) const
     return THECONVEYOR.passed(mark);
 }
 
-void MachineTask::begin_action(unsigned int line)
+void MachineTask::begin_action(uint32_t mark)
 {
-    acting= line;
+    acting= mark;
 }
 
 void MachineTask::end_action(uint32_t after_block)
@@ -277,7 +277,7 @@ void MachineTask::serve_tickets()
         } else if(t.kind == Ticket::MOVE) {
             THEROBOT.delta_move_sync(t.move.delta, t.move.scale, t.move.naxis);
         } else {
-            ticketing= t.gcode.line;
+            ticketing= t.gcode.mark;
             t.job(t.gcode, OnMachine{});
             if(ticketing != 0) {
                 THECONVEYOR.executed_unless_overtaken(THECONVEYOR.queue_mark(), ticketing);

@@ -396,11 +396,11 @@ void Conveyor::collect()
     in_actions= nullptr;
 }
 
-void Conveyor::executed_unless_overtaken(uint32_t block, unsigned int line)
+void Conveyor::executed_unless_overtaken(uint32_t block, uint32_t mark)
 {
     __disable_irq();
     if(finished == block) {
-        executed= line;
+        executed= mark;
     }
     __enable_irq();
 }
@@ -487,7 +487,7 @@ Block *Conveyor::take_block(unsigned int i)
 {
     queue.isr_tail_i= i;
     Block *b= queue.item_ref(i);
-    playing= b->line;
+    playing= b->mark;
     current_feedrate= b->nominal_speed;
     return b;
 }
@@ -495,8 +495,8 @@ Block *Conveyor::take_block(unsigned int i)
 void Conveyor::block_finished()
 {
     const Block *b= queue.item_ref(queue.isr_tail_i);
-    if(b->line != 0) {
-        executed= b->line;
+    if(b->mark != 0) {
+        executed= b->mark;
     }
     playing= 0;
     // we increment the isr_tail_i so we can get the next block

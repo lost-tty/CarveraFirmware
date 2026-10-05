@@ -20,10 +20,10 @@ using std::string;
 // One command word (G or M) of a line plus all of the line's parameter words.
 class Gcode {
     public:
-        Gcode() : line(0), mcs(false) {}
-        Gcode(const string& text, unsigned int line = 0);
+        Gcode() : mark(0), mcs(false) {}
+        Gcode(const string& text, uint32_t mark = 0);
         // index of the command in words, or words.size() for a line without G or M
-        Gcode(const gcode::Words& words, size_t index, unsigned int line);
+        Gcode(const gcode::Words& words, size_t index, uint32_t mark);
 
         bool has_letter(char letter) const { return find(letter) != nullptr; }
         float get_value(char letter) const;
@@ -40,7 +40,7 @@ class Gcode {
         uint8_t subcode() const { return command.subcode; }
 
         gcode::Word command{};  // the G or M word, letter 0 for a line without one
-        unsigned int line;
+        uint32_t mark;
         bool mcs;               // G53: this motion is in machine coordinates
 
         string error_text;

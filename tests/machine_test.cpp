@@ -66,7 +66,9 @@ static std::string run_all(Machine &m, const std::vector<Call> &calls) {
                 if (r.aborted() != 0) { char b[24]; snprintf(b, sizeof(b), "ABORT %d", (int)r.aborted()); out += b; }
                 break;
             }
-            if (res == script::Runner::ERROR) return out + "ERROR: " + err;
+            if (res == script::Runner::ERROR)
+                return out + "ERROR: line " + std::to_string(r.last().line) + ": " + err;
+
             if (res == script::Runner::MESSAGE) continue;
             if (!evaluate(r, line, err))
                 return out + "ERROR: " + err;
@@ -93,7 +95,9 @@ static std::string run(Machine &m, const char *sub, std::vector<float> args,
             if (r.aborted() != 0) { char b[24]; snprintf(b, sizeof(b), "|ABORT %d", (int)r.aborted()); out += b; }
             return out;
         }
-        if (res == script::Runner::ERROR) return out + "|ERROR: " + err;
+        if (res == script::Runner::ERROR)
+            return out + "|ERROR: line " + std::to_string(r.last().line) + ": " + err;
+
         if (res == script::Runner::MESSAGE) { messages += line + "\n"; continue; }
         if (!evaluate(r, line, err))
             return out + "|ERROR: " + err;

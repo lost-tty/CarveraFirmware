@@ -88,9 +88,9 @@ public:
     uint32_t motion_mark() const;
     bool motion_passed(uint32_t mark) const;
 
-    struct Where { unsigned int line; bool in; };
+    struct Where { uint32_t mark; bool in; };
     Where where() const;
-    void begin_action(unsigned int line);
+    void begin_action(uint32_t mark);
     void end_action(uint32_t after_block);
 
     bool homed() const;

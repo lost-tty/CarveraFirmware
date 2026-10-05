@@ -1687,7 +1687,7 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode
     // Append the block to the planner
     // NOTE that distance here should be either the distance travelled by the XYZ axis, or the E mm travel if a solo E move
     // NOTE this call blocks until there is room in the block queue
-    if(THEKERNEL->planner.append_block( actuator_pos, n_motors, rate_mm_s, distance, auxilliary_move ? nullptr : unit_vec, acceleration, s_value, cutting, gcode != nullptr ? gcode->line : 0)) {
+    if(THEKERNEL->planner.append_block( actuator_pos, n_motors, rate_mm_s, distance, auxilliary_move ? nullptr : unit_vec, acceleration, s_value, cutting, gcode != nullptr ? gcode->mark : 0)) {
         // this is the new compensated machine position
         memcpy(this->compensated_machine_position, transformed_target, n_motors * sizeof(float));
         return true;

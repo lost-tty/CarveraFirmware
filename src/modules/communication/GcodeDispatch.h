@@ -54,9 +54,9 @@ private:
     bool run_line(const SerialMessage &msg);
     Gate allowed_while_halted(const gcode::Words &words);
     Gate homed_enough(const gcode::Words &words);
-    bool execute(const gcode::Words &words, const std::string &text, unsigned int line);
+    bool execute(const gcode::Words &words, const std::string &text, uint32_t mark);
     bool parameter_statement(const char *p);
-    bool announce(const std::string &line, size_t from, unsigned int number,
+    bool announce(const std::string &line, size_t from, uint32_t mark,
                   const gcode::ParamStore *store);
     bool fail(const char *msg);
     bool remap(const Gcode &gcode, std::string &err);
@@ -75,7 +75,7 @@ private:
     float cycle_initial;
     bool homed_check;
     struct Buffered {
-        std::string line;
+        std::string text;
         StreamOutput *stream;
     };
     std::deque<Buffered> buffered;

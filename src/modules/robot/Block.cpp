@@ -34,7 +34,7 @@ uint8_t Block::n_actuators= 0;
 
 Block::Block()
 {
-    line = 0;
+    mark = 0;
     clear();
 }
 

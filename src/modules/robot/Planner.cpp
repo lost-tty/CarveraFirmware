@@ -91,7 +91,7 @@ bool Planner::blend(Block *prev, Block *block, float cos_theta, float &speed)
 
 // Append a block to the queue, compute it's speed factors
 // 2024
-bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors, float rate_mm_s, float distance, float *unit_vec, float acceleration, float s_value, bool cutting, unsigned int _line)
+bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors, float rate_mm_s, float distance, float *unit_vec, float acceleration, float s_value, bool cutting, uint32_t mark)
 // bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors, float rate_mm_s, float distance, float *unit_vec, float acceleration, float *s_values, int s_count, bool cutting, unsigned int _line)
 {
     PROFILE("append_block");
@@ -99,7 +99,7 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
 
     // Create ( recycle ) a new block
     Block* block = THECONVEYOR.queue.head_ref();
-    block->line = _line;
+    block->mark = mark;
 
     // Direction bits
     bool has_steps = false;

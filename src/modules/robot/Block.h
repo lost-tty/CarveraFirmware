@@ -49,7 +49,7 @@ class Block {
         float acceleration;       // the acceleration for this block
 
         float max_entry_speed;
-        unsigned int line;
+        uint32_t mark;
 
         uint8_t direction_bits;   // one bit per motor
         uint16_t blend_in, blend_out;   // path steps of this block the corners at its ends take

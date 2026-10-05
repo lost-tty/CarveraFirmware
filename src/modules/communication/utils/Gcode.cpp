@@ -9,8 +9,8 @@
 
 #include <climits>
 
-Gcode::Gcode(const string& text, unsigned int line)
-    : line(line), mcs(false)
+Gcode::Gcode(const string& text, uint32_t mark)
+    : mark(mark), mcs(false)
 {
     gcode::Line parsed;
     if (!parsed.parse(text.c_str(), nullptr)) {
@@ -27,8 +27,8 @@ Gcode::Gcode(const string& text, unsigned int line)
     }
 }
 
-Gcode::Gcode(const gcode::Words& words, size_t index, unsigned int line)
-    : line(line), mcs(false), words(words)
+Gcode::Gcode(const gcode::Words& words, size_t index, uint32_t mark)
+    : mark(mark), mcs(false), words(words)
 {
     if (index < words.size())
         command = words[index];

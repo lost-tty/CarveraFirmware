@@ -60,7 +60,7 @@ public:
     bool blocks_pending() const { return finished != queued; }
     unsigned int block_playing() const { return playing; }
     unsigned int last_executed() const { return executed; }
-    void executed_unless_overtaken(uint32_t block, unsigned int line);
+    void executed_unless_overtaken(uint32_t block, uint32_t mark);
     void clear_executed() { executed= 0; }
 
     bool is_idle() const;

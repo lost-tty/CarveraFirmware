@@ -1,6 +1,7 @@
 #ifndef SERIALMESSAGE_H
 #define SERIALMESSAGE_H
 
+#include <cstdint>
 #include <string>
 
 class StreamOutput;
@@ -9,7 +10,7 @@ namespace gcode { class ParamStore; }
 struct SerialMessage {
         StreamOutput* stream;
         std::string message;
-        unsigned int line;
+        uint32_t mark;                     // script::Source::mark, 0 for none
         const gcode::ParamStore *params;   // to evaluate with; null: the machine's
 };
 #endif

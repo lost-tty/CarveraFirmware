@@ -35,7 +35,8 @@ public:
     bool remap(const char *sub, const gcode::Words &words, std::string &err);
 
     bool step(SerialMessage &msg);   // true: msg holds a line to dispatch
-    void refused(unsigned line);
+    unsigned played_line();          // the job line the machine has reached
+    void refused(uint32_t mark);
     bool yields() const { return !in_sub(); }
     bool takes_console() const { return !playing() || paused; }
     bool busy() const { return ending || runner->running(); }
@@ -54,7 +55,7 @@ public:
     void stop();            // the job and any sub on it, or a sub alone
 
     // a line refused while earlier moves are still queued: they finish, then the job stops
-    bool stop_after_queued(unsigned int line);
+    bool stop_after_queued(uint32_t mark);
 
 private:
     bool can_call(std::string &err) const;
@@ -62,6 +63,7 @@ private:
     bool advance(SerialMessage &msg);
     bool frozen() const { return paused && !in_sub(); }
     void finish();
+    void stop_at(uint32_t at);
     void forget();
     void end_job();
     void halt(int reason);
@@ -73,9 +75,9 @@ private:
     script::Runner *runner= nullptr;
     StreamOutput *reply= nullptr;       // caller waiting for ok/error
     std::string name;                   // what runs, for messages
-    unsigned line= 0;                   // the last job line read
+    unsigned played= 0;
     uint32_t stop_after= 0;             // the queue mark the refused line was written before
-    unsigned int stop_line= 0;
+    uint32_t stop_mark= 0;
     bool trace= false;
     bool nested= false;                 // a sub runs on the job
     bool ending= false;                 // the job is read to its end, the machine finishes it

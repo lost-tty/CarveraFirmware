@@ -318,7 +318,7 @@ bool Player::get_progress(struct pad_progress &p)
     if(program.job_size() == 0)
         return false;
 
-    p.played_lines = machine_task.where().line;
+    p.played_lines = program.played_line();
     p.elapsed_secs = this->calculate_elapsed_secs();
     p.percent_complete = roundf(program.job_read() * 100.0F / program.job_size());
     p.filename = program.job_name();

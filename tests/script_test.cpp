@@ -48,6 +48,11 @@ struct Machine : gcode::ParamStore {
     }
 };
 
+static std::string located(const script::Runner &r, const std::string &err)
+{
+    return "line " + std::to_string(r.last().line) + ": " + err;
+}
+
 // runs a script (sub or main body) and returns the emitted lines joined by '|', or "ERROR: ..."
 static std::string run(const char *text, Machine &m, const char *sub = nullptr, std::vector<float> args = {}) {
     script::Source src;
@@ -67,7 +72,9 @@ static std::string run(const char *text, Machine &m, const char *sub = nullptr, 
             if (r.aborted() != 0) { char b[24]; snprintf(b, sizeof(b), "|ABORT %d", (int)r.aborted()); out += b; }
             return out;
         }
-        if (res == script::Runner::ERROR) return out + (out.empty() ? "" : "|") + "ERROR: " + err;
+        if (res == script::Runner::ERROR)
+            return out + (out.empty() ? "" : "|") + "ERROR: " + located(r, err);
+
         if (res == script::Runner::RETURNED)
             continue;
 
@@ -103,7 +110,7 @@ static std::string run_job(const char *lib, const char *job, Machine &m,
             return out;
 
         if (res == script::Runner::ERROR)
-            return out + "|ERROR: " + err;
+            return out + "|ERROR: " + located(r, err);
 
         if (res == script::Runner::RETURNED)
             continue;
@@ -241,7 +248,8 @@ int main() {
             if (i == 1) {
                 CHECK(r.step(line, err) == script::Runner::LINE && evaluate(r, line, err)
                       && line == "G0 X1 Y10");
-                CHECK(r.step(line, err) == script::Runner::ERROR && err == "line 3: no value for parameter #<_cnt>");
+                CHECK(r.step(line, err) == script::Runner::ERROR
+                      && located(r, err) == "line 3: no value for parameter #<_cnt>");
             }
         }
         r.stop();
@@ -339,6 +347,16 @@ int main() {
         // a pause can come in here
         CHECK(r.step(line, err) == script::Runner::RETURNED && r.at_main());
         CHECK(r.step(line, err) == script::Runner::LINE && line == "G1");
+    }
+    {
+        script::Source src;
+        add(src, "job", "G0\nG1\nG2\n", true);
+        add(src, "sub", "o<s> sub\nG3\no<s> endsub\n");
+        uint32_t job2 = src.mark(src.segments[0].base + 3, 2);
+        uint32_t sub2 = src.mark(src.segments[1].base + 9, 2);
+        CHECK(job2 == 2 && src.place(job2) == "script_test_job:2");
+        CHECK(script::Source::segment(sub2) == 1 && script::Source::line(sub2) == 2);
+        CHECK(src.place(sub2) == "script_test_sub:2" && src.place(0).empty());
     }
     printf(failures ? "%d failures\n" : "all passed\n", failures);
     return failures != 0;

@@ -156,7 +156,8 @@ void GcodeDispatch::broadcast(Gcode &gcode, OnMachine)
     // the posting line has already returned, so the error is reported from here
     if(gcode.error_text.empty()) return;
     printk("error:%s\n", gcode.error_text.c_str());
-    if(!program.stop_after_queued(gcode.line)) program.stop();
+    if(!program.stop_after_queued(gcode.mark))
+        program.stop();
 }
 
 // G4 and G92 read or set where the machine is, so the queue has to run out first
@@ -192,12 +193,12 @@ void GcodeDispatch::service()
     if(!buffered.empty() && program.yields()) {
         Buffered b= buffered.front();
         buffered.pop_front();
-        run_line(SerialMessage{b.stream, b.line, 0, nullptr});
+        run_line(SerialMessage{b.stream, b.text, 0, nullptr});
         return;
     }
     SerialMessage msg{&THEKERNEL->streams, "", 0, nullptr};
     if(program.step(msg) && !run_line(msg))
-        program.refused(msg.line);
+        program.refused(msg.mark);
 }
 
 bool GcodeDispatch::buffer(const std::string &line, StreamOutput *stream, std::string &err)
@@ -333,14 +334,14 @@ bool GcodeDispatch::run_line(const SerialMessage &msg)
             printk("error:Alarm lock\n");
             return false;
         }
-        return announce(s, j + 4, msg.line, store);
+        return announce(s, j + 4, msg.mark, store);
     }
 
     gcode::Line parsed; // local: modules may dispatch console lines while a line executes
     if(!parsed.parse(s.c_str() + i, store))
         return fail(parsed.error_text().c_str());
 
-    return execute(parsed.words(), s.substr(i), msg.line);
+    return execute(parsed.words(), s.substr(i), msg.mark);
 }
 
 void GcodeDispatch::program_end()
@@ -363,7 +364,7 @@ void GcodeDispatch::say(Gcode *gcode)
     printk("%s\r\n", gcode->text.c_str());
 }
 
-bool GcodeDispatch::announce(const string &line, size_t from, unsigned int number,
+bool GcodeDispatch::announce(const string &line, size_t from, uint32_t mark,
                             const gcode::ParamStore *store)
 {
     string out;
@@ -405,7 +406,7 @@ bool GcodeDispatch::announce(const string &line, size_t from, unsigned int numbe
 
     gcode::Words words;
     words.push_back(gcode::Word{.letter= 'M', .subcode= 0, .has_value= true, .value= 118.0F});
-    Gcode gcode(words, 0, number);
+    Gcode gcode(words, 0, mark);
     gcode.text= out;
     run_mcode(gcode);
     return true;
@@ -469,7 +470,7 @@ GcodeDispatch::Gate GcodeDispatch::homed_enough(const gcode::Words &words)
     return PASS;
 }
 
-bool GcodeDispatch::execute(const gcode::Words &words, const string &text, unsigned int line)
+bool GcodeDispatch::execute(const gcode::Words &words, const string &text, uint32_t mark)
 {
     if(words.empty()) {
         return true;
@@ -563,7 +564,7 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, unsig
             if(i == c.index) index= k;
             k++;
         }
-        Gcode gcode(block_words, index, line);
+        Gcode gcode(block_words, index, mark);
 
         if(c.rank == MOTION) {
             gcode.mcs= blocks[c.block].mcs;

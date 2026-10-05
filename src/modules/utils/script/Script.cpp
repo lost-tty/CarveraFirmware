@@ -77,6 +77,22 @@ std::string Source::located(const std::string &err, unsigned offset) const
     return basename(segment) + buf + err.substr(err.find(':') + 1);
 }
 
+uint32_t Source::mark(unsigned offset, unsigned line) const
+{
+    int i = segment_of(offset);
+    return i < 0 ? 0 : uint32_t(i) << 24 | line;
+}
+
+std::string Source::place(uint32_t mark) const
+{
+    if (mark == 0 || segment(mark) >= segments.size())
+        return "";
+
+    char buf[16];
+    snprintf(buf, sizeof(buf), ":%u", line(mark));
+    return basename(segment(mark)) + buf;
+}
+
 void Source::release()
 {
     if (fd != nullptr) fclose(fd);
@@ -674,10 +690,8 @@ bool Runner::set_local(const char *name, float v)
 
 Runner::Result Runner::fail(std::string &err, const std::string &msg)
 {
-    char buf[16];
     last_place = frames.empty() ? Place{0, 0} : Place{frames.back().at, frames.back().line};
-    snprintf(buf, sizeof(buf), "line %u: ", unsigned(last_place.line));
-    err = buf + msg;
+    err = msg;
     stop();
     return ERROR;
 }
