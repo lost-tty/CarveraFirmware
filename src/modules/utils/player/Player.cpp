@@ -516,10 +516,7 @@ void Player::step_command(string parameters, StreamOutput *stream)
     if (program.loaded() && !homed(stream))
         return;
 
-    if (program.step_running()) {
+    Program::Step step = how == "over" ? Program::OVER : how == "out" ? Program::OUT : Program::INTO;
+    if (!program.step(step))
         stream->printf("error:the last step still runs\r\n");
-        return;
-    }
-
-    program.step(how == "over" ? Program::OVER : how == "out" ? Program::OUT : Program::INTO);
 }

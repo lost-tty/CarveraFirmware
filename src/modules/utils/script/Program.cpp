@@ -392,14 +392,22 @@ unsigned Program::depth_of(uint32_t mark) const
 
 bool Program::step_running() const
 {
-    return stepper.fencing && (!THECONVEYOR.fence_settled() || !THECONVEYOR.fence_reached());
+    if(stepper.fencing)
+        return !THECONVEYOR.fence_settled() || !THECONVEYOR.fence_reached();
+
+    return holding() && !machine_task.idle();
 }
 
 // lines queued before the suspend pass the conveyor's fence one by one
-void Program::step(Step how)
+bool Program::step(Step how)
 {
-    if(step_running())
-        return;
+    if(step_running()) {
+        if(!THEKERNEL->get_feed_hold())
+            return false;
+
+        release();
+        return true;
+    }
 
     unsigned depth= depth_of(standing());
     if(stepper.fencing || (!holding() && !machine_task.idle())) {
@@ -411,6 +419,7 @@ void Program::step(Step how)
         resume();
     }
     stepper.stop_depth= how == INTO ? EVERY : how == OVER ? depth : depth - 1;
+    return true;
 }
 
 void Program::follow_fence()

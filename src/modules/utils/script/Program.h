@@ -63,8 +63,7 @@ public:
     void suspend();
     void resume();
     enum Step { INTO, OVER, OUT };
-    void step(Step how);   // resume, pause before the next line on that level
-    bool step_running() const;
+    bool step(Step how);   // resume, pause before the next line on that level
     void ask_pause() { pause_asked= playing(); }  // at the next job line
     bool cancel_pause();
     bool jump(unsigned line, std::string &err);
@@ -86,6 +85,7 @@ private:
     void follow_fence();
     void lift_fence();
     void release();   // the hold, and a loaded job's wait
+    bool step_running() const;
     uint32_t standing() const;   // the line the job stands before, else the machine's
     // from the line paused before, else the machine's; the console's outermost is the job's
     unsigned shown_chain(uint32_t *out);
