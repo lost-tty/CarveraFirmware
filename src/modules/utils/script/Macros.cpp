@@ -11,7 +11,7 @@
 #include <dirent.h>
 #endif
 
-// the .ngc files, by name
+// the .ngc files' names, without .ngc: the key index_of() looks up
 std::vector<std::string> Macros::list(const char *dir)
 {
     std::vector<std::string> names;
@@ -19,7 +19,7 @@ std::vector<std::string> Macros::list(const char *dir)
         while (struct dirent *e = readdir(d)) {
             std::string name = e->d_name;
             bool ngc = name.size() >= 5 && name.compare(name.size() - 4, 4, ".ngc") == 0;
-            if (ngc) names.push_back(name);
+            if (ngc) names.push_back(name.substr(0, name.size() - 4));
         }
         closedir(d);
     }
@@ -45,7 +45,7 @@ void Macros::load(const std::vector<std::string> &search)
             continue;
 
         index.push_back(pool.size());
-        pool.append(files[i], 0, files[i].size() - 4);
+        pool += files[i];
         pool += '\0';
     }
     index.shrink_to_fit();
