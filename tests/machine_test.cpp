@@ -232,6 +232,7 @@ int main() {
 
     // canned cycles: one runner, as the module keeps it, so a cycle's sticky Z R F survive between holes
     m.v[5043] = 3; // work Z, where the cycle starts and G98 retracts to
+    m.named["_cycle_initial"] = 3;
     m.named["_motion_mode"] = 81; // the dispatcher's G81 before the sub runs
     CHECK(run_all(m, {{"g81", {{'X', 10}, {'Y', 10}, {'Z', -2}, {'R', 1}, {'F', 100}}},
                       {"g81", {{'X', 20}}},
