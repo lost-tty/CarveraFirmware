@@ -18,45 +18,23 @@
 #include <cstring>
 #include "modules/robot/MachineTask.h"
 #include "Program.h"
+#include "MacroFS.h"
 
 
 void Scripts::on_module_loaded()
 {
     gcode_dispatch.set_script_hook(this);
     SimpleShell::add_command(shell_slot, "macro", &Scripts::shell, this,
-                             "macro list | params | check | run <sub> [args] | trace on|off");
-    register_for_event(ON_MAIN_LOOP);
+                             "macro list | params | run <sub> [args] | trace on|off");
     load();
 }
 
-#define SD_DIR SCRIPTS_DIR
-bool Scripts::load()
-{
-    if(program.busy()) {
-        printk("error:script running\n");
-        return false;
-    }
-    Macros &macros= program.macros();
-    Macros::Report r;
-    std::string err;
-    loaded= macros.load(Macros::EMBEDDED_DIR, SD_DIR, r, err);
-    if(!r.fallback.empty()) printk("error:%s, using the embedded scripts\n", r.fallback.c_str());
-    if(!loaded) {
-        printk("error:%s\n", macros.located(err, macros.program().error_offset).c_str());
-        return false;
-    }
-    if(r.replaced + r.added > 0) printk("scripts: %u embedded, %u replaced, %u added from " SD_DIR "\n", r.embedded, r.replaced, r.added);
-    else printk("scripts: %u embedded\n", r.embedded);
-    return true;
-}
+static const std::vector<std::string> MACRO_PATHS= {SCRIPTS_DIR, "/" MACROFS_MOUNT "/"};
 
-bool Scripts::run(const char *sub, const float *args, unsigned nargs, StreamOutput *stream, std::string &err)
+void Scripts::load()
 {
-    if(!loaded) {
-        err= "no scripts";
-        return false;
-    }
-    return program.call(sub, args, nargs, stream, err);
+    program.macros().load(MACRO_PATHS);
+    printk("scripts: %u\n", unsigned(program.macros().names().size()));
 }
 
 // M6 T3 -> o<m6> with #<t> = 3, G28.2 -> o<g28.2>: every word of the block becomes a #<letter>.
@@ -70,7 +48,7 @@ bool Scripts::trigger(const Gcode &gcode, StreamOutput *stream, std::string &err
         return false;
 
     const gcode::Word &c= gcode.command;
-    if(!loaded || c.letter == 0)
+    if(c.letter == 0)
         return false;
 
     char sub[16];
@@ -78,7 +56,7 @@ bool Scripts::trigger(const Gcode &gcode, StreamOutput *stream, std::string &err
     if(c.subcode != 0)
         snprintf(sub + n, sizeof(sub) - n, ".%u", c.subcode);
 
-    if(program.macros().program().find_sub(sub) < 0)
+    if(!program.macros().has(sub))
         return false;
 
     if(!program.call(sub, nullptr, 0, stream, err))
@@ -93,42 +71,31 @@ bool Scripts::trigger(const Gcode &gcode, StreamOutput *stream, std::string &err
 
 bool Scripts::call(const std::string &line, StreamOutput *stream, std::string &err)
 {
-    if(!loaded) {
-        err= "no scripts";
-        return false;
-    }
     return program.call_line(line, stream, err);
 }
 
-// hooks from other modules: run a sub if the machine script has it
-// a macro file changed on disk, so the loaded program is stale
 void Scripts::file_changed(const char *path)
 {
-    if(path == nullptr || strncmp(path, SD_DIR, sizeof(SD_DIR) - 1) != 0) return;
-    if(program.busy()) { // the source still reads the job and the subs: reload once they are done
-        stale= true;
+    if(path == nullptr)
         return;
+
+    for (const std::string &dir : MACRO_PATHS) {
+        if(strncmp(path, dir.c_str(), dir.size()) == 0) {
+            load();
+            return;
+        }
     }
-    loaded= false;
-    load();
-}
-
-void Scripts::on_main_loop(void *)
-{
-    if(!stale || program.busy())
-        return;
-
-    stale= false;
-    file_changed(SD_DIR);
 }
 
 bool Scripts::run_sub(const char *sub, const float *args, unsigned nargs)
 {
-    if(!loaded || program.macros().program().find_sub(sub) < 0)
+    if(!program.macros().has(sub))
         return false;
 
     std::string err;
-    if(run(sub, args, nargs, nullptr, err)) return true;
+    if(program.call(sub, args, nargs, nullptr, err))
+        return true;
+
     printk("error:script %s %s\n", sub, err.c_str());
     return false;
 }
@@ -140,7 +107,6 @@ void Scripts::boot()
 }
 
 const SimpleShell::Sub<Scripts> Scripts::SUBS[] = {
-    {"check",  &Scripts::sub_check,  "reload the scripts and validate them"},
     {"list",   &Scripts::sub_list,   "the subs that are defined"},
     {"params", &Scripts::sub_params, "the #<_name> values a script can read"},
     {"run",    &Scripts::sub_run,    "run one sub: run <sub> [args]"},
@@ -153,19 +119,11 @@ void Scripts::shell(void *self, const char *cmd, std::string args, StreamOutput 
     SimpleShell::dispatch(static_cast<Scripts *>(self), SUBS, cmd, args, stream);
 }
 
-void Scripts::sub_check(std::string, StreamOutput *)
-{
-    load();
-}
-
 void Scripts::sub_list(std::string, StreamOutput *stream)
 {
-    if(!loaded) {
-        stream->printf("error:no scripts, try macro check\n");
-        return;
+    for (const std::string &name : program.macros().names()) {
+        stream->printf("%s\n", name.c_str());
     }
-    const script::Program &p= program.macros().program();
-    for (unsigned i= 0; i < p.subs.size(); i++) stream->printf("%s\n", p.name(i));
 }
 
 void Scripts::sub_params(std::string, StreamOutput *stream)
@@ -179,9 +137,14 @@ void Scripts::sub_run(std::string cmd, StreamOutput *stream)
     float args[script::Runner::MAX_ARGS];
     unsigned n= 0;
     while(!cmd.empty() && n < script::Runner::MAX_ARGS) args[n++]= strtof(shift_parameter(cmd).c_str(), nullptr);
+    if(machine_task.is_halted()) {
+        stream->printf("error:Alarm lock\n");
+        return;
+    }
     std::string err;
-    if(machine_task.is_halted()) stream->printf("error:Alarm lock\n");
-    else if(!run(sub.c_str(), args, n, stream, err)) stream->printf("error:%s\n", err.c_str());
+    if(!program.call(sub.c_str(), args, n, stream, err))
+        stream->printf("error:%s\n", err.c_str());
+
     // ok follows when the script has finished
 }
 

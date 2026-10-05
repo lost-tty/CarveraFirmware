@@ -2,6 +2,8 @@
 
 #include "FileSystemLike.h"
 
+#define MACROFS_MOUNT "macros"
+
 // The embedded machine scripts as read-only files under /macros, from the cpio archive
 // build/macros.sh packs.
 class MacroFS : public mbed::FileSystemLike {

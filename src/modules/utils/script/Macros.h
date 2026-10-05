@@ -2,30 +2,24 @@
 
 #include "Script.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
-// The machine scripts: the embedded files under /macros and, per file, a replacement or addition
-// from a directory on the SD card. Nothing is copied into RAM: each file is a segment of the
-// source, read as it runs.
-class Macros {
+class Macros : public script::Resolver {
 public:
-    struct Report { unsigned embedded = 0, replaced = 0, added = 0; std::string fallback; }; // fallback: why the SD files were not used
-
-    static const char EMBEDDED_DIR[];   // the mount of MacroFS
-
-    // sd null: embedded only
-    bool load(const char *embedded, const char *sd, Report &report, std::string &err);
-    const script::Program &program() const { return prog; }
-    script::Source &source() { return src; }
-    const script::Source &source() const { return src; }
-    std::string located(const std::string &err, unsigned offset); // "line N: ..." -> "file.ngc:N: ..."
-    std::string file(unsigned offset);                            // the .ngc the offset is in
+    // a file in an earlier directory hides one of the same name in a later one
+    void load(const std::vector<std::string> &dirs);
+    bool has(const char *sub) const;
+    std::vector<std::string> paths(const char *sub) const override;
+    std::vector<std::string> names() const;
 
 private:
     static std::vector<std::string> list(const char *dir);
-    bool build(const std::vector<std::string> &paths, std::string &err);
+    int index_of(const char *sub) const;
+    const char *name(unsigned i) const { return pool.c_str() + index[i]; }
 
-    script::Source src;
-    script::Program prog;
+    std::vector<uint16_t> index;   // into pool, sorted by name
+    std::string pool;              // the names without .ngc, each ended by a '\0'
+    std::vector<std::string> dirs;
 };

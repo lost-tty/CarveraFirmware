@@ -14,14 +14,16 @@
 
 void Program::on_module_loaded()
 {
-    runner= new script::Runner(library.program(), gcode_dispatch.parameters());
+    library.source= &source;
+    library.resolver= &files;
+    runner= new script::Runner(library, gcode_dispatch.parameters());
     SimpleShell::add_command(shell_slot, "list", &Program::shell, this,
                              "list [n] - lines around the one running");
 }
 
 bool Program::start_job(const std::string &path, bool echo_lines, std::string &err)
 {
-    script::Source &src= library.source();
+    script::Source &src= source;
     if(!src.add_job(path)) {
         err= "File not found: " + path;
         return false;
@@ -122,7 +124,7 @@ bool Program::advance(SerialMessage &msg)
             } else if(trace) {
                 char buf[16];
                 snprintf(buf, sizeof(buf), "line %u:", unsigned(runner->last().line));
-                printk("%s> %s\n", library.located(buf, runner->last().offset).c_str(),
+                printk("%s> %s\n", source.located(buf, runner->last().offset).c_str(),
                        msg.message.c_str());
             }
             msg.params= &runner->parameters();
@@ -147,8 +149,8 @@ bool Program::advance(SerialMessage &msg)
             return false;
         }
         case script::Runner::ERROR: {
+            std::string where= source.located(err, runner->last().offset);
             finish();
-            std::string where= library.located(err, runner->last().offset);
             printk("error:script %s %s\n", name.c_str(), where.c_str());
             halt(SCRIPT);
             return false;
@@ -159,13 +161,13 @@ bool Program::advance(SerialMessage &msg)
 
 const char *Program::job_name() const
 {
-    const script::Source &src= library.source();
+    const script::Source &src= source;
     return playing() ? src.segments[src.job()].path : "";
 }
 
 unsigned Program::job_size() const
 {
-    const script::Source &src= library.source();
+    const script::Source &src= source;
     return playing() ? src.segments[src.job()].size : 0;
 }
 
@@ -174,7 +176,7 @@ unsigned Program::job_read() const
     if(!playing())
         return 0;
 
-    const script::Source &src= library.source();
+    const script::Source &src= source;
     return runner->main().offset - src.segments[src.job()].base;
 }
 
@@ -254,6 +256,14 @@ void Program::finish()
     machine_task.enforce_keepout();
     atc_handler.set_state(0);
     reply= nullptr;
+    forget();
+}
+
+// an SD file may change before the next program
+void Program::forget()
+{
+    if(!runner->running() && !playing())
+        library.reset();
 }
 
 // the file ended, was stopped or the machine halted: queued motion finishes, then spindle and
@@ -265,11 +275,12 @@ void Program::end_job()
         return;
 
     player.job_ended();
-    library.source().remove_job();
+    source.remove_job();
     line= 0;
     echo= false;
     pause_asked= false;
     machine_task.enforce_keepout();
+    forget();
 }
 
 void Program::halt(int reason)
@@ -287,7 +298,7 @@ void Program::shell(void *self, const char *, std::string cmd, StreamOutput *str
         return;
     }
 
-    script::Source &src= me->library.source();
+    script::Source &src= me->source;
     if(me->playing()) {
         stream->printf("%s:\r\n", me->job_name());
         me->list(stream, src.job(), machine_task.where().line, around);
@@ -305,7 +316,7 @@ void Program::list(StreamOutput *stream, int segment, unsigned current, unsigned
     if(segment < 0)
         return;
 
-    script::Source &src= library.source();
+    script::Source &src= source;
     unsigned at= src.segments[segment].base, end= at + src.segments[segment].size, n= 1;
     for (; n + around < current && at < end; n++) at= src.next(at); // `around` lines before
     std::string text;

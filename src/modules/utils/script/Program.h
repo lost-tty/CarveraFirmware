@@ -20,7 +20,7 @@ public:
     static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
     SimpleShell::Registered shell_slot;
 
-    Macros &macros() { return library; }
+    Macros &macros() { return files; }
     bool start_job(const std::string &path, bool echo, std::string &err);
     bool call(const char *sub, const float *args, unsigned nargs, StreamOutput *reply,
               std::string &err);
@@ -34,7 +34,7 @@ public:
     bool takes_console() const { return !playing() || paused; }
     bool busy() const { return ending || runner->running(); }
     bool in_sub() const { return runner->running() && !runner->at_main(); }
-    bool playing() const { return library.source().job() >= 0; }
+    bool playing() const { return source.job() >= 0; }
     const char *job_name() const;
     unsigned job_size() const;
     unsigned job_read() const;
@@ -56,11 +56,14 @@ private:
     bool advance(SerialMessage &msg);
     bool frozen() const { return paused && !in_sub(); }
     void finish();
+    void forget();
     void end_job();
     void halt(int reason);
     void list(StreamOutput *stream, int segment, unsigned current, unsigned around);
 
-    Macros library;
+    Macros files;
+    script::Source source;
+    script::Program library;
     script::Runner *runner= nullptr;
     StreamOutput *reply= nullptr;       // caller waiting for ok/error
     std::string name;                   // what runs, for messages

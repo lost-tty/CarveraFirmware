@@ -3,14 +3,13 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <strings.h>
 
 #if defined(__arm__)
 #include "DirHandle.h"
 #else
 #include <dirent.h>
 #endif
-
-const char Macros::EMBEDDED_DIR[] = "/macros/";
 
 // the .ngc files, by name
 std::vector<std::string> Macros::list(const char *dir)
@@ -28,64 +27,72 @@ std::vector<std::string> Macros::list(const char *dir)
     return names;
 }
 
-bool Macros::build(const std::vector<std::string> &paths, std::string &err)
+void Macros::load(const std::vector<std::string> &search)
 {
-    src.clear();
-    for (const std::string &path : paths) {
-        if (!src.add(path)) {
-            err = "cannot read " + path;
-            return false;
+    dirs = search;
+    std::vector<std::string> files;
+    for (const std::string &dir : dirs) {
+        std::vector<std::string> in = list(dir.c_str());
+        files.insert(files.end(), in.begin(), in.end());
+    }
+    std::sort(files.begin(), files.end(), [](const std::string &a, const std::string &b) {
+        return strcasecmp(a.c_str(), b.c_str()) < 0;
+    });
+    index.clear();
+    pool.clear();
+    for (unsigned i = 0; i < files.size(); i++) {
+        if (i > 0 && strcasecmp(files[i].c_str(), files[i - 1].c_str()) == 0)
+            continue;
+
+        index.push_back(pool.size());
+        pool.append(files[i], 0, files[i].size() - 4);
+        pool += '\0';
+    }
+    index.shrink_to_fit();
+    pool.shrink_to_fit();
+}
+
+int Macros::index_of(const char *sub) const
+{
+    unsigned lo = 0, hi = index.size();
+    while (lo < hi) {
+        unsigned mid = (lo + hi) / 2;
+        int c = strcasecmp(name(mid), sub);
+        if (c == 0)
+            return mid;
+
+        if (c < 0) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
         }
     }
-    return prog.load(src, err);
+    return -1;
 }
 
-// the SD copy of a file where there is one, the embedded file otherwise, then the SD additions
-bool Macros::load(const char *embedded, const char *sd, Report &report, std::string &err)
+bool Macros::has(const char *sub) const
 {
-    std::vector<std::string> files = list(embedded), paths;
-    report.embedded = files.size();
-    report.replaced = report.added = 0;
-    for (const std::string &name : files) paths.push_back(embedded + name);
+    return index_of(sub) >= 0;
+}
 
-    std::vector<std::string> own = sd != nullptr ? list(sd) : std::vector<std::string>();
-    if (!own.empty()) {
-        std::vector<std::string> with_sd = paths;
-        unsigned replaced = 0, added = 0;
-        for (const std::string &name : own) {
-            size_t i = std::find(files.begin(), files.end(), name) - files.begin();
-            if (i < files.size()) {
-                with_sd[i] = sd + name;
-                replaced++;
-            } else {
-                with_sd.push_back(sd + name);
-                added++;
-            }
-        }
-        if (build(with_sd, err)) {
-            report.replaced = replaced;
-            report.added = added;
-            return true;
-        }
+std::vector<std::string> Macros::paths(const char *sub) const
+{
+    std::vector<std::string> out;
+    int i = index_of(sub);
+    if (i < 0)
+        return out;
 
-        report.fallback = located(err, prog.error_offset);
+    for (const std::string &dir : dirs) {
+        out.push_back(dir + name(i) + ".ngc");
     }
-    return build(paths, err); // the embedded scripts alone
+    return out;
 }
 
-std::string Macros::file(unsigned offset)
+std::vector<std::string> Macros::names() const
 {
-    int i = src.segment_of(offset);
-    return i < 0 ? "" : src.basename(i);
-}
-
-std::string Macros::located(const std::string &err, unsigned offset)
-{
-    unsigned n = 0;
-    if (sscanf(err.c_str(), "line %u:", &n) != 1) return err;
-    std::string name = file(offset);
-    if (name.empty()) return err;
-    char buf[16];
-    snprintf(buf, sizeof(buf), ":%u:", n);
-    return name + buf + err.substr(err.find(':') + 1);
+    std::vector<std::string> out;
+    for (unsigned i = 0; i < index.size(); i++) {
+        out.push_back(name(i));
+    }
+    return out;
 }

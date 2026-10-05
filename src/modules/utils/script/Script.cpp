@@ -41,23 +41,40 @@ bool Source::add_job(const std::string &path)
 
 void Source::remove_job()
 {
-    if (job() < 0)
+    int i = job();
+    if (i < 0)
         return;
 
     release();
-    free(segments.back().path);
-    segments.pop_back();
+    free(segments[i].path);
+    segments.erase(segments.begin() + i);
 }
 
 int Source::job() const
 {
-    return !segments.empty() && segments.back().job ? int(segments.size()) - 1 : -1;
+    for (unsigned i = 0; i < segments.size(); i++) {
+        if (segments[i].job)
+            return i;
+    }
+    return -1;
 }
 
 std::string Source::basename(unsigned segment) const
 {
     const char *slash = strrchr(segments[segment].path, '/');
     return slash != nullptr ? slash + 1 : segments[segment].path;
+}
+
+std::string Source::located(const std::string &err, unsigned offset) const
+{
+    unsigned n = 0;
+    int segment = segment_of(offset);
+    if (segment < 0 || sscanf(err.c_str(), "line %u:", &n) != 1)
+        return err;
+
+    char buf[16];
+    snprintf(buf, sizeof(buf), ":%u:", n);
+    return basename(segment) + buf + err.substr(err.find(':') + 1);
 }
 
 void Source::release()
@@ -446,7 +463,49 @@ int Program::find_sub(const char *name) const
     return -1;
 }
 
-Runner::Runner(const Program &program, gcode::ParamStore &machine)
+int Program::find(const char *name, std::string &err)
+{
+    int i = find_sub(name);
+    if (i >= 0)
+        return i;
+
+    std::string path;
+    if (resolver != nullptr) {
+        for (const std::string &p : resolver->paths(name)) {
+            if (source->add(p)) {
+                path = p;
+                break;
+            }
+        }
+    }
+    if (path.empty()) {
+        err = std::string("no sub ") + name;
+        return -1;
+    }
+    size_t had = subs.size(), named = names.size();
+    Calls calls;
+    bool ok = check(source->segments.size() - 1, calls, err);
+    source->release();
+    if (ok && (i = find_sub(name)) >= 0)
+        return i;
+
+    err = ok ? path + " holds no o<" + name + "> sub" : source->located(err, error_offset);
+    subs.resize(had);
+    names.resize(named);
+    free(source->segments.back().path);
+    source->segments.pop_back();
+    return -1;
+}
+
+void Program::reset()
+{
+    std::vector<Sub>().swap(subs);
+    std::string().swap(names);
+    if (source != nullptr)
+        source->clear();
+}
+
+Runner::Runner(Program &program, gcode::ParamStore &machine)
     : program(program), machine(machine), store(*this)
 {
     frames.reserve(MAX_DEPTH);
@@ -555,11 +614,10 @@ bool Runner::call(const char *sub, const float *args, unsigned nargs, std::strin
         err = "too many arguments";
         return false;
     }
-    int index = program.find_sub(sub);
-    if (index < 0) {
-        err = std::string("no sub ") + sub;
+    int index = program.find(sub, err);
+    if (index < 0)
         return false;
-    }
+
     return push(index, args, nargs, err);
 }
 

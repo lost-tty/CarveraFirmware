@@ -38,6 +38,8 @@ public:
     unsigned line_of(unsigned offset);                                    // 1-based line within its segment
     int segment_of(unsigned offset) const;
     std::string basename(unsigned segment) const;
+    // "line N: ..." -> "file.ngc:N: ..."
+    std::string located(const std::string &err, unsigned offset) const;
     std::vector<Segment> segments;
 
 private:
@@ -63,14 +65,23 @@ inline bool is_control(const char *p)
 }
 
 // Validates the scripts at load and keeps only their subs; the runner finds the blocks as it reads.
+class Resolver {
+public:
+    virtual ~Resolver() {}
+    virtual std::vector<std::string> paths(const char *sub) const = 0;  // in search order
+};
+
 class Program {
 public:
     bool load(Source &source, std::string &err); // err: "line N: ...", N within the segment at error_offset
     int find_sub(const char *name) const;        // index into subs, or -1
+    int find(const char *name, std::string &err); // find_sub, reading the file on a miss
+    void reset();
     const char *name(int i) const { return names.c_str() + subs[i].name; }
     static const unsigned MAX_LABEL = 64;
 
     Source *source = nullptr;
+    Resolver *resolver = nullptr;
     unsigned error_offset = 0;
     std::vector<Sub> subs;
 
@@ -85,7 +96,7 @@ private:
 // Globals (#<_name>) persist from one program to the next.
 class Runner {
 public:
-    Runner(const Program &program, gcode::ParamStore &machine);
+    Runner(Program &program, gcode::ParamStore &machine);
     // the source from offset on as the bottom frame, where #1..#30 are the machine's
     bool start_main(unsigned offset, std::string &err);
     bool goto_main(unsigned line, std::string &err);
@@ -181,7 +192,7 @@ private:
     void pop();
     Named *find_named(const char *name, uint8_t depth);
 
-    const Program &program;
+    Program &program;
     gcode::ParamStore &machine;
     Store store;
     std::vector<Frame> frames;

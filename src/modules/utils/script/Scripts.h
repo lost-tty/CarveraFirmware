@@ -11,10 +11,8 @@
 class Scripts : public Module, public ScriptHook {
 public:
     void on_module_loaded() override;
-    void on_main_loop(void *) override;
     static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
     static const SimpleShell::Sub<Scripts> SUBS[];
-    void sub_check(std::string args, StreamOutput *stream);
     void sub_list(std::string args, StreamOutput *stream);
     void sub_params(std::string args, StreamOutput *stream);
     void sub_run(std::string args, StreamOutput *stream);
@@ -27,11 +25,7 @@ public:
     bool run_sub(const char *sub, const float *args, unsigned nargs);
 
 private:
-    bool load();
-    bool run(const char *sub, const float *args, unsigned nargs, StreamOutput *reply, std::string &err);
-
-    bool loaded= false;
-    bool stale= false;                  // a script file changed while the source was in use
+    void load();
 };
 
 extern Scripts scripts;

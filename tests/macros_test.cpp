@@ -1,5 +1,5 @@
-// Host test of the script loader: the embedded files, SD replacements and additions, line mapping,
-// memory use.
+// Host test of the script loader: names, reading a sub on its first call, SD replacements, line
+// mapping, memory use.
 // usage: macros_test <directory standing for /macros, e.g. ../src/macros> <scratch directory>
 #include "Macros.h"
 
@@ -38,62 +38,77 @@ int main(int argc, char **argv) {
     std::string dir = std::string(argv[2]) + "/macros/";
     mkdir(dir.c_str(), 0755);
 
-    { // embedded only
-        size_t before = live, peak_before = peak = live;
-        Macros m; Macros::Report r; std::string err;
-        CHECK(m.load(embedded.c_str(), nullptr, r, err));
-        CHECK(err.empty());
-        CHECK(r.embedded == files && r.replaced == 0 && r.added == 0 && r.fallback.empty());
-        CHECK(m.program().find_sub("m6") >= 0 && m.program().find_sub("atc_change") >= 0);
-        int sub = m.program().find_sub("atc_change");
-        unsigned at = m.program().subs[sub].offset;
-        CHECK(m.file(at) == "atc_change.ngc");                       // the first embedded file, alphabetically
-        CHECK(m.source().line_of(at) == 2);
-        CHECK(m.located("line 2: bad", at) == "atc_change.ngc:2: bad");
-        CHECK(m.located("no line", at) == "no line");
-        CHECK(m.source().segments.size() == files);
-        CHECK(std::string(m.source().segments[0].path) == embedded + "atc_change.ngc");
-        CHECK(m.source().line_of(m.source().segments[1].base) == 1);
-        m.source().release();
-        printf("embedded load: %zu bytes live, %zu peak\n", live - before, peak - peak_before);
+    { // the names only, nothing read
+        size_t before = live;
+        Macros m;
+        m.load({embedded});
+        CHECK(m.names().size() == files);
+        CHECK(m.has("m6") && m.has("M6") && m.has("atc_change") && !m.has("m7"));
+        CHECK(m.paths("m6") == std::vector<std::string>{embedded + "m6.ngc"});
+        CHECK(m.paths("m7").empty());
+        printf("names: %zu bytes live for %u files\n", live - before, files);
     }
-    { // SD replaces one file and adds one
+    { // a call reads the file once, reset forgets it
+        Macros m; std::string err;
+        script::Source src; script::Program prog;
+        prog.source = &src; prog.resolver = &m;
+        m.load({embedded});
+        size_t before = live;
+        int sub = prog.find("m6", err);
+        CHECK(sub >= 0 && err.empty());
+        CHECK(src.segments.size() == 1
+              && src.basename(src.segment_of(prog.subs[sub].offset)) == "m6.ngc");
+        CHECK(prog.find("atc_change", err) >= 0 && src.segments.size() == 2);
+        CHECK(prog.find("m6", err) == sub && src.segments.size() == 2);
+        printf("two subs read: %zu bytes live\n", live - before);
+        prog.reset();
+        CHECK(src.segments.empty() && prog.subs.empty());
+        CHECK(prog.find("nothing", err) < 0 && err == "no sub nothing");
+    }
+    { // an SD file replaces the embedded one and adds one
         write(dir + "g28.ngc", "o<g28> sub\n(MSG, custom)\no<g28> endsub\n");
         write(dir + "extra.ngc", "(added)\no<extra> sub\nG0 X0\no<extra> endsub\n");
         write(dir + "notes.txt", "ignored");
-        size_t before = live;
-        Macros m; Macros::Report r; std::string err;
-        CHECK(m.load(embedded.c_str(), dir.c_str(), r, err));
-        CHECK(r.embedded == files && r.replaced == 1 && r.added == 1 && r.fallback.empty());
-        int extra = m.program().find_sub("extra");
+        Macros m; std::string err;
+        script::Source src; script::Program prog;
+        prog.source = &src; prog.resolver = &m;
+        m.load({dir, embedded});
+        CHECK(m.names().size() == files + 1);
+        CHECK(m.paths("g28") == (std::vector<std::string>{dir + "g28.ngc", embedded + "g28.ngc"}));
+        int extra = prog.find("extra", err);
         CHECK(extra >= 0);
-        unsigned at = m.program().subs[extra].offset;
-        CHECK(m.file(at) == "extra.ngc" && m.source().line_of(at) == 2);
-        char buf[32]; snprintf(buf, sizeof(buf), "line %u: x", m.source().line_of(at));
-        CHECK(m.located(buf, at) == "extra.ngc:2: x");
+        unsigned at = prog.subs[extra].offset;
+        CHECK(src.basename(src.segment_of(at)) == "extra.ngc" && src.line_of(at) == 2);
+        CHECK(src.located("line 2: x", at) == "extra.ngc:2: x");
         std::string line; unsigned next;
-        CHECK(m.source().line_at(m.program().subs[m.program().find_sub("g28")].offset + 11, line, next) && line == "(MSG, custom)");
-        m.source().release();
-        printf("sd load: %zu bytes live (%zu segments, %zu subs)\n", live - before,
-               m.source().segments.size(), m.program().subs.size());
+        int g28 = prog.find("g28", err);
+        CHECK(g28 >= 0 && src.line_at(prog.subs[g28].offset + 11, line, next)
+              && line == "(MSG, custom)");
+        src.release();
     }
-    { // a broken SD file drops the whole SD set, the embedded scripts stay
+    { // a broken file fails its call with the place, and leaves nothing behind
         write(dir + "broken.ngc", "o<broken> sub\nG0 X0\n");
-        Macros m; Macros::Report r; std::string err;
-        CHECK(m.load(embedded.c_str(), dir.c_str(), r, err));
-        CHECK(r.replaced == 0 && r.added == 0 && r.fallback.compare(0, 11, "broken.ngc:") == 0);
-        CHECK(r.embedded == files);
-        CHECK(m.program().find_sub("extra") < 0 && m.program().find_sub("g28") >= 0);
+        write(dir + "other.ngc", "o<elsewhere> sub\no<elsewhere> endsub\n");
+        Macros m; std::string err;
+        script::Source src; script::Program prog;
+        prog.source = &src; prog.resolver = &m;
+        m.load({dir, embedded});
+        CHECK(prog.find("broken", err) < 0 && err.compare(0, 13, "broken.ngc:1:") == 0);
+        CHECK(src.segments.empty() && prog.subs.empty());
+        CHECK(prog.find("other", err) < 0
+              && err.find("holds no o<other> sub") != std::string::npos);
+        CHECK(prog.find("m6", err) >= 0);
         remove((dir + "broken.ngc").c_str());
+        remove((dir + "other.ngc").c_str());
     }
     { // past 64 KB
         write(dir + "huge.ngc", std::string(70000, '\n') + "o<huge> sub\nG0 X1\no<huge> endsub\n");
-        Macros m; Macros::Report r; std::string err;
-        CHECK(m.load(embedded.c_str(), dir.c_str(), r, err));
-        CHECK(r.fallback.empty() && r.added == 2); // with extra.ngc from above
-        int huge = m.program().find_sub("huge");
-        CHECK(huge >= 0 && m.program().subs[huge].line == 70001);
-        CHECK(m.program().find_sub("m6") >= 0);
+        Macros m; std::string err;
+        script::Source src; script::Program prog;
+        prog.source = &src; prog.resolver = &m;
+        m.load({dir, embedded});
+        int huge = prog.find("huge", err);
+        CHECK(huge >= 0 && prog.subs[huge].line == 70001);
         remove((dir + "huge.ngc").c_str());
     }
     remove((dir + "g28.ngc").c_str()); remove((dir + "extra.ngc").c_str()); remove((dir + "notes.txt").c_str());

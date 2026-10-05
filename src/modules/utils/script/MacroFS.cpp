@@ -138,7 +138,7 @@ private:
 }
 
 MacroFS::MacroFS(const char *blob, const char *blob_end)
-    : FileSystemLike("macros"), blob(blob), blob_end(blob_end) {}
+    : FileSystemLike(MACROFS_MOUNT), blob(blob), blob_end(blob_end) {}
 
 mbed::FileHandle *MacroFS::open(const char *filename, int flags)
 {
