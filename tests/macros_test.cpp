@@ -50,7 +50,7 @@ int main(int argc, char **argv) {
     }
     { // a call reads the file once, reset forgets it
         Macros m; std::string err;
-        script::Source src; script::Program prog;
+        script::Source src; script::Library prog;
         prog.source = &src; prog.resolver = &m;
         m.load({embedded});
         size_t before = live;
@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
         write(dir + "extra.ngc", "(added)\no<extra> sub\nG0 X0\no<extra> endsub\n");
         write(dir + "notes.txt", "ignored");
         Macros m; std::string err;
-        script::Source src; script::Program prog;
+        script::Source src; script::Library prog;
         prog.source = &src; prog.resolver = &m;
         m.load({dir, embedded});
         CHECK(m.names().size() == files + 1);
@@ -90,7 +90,7 @@ int main(int argc, char **argv) {
         write(dir + "broken.ngc", "o<broken> sub\nG0 X0\n");
         write(dir + "other.ngc", "o<elsewhere> sub\no<elsewhere> endsub\n");
         Macros m; std::string err;
-        script::Source src; script::Program prog;
+        script::Source src; script::Library prog;
         prog.source = &src; prog.resolver = &m;
         m.load({dir, embedded});
         CHECK(prog.find("broken", err) < 0 && err.compare(0, 13, "broken.ngc:1:") == 0);
@@ -104,7 +104,7 @@ int main(int argc, char **argv) {
     { // past 64 KB
         write(dir + "huge.ngc", std::string(70000, '\n') + "o<huge> sub\nG0 X1\no<huge> endsub\n");
         Macros m; std::string err;
-        script::Source src; script::Program prog;
+        script::Source src; script::Library prog;
         prog.source = &src; prog.resolver = &m;
         m.load({dir, embedded});
         int huge = prog.find("huge", err);

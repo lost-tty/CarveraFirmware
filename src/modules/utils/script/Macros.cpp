@@ -52,6 +52,16 @@ void Macros::load(const std::vector<std::string> &search)
     pool.shrink_to_fit();
 }
 
+void Macros::file_changed(const char *path)
+{
+    for (const std::string &dir : dirs) {
+        if (strncmp(path, dir.c_str(), dir.size()) == 0) {
+            load(dirs);
+            return;
+        }
+    }
+}
+
 int Macros::index_of(const char *sub) const
 {
     unsigned lo = 0, hi = index.size();

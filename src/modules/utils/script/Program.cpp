@@ -7,20 +7,58 @@
 #include "modules/tools/atc/ATCHandler.h"
 #include "modules/robot/MachineTask.h"
 #include "Player.h"
+#include "MacroFS.h"
+#include "ScriptsPublicAccess.h"
+#include "utils/Parameters.h"
 #include "utils.h"
 
 #include <cstdio>
 #include <cstdlib>
 
+static const std::vector<std::string> MACRO_PATHS= {SCRIPTS_DIR, "/" MACROFS_MOUNT "/"};
+
 void Program::on_module_loaded()
 {
+    files.load(MACRO_PATHS);
+    printk("%u macros found\n", unsigned(files.names().size()));
     library.source= &source;
     library.resolver= &files;
     runner= new script::Runner(library, gcode_dispatch.parameters());
+    SimpleShell::add_command(macro_slot, "macro", &Program::macro_shell, this,
+                             "macro list | params");
     SimpleShell::add_command(trace_slot, "trace", &Program::trace_shell, this,
                              "trace on|off - echo every line with its file and number");
     SimpleShell::add_command(list_slot, "list", &Program::list_shell, this,
                              "list [n] - lines around the one running");
+}
+
+bool Program::remap(const char *sub, const gcode::Words &words, std::string &err)
+{
+    // a sub's own lines keep the codes' built-in meaning
+    if(in_sub() || !files.has(sub))
+        return false;
+
+    if(call(sub, nullptr, 0, &THEKERNEL->streams, err)) {
+        for (const gcode::Word &w : words) {
+            char local[2]= {(char)tolower(w.letter), 0};
+            if(w.letter != 'G' && w.letter != 'M')
+                runner->set_local(local, w.value);
+        }
+    }
+    return true;
+}
+
+bool Program::run_sub(const char *sub)
+{
+    if(!files.has(sub))
+        return false;
+
+    std::string err;
+    if(call(sub, nullptr, 0, nullptr, err))
+        return true;
+
+    printk("error:script %s %s\n", sub, err.c_str());
+    return false;
 }
 
 bool Program::start_job(const std::string &path, std::string &err)
@@ -335,4 +373,27 @@ void Program::list(StreamOutput *stream, int segment, unsigned current, unsigned
         stream->printf("%c %5u  %s\r\n", n == current ? '>' : ' ', n, text.c_str());
     }
     src.release();
+}
+
+const SimpleShell::Sub<Program> Program::MACRO_SUBS[] = {
+    {"list",   &Program::macro_list,   "the subs that are defined"},
+    {"params", &Program::macro_params, "the #<_name> values a script can read"},
+    {nullptr, nullptr, nullptr},
+};
+
+void Program::macro_shell(void *self, const char *cmd, std::string args, StreamOutput *stream)
+{
+    SimpleShell::dispatch(static_cast<Program *>(self), MACRO_SUBS, cmd, args, stream);
+}
+
+void Program::macro_list(std::string, StreamOutput *stream)
+{
+    for (const std::string &n : files.names()) {
+        stream->printf("%s\n", n.c_str());
+    }
+}
+
+void Program::macro_params(std::string, StreamOutput *stream)
+{
+    Parameters::list_named(stream);
 }

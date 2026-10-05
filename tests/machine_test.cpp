@@ -44,7 +44,7 @@ struct Machine : gcode::ParamStore {
 };
 
 static std::string messages;
-static script::Program program;
+static script::Library program;
 
 struct Word { char letter; float value; };
 

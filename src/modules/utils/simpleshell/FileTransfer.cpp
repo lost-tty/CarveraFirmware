@@ -3,7 +3,7 @@
 #include "Conveyor.h"
 #include "utils.h"
 #include "mbed.h"
-#include "Scripts.h"
+#include "Program.h"
 #include <cstring>
 
 using namespace std;
@@ -475,7 +475,7 @@ void FileTransfer::finish(bool ok, bool keep_data, bool quiet)
             active_stream->printf(ok ? "Info: Download success: %s.\r\n"
                                      : "Download failed for file: %s.\r\n", filename.c_str());
         } else if (ok) {
-            scripts.file_changed(filename.c_str());
+            program.macros().file_changed(filename.c_str());
             active_stream->printf("Info: upload success: %s.\r\n", filename.c_str());
         } else {
             active_stream->printf("Upload failed for file: %s.\r\n", filename.c_str());

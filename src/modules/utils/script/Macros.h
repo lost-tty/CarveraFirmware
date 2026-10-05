@@ -10,6 +10,7 @@ class Macros : public script::Resolver {
 public:
     // a file in an earlier directory hides one of the same name in a later one
     void load(const std::vector<std::string> &dirs);
+    void file_changed(const char *path);
     bool has(const char *sub) const;
     std::vector<std::string> paths(const char *sub) const override;
     std::vector<std::string> names() const;

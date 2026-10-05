@@ -19,14 +19,20 @@ public:
     void cleanup() override;
     static void list_shell(void *self, const char *name, std::string args, StreamOutput *stream);
     static void trace_shell(void *self, const char *name, std::string args, StreamOutput *stream);
-    SimpleShell::Registered list_slot, trace_slot;
+    static void macro_shell(void *self, const char *name, std::string args, StreamOutput *stream);
+    static const SimpleShell::Sub<Program> MACRO_SUBS[];
+    void macro_list(std::string args, StreamOutput *stream);
+    void macro_params(std::string args, StreamOutput *stream);
+    SimpleShell::Registered list_slot, trace_slot, macro_slot;
 
     Macros &macros() { return files; }
     bool start_job(const std::string &path, std::string &err);
     bool call(const char *sub, const float *args, unsigned nargs, StreamOutput *reply,
               std::string &err);
     bool call_line(const std::string &line, StreamOutput *reply, std::string &err);
-    bool set_local(const char *name, float v) { return runner->set_local(name, v); }
+    bool run_sub(const char *sub);   // false: there is none or it cannot start
+    // false: the code stays with its handler; err: the sub did not start
+    bool remap(const char *sub, const gcode::Words &words, std::string &err);
 
     bool step(SerialMessage &msg);   // true: msg holds a line to dispatch
     void refused(unsigned line);
@@ -63,7 +69,7 @@ private:
 
     Macros files;
     script::Source source;
-    script::Program library;
+    script::Library library;
     script::Runner *runner= nullptr;
     StreamOutput *reply= nullptr;       // caller waiting for ok/error
     std::string name;                   // what runs, for messages

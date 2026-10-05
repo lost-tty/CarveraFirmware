@@ -8,7 +8,7 @@ uint8_t Profile::used= 0;
 #include "Conveyor.h"
 #include "Robot.h"
 #include "Endstops.h"
-#include "Scripts.h"
+#include "Program.h"
 #include "libs/Kernel.h"
 #include "libs/StepTicker.h"
 #include "libs/Watchdog.h"
@@ -209,7 +209,7 @@ bool MachineTask::post_move(const float delta[], float rate_mm_s)
 static void startup()
 {
     THEROBOT.home_on_startup();
-    scripts.boot();
+    program.run_sub("boot");
 }
 
 void MachineTask::post_startup()

@@ -20,7 +20,7 @@
 #include "checksumm.h"
 #include "utils.h"
 #include "libs/StreamOutput.h"
-#include "Scripts.h"
+#include "Program.h"
 #include "Logging.h"
 #include "ZProbe.h"
 #include "BaseSolution.h"
@@ -234,7 +234,7 @@ void Endstops::back_off_home(axis_bitmap_t axis)
 void Endstops::after_home(axis_bitmap_t axis)
 {
     if(!axis[X_AXIS] || !axis[Y_AXIS]) return;
-    scripts.run_sub("after_home", nullptr, 0);
+    program.run_sub("after_home");
 }
 
 // the switch an axis homes to is expected to be pressed for the whole cycle, including the

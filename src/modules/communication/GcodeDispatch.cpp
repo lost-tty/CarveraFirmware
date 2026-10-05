@@ -278,6 +278,20 @@ void GcodeDispatch::run_mdi(const SerialMessage &msg)
         printk("error:%s\r\n", err.c_str());
 }
 
+bool GcodeDispatch::remap(const Gcode &gcode, std::string &err)
+{
+    const gcode::Word &c= gcode.command;
+    if(c.letter == 0)
+        return false;
+
+    char sub[16];
+    int n= snprintf(sub, sizeof(sub), "%c%u", c.letter, unsigned(c.value));
+    if(c.subcode != 0)
+        snprintf(sub + n, sizeof(sub) - n, ".%u", c.subcode);
+
+    return program.remap(sub, gcode.get_words(), err);
+}
+
 bool GcodeDispatch::run_line(const SerialMessage &msg)
 {
     const string &s= msg.message;
@@ -303,8 +317,10 @@ bool GcodeDispatch::run_line(const SerialMessage &msg)
             printk("error:Alarm lock\n");
             return false;
         }
-        std::string err= "no scripts";
-        if(scripts == nullptr || !scripts->call(s.substr(j), msg.stream, err)) return fail(err.c_str());
+        std::string err;
+        if(!program.call_line(s.substr(j), msg.stream, err))
+            return fail(err.c_str());
+
         return true;
     }
 
@@ -573,7 +589,7 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, unsig
         // a scripted code runs its sub after the modules have seen it, so their handlers still apply;
         // the ok follows when the sub is done, which is the last block of the line by rank
         std::string err;
-        if(scripts != nullptr && scripts->trigger(gcode, &THEKERNEL->streams, err)) {
+        if(remap(gcode, err)) {
             return err.empty() || fail(err.c_str());
         }
 

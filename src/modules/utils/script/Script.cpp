@@ -339,7 +339,7 @@ public:
     bool set_named(const char *, float, std::string &) override { return true; }
 };
 
-bool Program::load(Source &src, std::string &err)
+bool Library::load(Source &src, std::string &err)
 {
     source = &src;
     std::vector<Sub>().swap(subs);
@@ -365,7 +365,7 @@ bool Program::load(Source &src, std::string &err)
     return true;
 }
 
-bool Program::check(unsigned segment, Calls &calls, std::string &err)
+bool Library::check(unsigned segment, Calls &calls, std::string &err)
 {
     Source &src = *source;
     Blocks blocks;
@@ -454,7 +454,7 @@ bool Program::check(unsigned segment, Calls &calls, std::string &err)
     return true;
 }
 
-int Program::find_sub(const char *name) const
+int Library::find_sub(const char *name) const
 {
     for (unsigned i = 0; i < subs.size(); i++) {
         if (label_equal(this->name(i), strlen(this->name(i)), name, strlen(name)))
@@ -463,7 +463,7 @@ int Program::find_sub(const char *name) const
     return -1;
 }
 
-int Program::find(const char *name, std::string &err)
+int Library::find(const char *name, std::string &err)
 {
     int i = find_sub(name);
     if (i >= 0)
@@ -497,7 +497,7 @@ int Program::find(const char *name, std::string &err)
     return -1;
 }
 
-void Program::reset()
+void Library::reset()
 {
     std::vector<Sub>().swap(subs);
     std::string().swap(names);
@@ -505,8 +505,8 @@ void Program::reset()
         source->clear();
 }
 
-Runner::Runner(Program &program, gcode::ParamStore &machine)
-    : program(program), machine(machine), store(*this)
+Runner::Runner(Library &library, gcode::ParamStore &machine)
+    : library(library), machine(machine), store(*this)
 {
     frames.reserve(MAX_DEPTH);
     named.push_back(Named{GLOBAL, "_value", 0});
@@ -585,8 +585,8 @@ bool Runner::push(int sub, const float *args, unsigned nargs, std::string &err)
     }
     frames.emplace_back();
     Frame &f = frames.back();
-    f.at = sub < 0 ? 0 : program.source->next(program.subs[sub].offset);
-    f.line = sub < 0 ? 1 : program.subs[sub].line + 1;
+    f.at = sub < 0 ? 0 : library.source->next(library.subs[sub].offset);
+    f.line = sub < 0 ? 1 : library.subs[sub].line + 1;
     f.base = this->args.size();
     f.testing = false;
     f.main = sub < 0;
@@ -614,7 +614,7 @@ bool Runner::call(const char *sub, const float *args, unsigned nargs, std::strin
         err = "too many arguments";
         return false;
     }
-    int index = program.find(sub, err);
+    int index = library.find(sub, err);
     if (index < 0)
         return false;
 
@@ -637,7 +637,7 @@ bool Runner::goto_main(unsigned line, std::string &err)
         err = "a sub is running";
         return false;
     }
-    Source &src = *program.source;
+    Source &src = *library.source;
     const Source::Segment &s = src.segments[src.segment_of(main_start)];
     Blocks blocks;
     std::string text, e;
@@ -711,7 +711,7 @@ bool Runner::call_line(const std::string &line, std::string &sub, std::string &e
 bool Runner::find(const Mark &from, const char *label, size_t length, unsigned kinds, Mark &out,
                   std::string &err)
 {
-    Source &src = *program.source;
+    Source &src = *library.source;
     int segment = src.segment_of(from.at);
     unsigned line = from.line + 1;
     Blocks blocks;
@@ -926,7 +926,7 @@ Runner::Result Runner::step(std::string &out, std::string &err)
     while (!frames.empty()) {
         Frame &f = frames.back();
         unsigned at = f.at, next;
-        if (!program.source->line_at(at, text, next)) {
+        if (!library.source->line_at(at, text, next)) {
             pop();
             if (at_main())
                 return RETURNED;

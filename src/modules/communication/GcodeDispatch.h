@@ -24,12 +24,6 @@ struct SerialMessage;
 class StreamOutput;
 class Gcode;
 
-// a module that runs some G/M codes as scripts: return true when the command is taken (err set on failure)
-class ScriptHook {
-public:
-    virtual bool trigger(const Gcode &gcode, StreamOutput *stream, std::string &err) = 0;
-    virtual bool call(const std::string &line, StreamOutput *stream, std::string &err) = 0;
-};
 
 class GcodeDispatch : public Module, public Killable
 {
@@ -50,7 +44,6 @@ public:
 
     bool homed_check_enabled() const { return homed_check; }
     Parameters &parameters() { return params; }
-    void set_script_hook(ScriptHook *hook) { scripts= hook; }
     void run_mdi(const SerialMessage &msg);
     // queued console G-code, also taken while a job plays
     bool buffer(const std::string &line, StreamOutput *stream, std::string &err);
@@ -66,6 +59,7 @@ private:
     bool announce(const std::string &line, size_t from, unsigned int number,
                   const gcode::ParamStore *store);
     bool fail(const char *msg);
+    bool remap(const Gcode &gcode, std::string &err);
     static bool safe_while_running(const gcode::Words &words);
     static void broadcast(Gcode &gcode, OnMachine);
     static void broadcast_drained(Gcode &gcode, OnMachine);
@@ -76,7 +70,6 @@ private:
     Parameters params;
     McodeRegistry::Mcode m500, m503, m118;
     static Module *handlers;
-    ScriptHook *scripts= nullptr;
     uint8_t modal_motion;
     uint8_t modal_cycle;
     float cycle_initial;

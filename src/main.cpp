@@ -15,7 +15,6 @@
 #include "modules/tools/zprobe/ZProbe.h"
 #include "modules/tools/switch/SwitchPool.h"
 #include "modules/tools/atc/ATCHandler.h"
-#include "modules/utils/script/Scripts.h"
 #include "modules/utils/script/Program.h"
 #include "modules/utils/script/MacroFS.h"
 #include "modules/utils/wifi/WifiProvider.h"
@@ -137,7 +136,6 @@ WirelessProbe wireless_probe;
 MainButton mainbutton;
 ATCHandler atc_handler;
 Program program;
-Scripts scripts;
 extern const char _binary_macros_cpio_start[], _binary_macros_cpio_end[];
 MacroFS macro_fs(_binary_macros_cpio_start, _binary_macros_cpio_end);
 Endstops endstops;
@@ -186,7 +184,6 @@ void init() {
     THEKERNEL->add_module(&player);
     THEKERNEL->add_module(&atc_handler);
     THEKERNEL->add_module(&program);
-    THEKERNEL->add_module(&scripts);
     THEKERNEL->add_module(&wireless_probe);
     THEKERNEL->add_module(&usb_host);
     THEKERNEL->add_module(&mainbutton);

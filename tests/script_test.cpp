@@ -52,7 +52,7 @@ struct Machine : gcode::ParamStore {
 static std::string run(const char *text, Machine &m, const char *sub = nullptr, std::vector<float> args = {}) {
     script::Source src;
     add(src, "run", text);
-    script::Program prog;
+    script::Library prog;
     std::string err;
     if (!prog.load(src, err)) return "LOAD: " + err;
     script::Runner r(prog, m);
@@ -86,7 +86,7 @@ static std::string run_job(const char *lib, const char *job, Machine &m,
 {
     script::Source src;
     add(src, "lib", lib);
-    script::Program prog;
+    script::Library prog;
     std::string err;
     if (!prog.load(src, err))
         return "LOAD: " + err;
@@ -124,7 +124,7 @@ static std::string run_job(const char *lib, const char *job, Machine &m,
 static std::string load_error(const char *text) {
     script::Source src;
     add(src, "load", text);
-    script::Program prog;
+    script::Library prog;
     std::string err;
     return prog.load(src, err) ? "ok" : err;
 }
@@ -230,7 +230,7 @@ int main() {
     {
         script::Source src;
         add(src, "g81", "o<g81> sub\nG0 X#<x> Y#<y>\n#<_cnt> = [#<_cnt> + 1]\no<g81> endsub\n");
-        script::Program prog; std::string err; CHECK(prog.load(src, err));
+        script::Library prog; std::string err; CHECK(prog.load(src, err));
         script::Runner r(prog, m);
         std::string line, joined;
         m.named.erase("_cnt");
@@ -278,7 +278,7 @@ int main() {
         const char *job = "G0\no1 while [1]\nG1\no1 endwhile\nG2\n";
         script::Source src;
         add(src, "job", job, true);
-        script::Program prog;
+        script::Library prog;
         std::string err;
         CHECK(prog.load(src, err));
         script::Runner r(prog, m);
@@ -295,7 +295,7 @@ int main() {
         const char *job = "G0\no1 repeat [2]\nG1\no1 endrepeat\nG2\n";
         script::Source src;
         add(src, "job", job);
-        script::Program prog;
+        script::Library prog;
         std::string err, line;
         CHECK(prog.load(src, err));
         script::Runner r(prog, m);
@@ -329,7 +329,7 @@ int main() {
     {
         script::Source src;
         add(src, "lib", "o<sq> sub\nG2\no<sq> endsub\n");
-        script::Program prog;
+        script::Library prog;
         std::string err, line;
         CHECK(prog.load(src, err));
         add(src, "job", "o<sq> call\nG1\n", true);

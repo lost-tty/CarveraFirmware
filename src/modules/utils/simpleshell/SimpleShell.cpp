@@ -25,7 +25,6 @@
 #include "AppendFileStream.h"
 #include "FileStream.h"
 #include "checksumm.h"
-#include "Scripts.h"
 #include "Program.h"
 #include "Script.h"
 #include "modules/utils/player/Player.h"
@@ -370,7 +369,7 @@ void SimpleShell::rm_command( string parameters, StreamOutput *stream )
     } else {
     	remove(absolute_from_relative(md5_path, stream).c_str());
     	remove(absolute_from_relative(lz_path, stream).c_str());
-    	scripts.file_changed(toRemove.c_str());
+    	program.macros().file_changed(toRemove.c_str());
     	stream->send(Frame::LOAD_FINISH, "ok\r\n", 4);
     }
 }
@@ -393,8 +392,8 @@ void SimpleShell::mv_command( string parameters, StreamOutput *stream )
     } else  {
     	rename(md5_from.c_str(), md5_to.c_str());
         rename(lz_from.c_str(), lz_to.c_str());
-        scripts.file_changed(from.c_str());
-        scripts.file_changed(to.c_str());
+        program.macros().file_changed(from.c_str());
+        program.macros().file_changed(to.c_str());
         stream->send(Frame::LOAD_FINISH, "ok\r\n", 4);
 		stream->printf("renamed %s to %s\r\n", from.c_str(), to.c_str());
     }
@@ -1270,7 +1269,8 @@ void SimpleShell::test_command( string parameters, StreamOutput *stream)
 
     }else {
         stream->printf("usage: test raw axis steps steps/sec\n");
-        stream->printf(" jog, square and circle are macros: macro run test_square <size> <feed> <times>\n");
+        stream->printf(" jog, square and circle are macros:"
+                       " o<test_square> call [size] [feed] [times]\n");
     }
 }
 
