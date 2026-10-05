@@ -1339,10 +1339,27 @@ void SimpleShell::jog(string parameters, StreamOutput *stream)
 void SimpleShell::help_command(string parameters, StreamOutput *stream)
 {
     stream->printf("Commands:\r\n");
-    for (const ptentry_t* cmd = commands_table; cmd->name != nullptr; ++cmd) {
-        stream->printf("%s\r\n", cmd->help);
+    const char *last = "";
+    while (true) {
+        const char *name = nullptr, *help = nullptr;
+        auto consider = [&](const char *n, const char *h) {
+            if (strcasecmp(n, last) > 0 && (name == nullptr || strcasecmp(n, name) < 0)) {
+                name = n;
+                help = h;
+            }
+        };
+        for (const ptentry_t *cmd = commands_table; cmd->name != nullptr; ++cmd) {
+            consider(cmd->name, cmd->help);
+        }
+        for (const Registered *r = registered; r != nullptr; r = r->next) {
+            consider(r->name, r->help);
+        }
+        if (name == nullptr)
+            return;
+
+        stream->printf("%s\r\n", help);
+        last = name;
     }
-    for (const Registered *r = registered; r != nullptr; r = r->next) stream->printf("%s\r\n", r->help);
 }
 
 static const char *const config_path = "/sd/config.txt";
