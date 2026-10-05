@@ -34,6 +34,8 @@ from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.data_structures import Point, Size
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.key_binding.bindings.mouse import load_mouse_bindings
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout import (ConditionalContainer, DynamicContainer, Float, FloatContainer, HSplit, Layout,
                                    VSplit, Window)
@@ -72,6 +74,7 @@ LOCAL = {
 DEFAULT_PORT = 2222
 # FrameConsole's line buffer holds 127 bytes: a line, its newline and the "$G\n" behind it must fit
 LINE_MAX = 120
+INFO_TAIL_S = 1.0  # a line cut at a frame's end waits this long for its rest
 POLL_S = 0.5  # status poll, also keeps the machine from dropping an idle connection (wifi.tcp_timeout_s)
 MODAL_S = 2.0  # $G poll for the modal state, which the status frame does not carry
 CONNECT_S = 5.0
@@ -315,6 +318,7 @@ class Console:
 
     def reader(self, sock):
         r = FrameReader(sock)
+        self.info_tail, self.info_since = b'', 0.0
         try:
             while True:
                 ftype, payload = r.next(SILENT_S)
@@ -349,6 +353,18 @@ class Console:
                 self.end_transfer(up, None)
             if reply is not None or up.result is not None:
                 return
+        # the machine cuts its text into frames where they fill, not at line ends
+        if ftype == INFO:
+            if not self.info_tail:
+                self.info_since = time.monotonic()
+            payload = self.info_tail + payload
+            cut = payload.rfind(b'\n') + 1
+            payload, self.info_tail = payload[:cut], payload[cut:]
+            if not payload:
+                return
+        elif self.info_tail and time.monotonic() - self.info_since >= INFO_TAIL_S:
+            tail, self.info_tail = self.info_tail, b''
+            self.on_frame(INFO, tail + b'\n')
         if self.listing_dir is not None and ftype in (LOAD_INFO, LOAD_FINISH, LOAD_ERROR):
             if ftype == LOAD_INFO:
                 lines = payload.decode(errors='replace').split('\n')
@@ -870,6 +886,7 @@ def log_style(text):
 
 
 WHEEL_LINES = 3  # log lines per notch of the mouse wheel
+EDGE_SCROLL_S = 0.05  # a line per step while a drag rests at the log's edge
 
 
 # the window's own wheel scrolling would be pulled back by the log's cursor at the end
@@ -923,7 +940,8 @@ class Ui:
         self.mouse = True  # on, the wheel scrolls and a drag copies log lines; off, the terminal has the mouse
         self.selection = None  # log lines dragged over: (first, last)
         self.dragging = False
-        self.log_start = 0  # the log line the window's first row shows
+        self.edge = 0  # +1 while a drag rests at the log's top edge or above it, -1 at the bottom
+        self.log_start = 0  # the first log line handed to the window
         con.redraw = lambda: self.app.invalidate() if self.app is not None else None
         self.input = Buffer(history=FileHistory(HISTORY_FILE), completer=CarveraCompleter(con),
                             complete_while_typing=False, multiline=False, accept_handler=self.accept)
@@ -957,6 +975,8 @@ class Ui:
         root = FloatContainer(DynamicContainer(self.layout),
                               floats=[Float(xcursor=True, ycursor=True,
                                             content=CompletionsMenu(max_height=12, scroll_offset=1))])
+        self.vt100_mouse = next(b.handler for b in load_mouse_bindings().bindings
+                                if b.keys == (Keys.Vt100MouseEvent,))
         self.app = Application(layout=Layout(root, focused_element=self.input_window),
                                key_bindings=self.keys(), style=STYLE, full_screen=True,
                                mouse_support=Condition(lambda: self.mouse),
@@ -1031,9 +1051,14 @@ class Ui:
                 return
             n = max(0, min(self.log_start + row, len(self.log) - 1))
             self.selection = (n, n) if start else (self.selection[0], n)
+            started = start and not self.dragging
             self.dragging = not done
+            if done:
+                self.edge = 0
             first, last = min(self.selection), max(self.selection)
             text = '\n'.join(''.join(t for _, t in self.log[i]) for i in range(first, last + 1))
+        if started:
+            threading.Thread(target=self.edge_scroll, daemon=True).start()
         if done:
             copy_to_clipboard(text, self.app.output)
         self.app.invalidate()
@@ -1103,6 +1128,48 @@ class Ui:
             self.app.exit()
         return False
 
+    # all of a drag's mouse events go to the log, also those past its edge
+    def drag_event(self, event):
+        renderer = event.app.renderer
+        real = renderer.mouse_handlers
+
+        class Capture:
+            mouse_handlers = collections.defaultdict(
+                lambda: collections.defaultdict(lambda: self.drag_at))
+
+        renderer.mouse_handlers = Capture()
+        try:
+            return self.vt100_mouse(event)
+        finally:
+            renderer.mouse_handlers = real
+
+    # e.position is on the screen
+    def drag_at(self, e):
+        info = self.log_window.render_info
+        if info is None:
+            return None
+
+        row = e.position.y - info._y_offset
+        self.edge = 1 if row <= 0 else -1 if row >= info.window_height - 1 else 0
+        row = max(0, min(row, info.window_height - 1))
+        line = info.visible_line_to_input_line.get(row, info.last_visible_line())
+        if e.event_type == MouseEventType.MOUSE_UP:
+            self.select(line, done=True)
+        elif e.event_type == MouseEventType.MOUSE_MOVE and e.button == MouseButton.LEFT:
+            self.select(line)
+        return None
+
+    def edge_scroll(self):
+        while self.dragging:
+            if self.edge:
+                self.scroll_by(self.edge)
+                with self.lock:
+                    last = len(self.log) - 1
+                    end = max(0, min(self.selection[1] - self.edge, last))
+                    self.selection = (self.selection[0], end)
+                self.app.invalidate()
+            time.sleep(EDGE_SCROLL_S)
+
     def keys(self):
         keys = KeyBindings()
         con = self.con
@@ -1112,6 +1179,10 @@ class Ui:
                 self.say(con.realtime(byte) or what, 'class:hold')
             except OSError as e:
                 self.say(f'failed: {e}')
+
+        @keys.add(Keys.Vt100MouseEvent, filter=Condition(lambda: self.dragging))
+        def _(event):
+            return self.drag_event(event)
 
         @keys.add('c-x', eager=True)  # prompt_toolkit uses c-x as a prefix, eager stops it waiting for a second key
         def _(event):
