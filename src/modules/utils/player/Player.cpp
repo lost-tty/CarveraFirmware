@@ -116,7 +116,7 @@ void Player::progress_report(Gcode *)
 
 void Player::resume_gcode(Gcode *gcode)
 {
-    this->resume_command("", &THEKERNEL->streams);
+    resume(&THEKERNEL->streams);
 }
 
 // When a new line is received, check if it is a command, and if it is, act upon it
@@ -124,7 +124,7 @@ const Player::Cmd Player::COMMANDS[] = {
     {"play",     &Player::play_command,     "play file - play a gcode file"},
     {"progress", &Player::progress_command, "progress [-b] - progress of the file being played"},
     {"abort",    &Player::abort_command,    "abort - stop the machine, held or not, and close the file if one is playing"},
-    {"suspend",  &Player::suspend_command,  "suspend [h] - suspend the job, h keeps the spindle on"},
+    {"suspend",  &Player::suspend_command,  "suspend - suspend the job"},
     {"resume",   &Player::resume_command,   "resume - resume a suspended job"},
     {"step",     &Player::step_command,     "step [over|out] - next line, over a sub, out of it"},
     {"s",        &Player::step_command,     "s [over|out] - step"},
@@ -447,6 +447,11 @@ bool Player::get_progress(struct pad_progress &p)
 
 void Player::suspend_command(string parameters, StreamOutput *stream )
 {
+    suspend(stream);
+}
+
+void Player::suspend(StreamOutput *stream)
+{
     if (program.suspended()) {
         stream->printf("Already suspended!\n");
         return;
@@ -473,6 +478,11 @@ void Player::suspend_now()
 }
 
 void Player::resume_command(string parameters, StreamOutput *stream )
+{
+    resume(stream);
+}
+
+void Player::resume(StreamOutput *stream)
 {
     if (program.cancel_pause()) {
         stream->printf("Suspend cancelled\n");

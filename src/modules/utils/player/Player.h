@@ -48,6 +48,8 @@ class Player : public Module {
         void job_ended(Program::Outcome how);
         void job_status(string parameters, StreamOutput *stream);
         void unwatch(StreamOutput *stream) { watch.remove(stream); }
+        void suspend(StreamOutput *stream);
+        void resume(StreamOutput *stream);
 
     private:
         typedef void (Player::*command_t)(string, StreamOutput *);
