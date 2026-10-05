@@ -74,7 +74,8 @@ bool Program::load_job(const std::string &path, std::string &err)
     }
     name= path;
     played= 0;
-    paused= waiting= true;
+    pause= JOB;
+    waiting= true;
     return true;
 }
 
@@ -292,7 +293,7 @@ bool Program::advance(SerialMessage &msg)
             msg.params= &runner->parameters();
             if(stops_before(runner->depth())) {
                 stepper.held= msg;
-                paused= true;
+                pause= ALL;
                 return false;
             }
             return true;
@@ -354,7 +355,7 @@ unsigned Program::job_read() const
 // the hold brakes on the path and keeps the queue, so resuming carries on from where it stood
 void Program::suspend()
 {
-    paused= true;
+    pause= playing() ? JOB : ALL;
     machine_task.hold(true);
 }
 
@@ -362,7 +363,7 @@ void Program::resume()
 {
     lift_fence();
     stepper.stop_depth= 0;
-    paused= false;
+    pause= NONE;
     release();
 }
 
@@ -399,7 +400,7 @@ void Program::step(Step how)
     if(stepper.fencing || (!holding() && !machine_task.idle())) {
         THECONVEYOR.ask_fence(stepper.fencing ? Conveyor::FENCE_PASS : Conveyor::FENCE_LINE);
         stepper.fencing= true;
-        paused= true;
+        pause= ALL;
         release();
     } else {
         resume();
@@ -423,7 +424,7 @@ void Program::follow_fence()
         return;
 
     lift_fence();
-    paused= false;
+    pause= NONE;
 }
 
 bool Program::cancel_pause()
@@ -470,14 +471,15 @@ void Program::stop()
     }
     end_job();
     stepper= Stepper{};
-    paused= waiting= false;
+    pause= NONE;
+    waiting= false;
     stopping= false;
     gcode_dispatch.program_end();
 }
 
 void Program::cleanup()
 {
-    if(paused) {
+    if(pause != NONE) {
         resume();
         printk("Suspend cleared\n");
     }

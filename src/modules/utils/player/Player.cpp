@@ -446,13 +446,13 @@ void Player::suspend_command(string parameters, StreamOutput *stream )
         return;
     }
 
-    if(!program.playing()) {
+    if(!program.busy()) {
         stream->printf("Can not suspend when not playing file!\n");
         return;
     }
 
-    // a tool change or other script is half way; pause at the next file line instead
-    if (program.in_sub()) {
+    // a tool change or other script is half way in a job; pause at the next file line instead
+    if (program.playing() && program.in_sub()) {
         program.ask_pause();
         stream->printf("Suspending after the running script...\n");
         return;
@@ -492,8 +492,8 @@ void Player::step_command(string parameters, StreamOutput *stream)
         return;
     }
 
-    // a feed hold on a job counts as suspended
-    if (!program.suspended() && !(program.playing() && THEKERNEL->get_feed_hold())) {
+    // a feed hold on a job or a script counts as suspended
+    if (!program.suspended() && !(program.busy() && THEKERNEL->get_feed_hold())) {
         stream->printf("Not suspended\n");
         return;
     }

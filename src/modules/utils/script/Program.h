@@ -49,7 +49,7 @@ public:
     void refused(uint32_t mark);
     void park(const SerialMessage &msg);   // the line waits for the machine, then goes again
     bool yields() const { return !in_sub(); }
-    bool takes_console() const { return !playing() || paused; }
+    bool takes_console() const { return !playing() || pause != NONE; }
     bool busy() const { return ending || runner->running(); }
     bool in_sub() const { return runner->running() && !runner->at_main(); }
     bool playing() const { return source.job() >= 0; }
@@ -57,7 +57,7 @@ public:
     unsigned job_size() const;
     unsigned job_read() const;
 
-    bool suspended() const { return paused; }
+    bool suspended() const { return pause != NONE; }
     bool loaded() const { return waiting; }
     bool stepping() const { return stepper.stop_depth != 0; }
     void suspend();
@@ -76,7 +76,7 @@ private:
     bool can_call(std::string &err) const;
     bool called(const std::string &sub, StreamOutput *reply, bool on_job);
     bool advance(SerialMessage &msg);
-    bool frozen() const { return paused && (stepping() || !in_sub()); }
+    bool frozen() const { return pause == ALL || (pause == JOB && !in_sub()); }
     void finish();
     void stop_at(uint32_t at);
     void note_calls();
@@ -131,7 +131,9 @@ private:
     bool waiting= false;
     bool nested= false;                 // a sub runs on the job
     bool ending= false;                 // the job is read to its end, the machine finishes it
-    bool paused= false;
+    // JOB holds the job, a sub called on top of it still runs; ALL holds everything
+    enum Pause : uint8_t { NONE, JOB, ALL };
+    Pause pause= NONE;
     bool pause_asked= false;
     bool stopping= false;
 };
