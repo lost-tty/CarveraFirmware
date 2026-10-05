@@ -68,12 +68,6 @@ bool Program::call_line(const std::string &text, StreamOutput *stream, std::stri
     return can_call(err) && runner->call_line(text, sub, err) && called(sub, stream, on_job);
 }
 
-void Program::restore_modal_on_return()
-{
-    saved_modal= gcode_dispatch.modal_state();
-    modal_saved= true;
-}
-
 void Program::on_main_loop(void *)
 {
     if(!busy() || machine_task.is_halted() || frozen() || machine_task.full())
@@ -274,8 +268,6 @@ void Program::cleanup()
 // a sub returned or everything ended
 void Program::finish()
 {
-    if(modal_saved) gcode_dispatch.set_modal_state(saved_modal);
-    modal_saved= false;
     nested= false;
     machine_task.enforce_keepout();
     atc_handler.set_state(0);

@@ -119,6 +119,9 @@ static float probe_y(void *) { return probe_axis(1); }
 static float probe_z(void *) { return probe_axis(2); }
 static float probe_ok(void *) { return probe_axis(3); }
 static float cycle_initial(void *) { return gcode_dispatch.get_cycle_initial(); }
+static float metric(void *) { return THEROBOT.get_units_code() == 21; }
+static float imperial(void *) { return THEROBOT.get_units_code() == 20; }
+static float motion_mode(void *) { return gcode_dispatch.get_modal_command(); }
 
 static constexpr Parameters::Named BUILTIN[] = {
     {"_laser_mode",  laser_mode,    true},
@@ -131,6 +134,9 @@ static constexpr Parameters::Named BUILTIN[] = {
     {"_probe_z",     probe_z,       true},
     {"_probe_ok",    probe_ok,      true},
     {"_cycle_initial", cycle_initial, false},
+    {"_motion_mode", motion_mode, false},
+    {"_metric",      metric,      false},
+    {"_imperial",    imperial,    false},
 };
 
 void Parameters::init()
@@ -158,6 +164,18 @@ bool Parameters::get_named(const char *name, float &v) const
     if (p == nullptr) return false;
     if (p->machine && !settle()) return false;
     v = p->get(context);
+    return true;
+}
+
+bool Parameters::set_named(const char *name, float v, std::string &err)
+{
+    if (strcmp(name, "_motion_mode") != 0)
+        return false;
+
+    if (!gcode_dispatch.set_modal_command(unsigned(v))) {
+        err = "bad value for #<_motion_mode>";
+        return false;
+    }
     return true;
 }
 

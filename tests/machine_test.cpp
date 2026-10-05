@@ -28,11 +28,19 @@ struct Machine : gcode::ParamStore {
         {"_atc_probe_fast_rate", 300}, {"_atc_probe_slow_rate", 60}, {"_atc_probe_retract", 2}, {"_atc_probe_height", 0},
         {"_probe_mx", -3}, {"_probe_my", -54}, {"_probe_mz", -145},
         {"_active_tool", -1}, {"_laser_mode", 0}, {"_spindle_on", 0}, {"_tlo", 10}, {"_clamp_state", 1}, {"_tool_detected", 0},
+        {"_motion_mode", 0},
     };
     bool get(int n, float &out) const override { auto i = v.find(n); if (i == v.end()) return false; out = i->second; return true; }
     bool set(int n, float val) override { v[n] = val; return true; }
     bool get_named(const char *name, float &out) const override { auto i = named.find(name); if (i == named.end()) return false; out = i->second; return true; }
-    bool set_named(const char *, float, std::string &) override { return false; }
+    bool set_named(const char *name, float val, std::string &) override
+    {
+        if (strcmp(name, "_motion_mode") != 0)
+            return false;
+
+        named[name] = val;
+        return true;
+    }
 };
 
 static std::string messages;
@@ -216,6 +224,7 @@ int main() {
 
     // canned cycles: one runner, as the module keeps it, so a cycle's sticky Z R F survive between holes
     m.v[5043] = 3; // work Z, where the cycle starts and G98 retracts to
+    m.named["_motion_mode"] = 81; // the dispatcher's G81 before the sub runs
     CHECK(run_all(m, {{"drill", {{'X', 10}, {'Y', 10}, {'Z', -2}, {'R', 1}, {'F', 100}}, 81},
                       {"drill", {{'X', 20}}, 81},
                       {"drill_cancel", {}, 0}})

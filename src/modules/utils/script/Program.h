@@ -30,7 +30,6 @@ public:
               std::string &err);
     bool call_line(const std::string &line, StreamOutput *reply, std::string &err);
     bool set_local(const char *name, float v) { return runner->set_local(name, v); }
-    void restore_modal_on_return(); // of the sub just called: the caller's group 1 comes back
     void set_trace(bool on) { trace= on; }
 
     bool busy() const { return ending || runner->running(); }
@@ -79,8 +78,6 @@ private:
     bool paused= false;
     bool pause_asked= false;
     bool stopping= false;
-    bool modal_saved= false;
-    GcodeDispatch::ModalState saved_modal;
 };
 
 extern Program program;

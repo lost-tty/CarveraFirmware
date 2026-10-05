@@ -10,6 +10,7 @@ C++ handler. Numbers are mm, machine coordinates unless G90 is used.
 
 A sub sets the modal state it needs and puts it back before `endsub`: a `G91` retract that ends without a
 `G90` carries on into the caller's next absolute move. Started on its own (`macro run`, boot) there is
-nothing to inherit, so it opens with `G21 G90 G91.1 G17`.
+nothing to inherit, so it opens with `G21 G90 G91.1 G17`. `#<_motion_mode>` (81: G81) can be set back,
+`#<_metric>`/`#<_imperial>` tell the units.
 
 `o<name> abort [n]` ends the script and halts the machine with reason n; `return [n]` just returns a value.

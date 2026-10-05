@@ -1,6 +1,7 @@
 (G81/G82/G83 canned cycle. G98 retracts to the Z the cycle started at, G99 to the R plane, G80 cancels.)
 (Z depth, R retract, F feed, Q peck, P dwell seconds stay set until the cycle ends or they are given again.)
 o<drill> sub
+  #<mode> = #<_motion_mode>
   o1 if [EXISTS[#<z>]]
     #<_drill_z> = #<z>
   o1 endif
@@ -75,4 +76,5 @@ o<drill> sub
     G4 P#<dwell>
   o12 endif
   G0 Z#<_drill_plane>
+  #<_motion_mode> = #<mode>
 o<drill> endsub

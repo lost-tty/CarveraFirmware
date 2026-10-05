@@ -86,6 +86,21 @@ static Class classify(const gcode::Word &w)
     return {0, OTHER_M, 0};
 }
 
+// a cycle keeps the Z it started at
+bool GcodeDispatch::set_modal_command(unsigned g)
+{
+    if(g >= 81 && g <= 89) {
+        modal_cycle= g;
+        return true;
+    }
+    if(g > 3)
+        return false;
+
+    modal_motion= g;
+    modal_cycle= 0;
+    return true;
+}
+
 // a mode setting: axis words next to it are a move in the modal motion (G90 X10), unlike settings M codes (M92 X80)
 static bool is_modal_setting(Class c) {
     return c.rank != DWELL && c.rank != NON_MODAL && c.rank != OTHER_M && c.rank != STOP && c.rank != TOOL_CHANGE && c.rank != MOTION;

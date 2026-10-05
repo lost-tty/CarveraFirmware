@@ -23,6 +23,7 @@ public:
     bool set(int n, float v) override;
     bool get_named(const char *name, float &v) const override;
     bool has_named(const char *name) const override;
+    bool set_named(const char *name, float v, std::string &err) override;  // only _motion_mode
     static void list_named(StreamOutput *stream);
     static void init();
 

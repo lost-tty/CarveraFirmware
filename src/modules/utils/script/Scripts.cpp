@@ -97,8 +97,6 @@ bool Scripts::trigger(const Gcode &gcode, StreamOutput *stream, std::string &err
         return false;
 
     if(!run(t->sub, nullptr, 0, stream, err)) return true;
-    // a canned cycle's sub moves in its own group 1; the program's is put back when the sub ends
-    if(t->letter == 'G' && t->code >= 80 && t->code <= 89) program.restore_modal_on_return();
     program.set_local("code", t->code);
     program.set_local("subcode", gcode.subcode());
     for (const gcode::Word &w : gcode.get_words()) {

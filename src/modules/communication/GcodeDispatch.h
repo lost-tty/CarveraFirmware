@@ -41,11 +41,8 @@ public:
     void init();
 
     uint8_t get_modal_command() const { return modal_cycle != 0 ? modal_cycle : modal_motion; }
+    bool set_modal_command(unsigned g);   // G0..G3 or G81..G89, without moving
     float get_cycle_initial() const { return cycle_initial; }
-    // group 1 as one frame: a canned-cycle sub runs in its own and the program's is put back at its end
-    struct ModalState { uint8_t motion; uint8_t cycle; float cycle_initial; };
-    ModalState modal_state() const { return {modal_motion, modal_cycle, cycle_initial}; }
-    void set_modal_state(ModalState m) { modal_motion= m.motion; modal_cycle= m.cycle; cycle_initial= m.cycle_initial; }
 
     bool homed_check_enabled() const { return homed_check; }
     Parameters &parameters() { return params; }
