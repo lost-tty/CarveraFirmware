@@ -190,6 +190,15 @@ void GcodeDispatch::service()
     if(machine_task.full())
         return;
 
+    if(rest.from != 0 && !program.in_sub()) {
+        Rest r{};
+        std::swap(r, rest);
+        uint32_t mark= r.plan.mark;
+        if(!run(std::move(r.plan), r.from) && mark != 0)
+            program.refused(mark);
+
+        return;
+    }
     if(!buffered.empty() && program.yields()) {
         Buffered b= buffered.front();
         buffered.pop_front();
@@ -341,11 +350,12 @@ bool GcodeDispatch::run_line(const SerialMessage &msg)
     if(!parsed.parse(s.c_str() + i, store))
         return fail(parsed.error_text().c_str());
 
-    return execute(parsed.words(), s.substr(i), msg.mark);
+    return execute(parsed.words(), msg.mark);
 }
 
 void GcodeDispatch::program_end()
 {
+    rest= Rest{};
     modal_motion= 0;
     modal_cycle= 0;
     cycle_initial= 0;
@@ -468,7 +478,7 @@ GcodeDispatch::Gate GcodeDispatch::homed_enough(const gcode::Words &words)
     return PASS;
 }
 
-bool GcodeDispatch::execute(const gcode::Words &words, const string &text, uint32_t mark)
+bool GcodeDispatch::execute(const gcode::Words &words, uint32_t mark)
 {
     if(words.empty()) {
         return true;
@@ -478,14 +488,21 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, uint3
     if(gate == PASS) gate= homed_enough(words);
     if(gate != PASS) return gate == HANDLED;
 
+    Plan p;
+    return plan(words, mark, p) && run(std::move(p), 0);
+}
+
+bool GcodeDispatch::plan(const gcode::Words &words, uint32_t mark, Plan &p)
+{
     // A line holds one or more blocks: a repeated modal group, or a G53 after a motion word, starts
     // the next one (Smoothie lines like "G0 A90 G53 G0 Z-2"). Words belong to the block they appear in.
-    struct Cmd { size_t index; uint8_t block; Rank rank; };
     struct Blk { bool mcs; bool motion; bool axis_code; bool axis; bool feed; bool settings_only; };
-    std::vector<Cmd> order;
     std::vector<Blk> blocks(1, Blk{false, false, false, false, false, true});
-    gcode::Words all= words; // synthesized motion words are appended
-    std::vector<uint8_t> block_of(words.size(), 0);
+    std::vector<Plan::Cmd> &order= p.order;
+    std::vector<uint8_t> &block_of= p.block_of;
+    p.all= words; // synthesized motion words are appended
+    p.mark= mark;
+    block_of.assign(words.size(), 0);
     uint32_t groups= 0;
     for (size_t i= 0; i < words.size(); i++) {
         const gcode::Word &w= words[i];
@@ -514,7 +531,7 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, uint3
         if(!is_modal_setting(c) || (c.flags & AXIS_WORDS)) b->settings_only= false;
         size_t pos= order.size();
         while(pos > 0 && (order[pos - 1].block > block_of[i] || (order[pos - 1].block == block_of[i] && order[pos - 1].rank > c.rank))) pos--;
-        order.insert(order.begin() + pos, Cmd{i, block_of[i], c.rank});
+        order.insert(order.begin() + pos, Plan::Cmd{i, block_of[i], c.rank, false, false});
     }
 
     // a block whose commands are only mode settings moves with the modal motion when it has axis words or G53 (F alone: G1)
@@ -522,16 +539,18 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, uint3
         Blk &b= blocks[k];
         if(b.motion || !(b.mcs || (b.settings_only && (b.axis || b.feed)))) continue;
         uint8_t modal= b.axis || b.mcs ? modal_cycle != 0 ? modal_cycle : modal_motion : 1;
-        all.push_back(gcode::Word{.letter= 'G', .subcode= 0, .has_value= true, .value= float(modal)});
+        p.all.push_back(gcode::Word{.letter= 'G', .subcode= 0, .has_value= true,
+                                    .value= float(modal)});
         block_of.push_back(k);
         size_t pos= order.size();
         while(pos > 0 && (order[pos - 1].block > k || (order[pos - 1].block == k && order[pos - 1].rank > MOTION))) pos--;
-        order.insert(order.begin() + pos, Cmd{all.size() - 1, uint8_t(k), MOTION});
+        order.insert(order.begin() + pos, Plan::Cmd{p.all.size() - 1, uint8_t(k), MOTION, false,
+                                                    true});
         b.motion= true;
     }
 
-    for (const Cmd &c : order) {
-        const gcode::Word &w= all[c.index];
+    for (const Plan::Cmd &c : order) {
+        const gcode::Word &w= p.all[c.index];
         Blk &b= blocks[c.block];
         if(c.rank == MOTION && b.mcs && w.value > 1) return fail("G53 needs G0 or G1");
         if(c.rank == MOTION && b.axis_code) return fail("G10/G22/G28/G30/G92 cannot share a line with a motion word");
@@ -545,28 +564,45 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, uint3
         }
     }
 
-    if(order.empty()) order.push_back(Cmd{words.size(), 0, OTHER_M}); // T or S alone
+    // T or S alone
+    if(order.empty())
+        order.push_back(Plan::Cmd{words.size(), 0, OTHER_M, false, true});
 
+    for (Plan::Cmd &c : order) {
+        c.mcs= blocks[c.block].mcs;
+    }
+    return true;
+}
+
+bool GcodeDispatch::run(Plan p, size_t from)
+{
     gcode::Words block_words;
     int current= -1;
-    for (size_t n= 0; n < order.size(); n++) {
-        const Cmd &c= order[n];
+    for (size_t n= from; n < p.order.size(); n++) {
+        const Plan::Cmd &c= p.order[n];
         if(c.block != current) {
             current= c.block;
             block_words.clear();
-            for (size_t i= 0; i < all.size(); i++) if(block_of[i] == c.block) block_words.push_back(all[i]);
+            for (size_t i= 0; i < p.all.size(); i++) {
+                if(p.block_of[i] == c.block)
+                    block_words.push_back(p.all[i]);
+            }
         }
         size_t index= block_words.size();
-        for (size_t i= 0, k= 0; i < all.size(); i++) {
-            if(block_of[i] != c.block) continue;
-            if(i == c.index) index= k;
+        for (size_t i= 0, k= 0; i < p.all.size(); i++) {
+            if(p.block_of[i] != c.block)
+                continue;
+
+            if(i == c.index)
+                index= k;
+
             k++;
         }
-        Gcode gcode(block_words, index, mark);
+        Gcode gcode(block_words, index, p.mark);
 
         if(c.rank == MOTION) {
-            gcode.mcs= blocks[c.block].mcs;
-            if(c.index < words.size()) {
+            gcode.mcs= c.mcs;
+            if(!c.implied) {
                 uint8_t g= gcode.g();
                 if(g < 4) {
                     modal_motion= g;
@@ -581,15 +617,24 @@ bool GcodeDispatch::execute(const gcode::Words &words, const string &text, uint3
         }
 
         bool claimed= true;
-        if(gcode.has_m()) claimed= run_mcode(gcode);
-        else if(c.index >= words.size()) run_gcode(gcode, 0);
-        else run_gcode(gcode, c.rank == MOTION ? 0 : classify(words[c.index]).flags);
+        if(gcode.has_m()) {
+            claimed= run_mcode(gcode);
+        } else if(c.implied) {
+            run_gcode(gcode, 0);
+        } else {
+            run_gcode(gcode, c.rank == MOTION ? 0 : classify(p.all[c.index]).flags);
+        }
 
-        // a scripted code runs its sub after the modules have seen it, so their handlers still apply;
-        // the ok follows when the sub is done, which is the last block of the line by rank
+        // a scripted code runs its sub after the modules have seen it, so their handlers still apply
         std::string err;
         if(remap(gcode, err)) {
-            return err.empty() || fail(err.c_str());
+            if(!err.empty())
+                return fail(err.c_str());
+
+            if(n + 1 < p.order.size())
+                rest= Rest{std::move(p), n + 1};
+
+            return true;
         }
 
         if(!claimed) {

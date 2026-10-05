@@ -54,7 +54,17 @@ private:
     bool run_line(const SerialMessage &msg);
     Gate allowed_while_halted(const gcode::Words &words);
     Gate homed_enough(const gcode::Words &words);
-    bool execute(const gcode::Words &words, const std::string &text, uint32_t mark);
+    // the commands of a line in the order they run, with the motion words its blocks imply
+    struct Plan {
+        struct Cmd { size_t index; uint8_t block; uint8_t rank; bool mcs; bool implied; };
+        std::vector<Cmd> order;
+        gcode::Words all;   // the line's words, then the implied ones
+        std::vector<uint8_t> block_of;
+        uint32_t mark;
+    };
+    bool execute(const gcode::Words &words, uint32_t mark);
+    bool plan(const gcode::Words &words, uint32_t mark, Plan &p);
+    bool run(Plan p, size_t from);
     bool parameter_statement(const char *p);
     bool announce(const std::string &line, size_t from, uint32_t mark,
                   const gcode::ParamStore *store);
@@ -79,5 +89,11 @@ private:
         StreamOutput *stream;
     };
     std::deque<Buffered> buffered;
+    // the commands of a line after the one that runs as a sub
+    struct Rest {
+        Plan plan;
+        size_t from;
+    };
+    Rest rest{};
     static const unsigned BUFFER_LIMIT = 32; // a remote client must not grow it without bound
 };
