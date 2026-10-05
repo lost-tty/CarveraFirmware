@@ -2,7 +2,8 @@
 # Console to the machine over TCP using the Makera frame protocol. Needs prompt_toolkit.
 # Full screen: replies scroll above the input (PageUp/PageDown), the machine status sits below it.
 # While a file or script runs, its lines around the current one show beside the log when the terminal
-# is wide, above the input when it is tall, polled with "list"; the running line is highlighted.
+# is wide, above the input when it is tall; "job watch" names them, a second connection fetches each
+# file once. The running line is highlighted.
 # Typed and pasted lines queue up and go out one at a time: each waits until the machine has taken
 # the one before, so a paste never overruns its 128-byte line buffer. The prompt stays live meanwhile.
 # Ctrl-X aborts, Ctrl-P holds, Ctrl-O resumes: sent the moment the key is pressed, no Enter needed.
@@ -17,6 +18,7 @@ import argparse
 import collections
 import glob
 import os
+import queue
 import re
 import socket
 import threading
@@ -37,7 +39,7 @@ from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import SearchToolbar
 
-from upload import frame, Closed, FrameReader, Upload, INFO, CTRL_MULTI, CAN
+from upload import fetch, frame, Closed, FrameReader, Upload, INFO, CTRL_MULTI, CAN
 
 CTRL_SINGLE = 0xA1
 STATUS = 0x81
@@ -47,7 +49,7 @@ NAMES = {0x82: 'diag', LOAD_INFO: 'load', LOAD_FINISH: 'load-end', LOAD_ERROR: '
 # upload and download are left out: typed, they start a transfer this console does not drive
 SHELL = ('ls cd pwd cat echo rm mv mkdir reset dfu break help ftype version model mem task get '
          'set_temp switch net ap wlan diagnose sleep power remount calc_thermistor thermistors time test '
-         'play progress abort suspend resume step goto list job trace macro').split()
+         'play progress abort suspend resume step goto job trace macro').split()
 REMOTE_PATH = 'ls cd cat rm mv mkdir play'.split()  # commands taking a path on the machine
 SUBCOMMANDS = {'job': 'status watch load', 'step': 'over out', 'trace': 'on off', 'macro': 'list params'}
 REALTIME = {'?': b'?', '!': b'!', '~': b'~', '^X': b'\x18', '^x': b'\x18'}
@@ -73,10 +75,8 @@ START_S = 10.0  # an upload the machine has not begun by then was refused withou
 CANCEL_S = 5.0  # a cancel the machine has not answered by then is given up on
 STUCK_S = 30.0  # a typed line with no receipt this long, while idle and quiet, is pointed out
 RESYNC_S = 8.0  # one of our own queries unanswered this long, with nothing else heard, lost its reply
-LIST_S = 2.0  # the program is listed when its line moves, and this often besides
+REFETCH_S = 30.0  # a file that could not be fetched is asked for again after this long
 HISTORY_FILE = os.path.expanduser('~/.carvera_cli_history')
-LIST_LINE = re.compile(r'([ >+]) +(\d+)(?:  (.*))?$')  # Source::list: '>' current, '+' read ahead
-LIST_HEADER = re.compile(r'\S.*:$')
 STATE_STYLE = {'Idle': 'idle', 'Run': 'run', 'Home': 'run', 'Jog': 'run', 'Hold': 'hold', 'Pause': 'hold',
                'Wait': 'hold', 'Alarm': 'alarm', 'Sleep': 'dim'}
 STYLE = Style.from_dict({
@@ -94,7 +94,6 @@ STYLE = Style.from_dict({
     'current': 'bg:#264f78',
     'caller': 'bg:#3a3d41',
     'gutter': '#606060',
-    'ahead': '#4ec9b0',
     'comment': '#6a9955 italic',
     'g': '#569cd6 bold',
     'm': '#c586c0 bold',
@@ -122,7 +121,7 @@ class Rejected(Exception):
 
 class Ask:
     def __init__(self, kind, own_replies=0):
-        # a typed line's receipt: 'show' (a typed $G) or 'hide'; our own queries: 'poll', 'list', 'ls'
+        # a typed line's receipt: 'show' (a typed $G) or 'hide'; our own queries: 'poll', 'watch', 'ls'
         self.kind = kind
         self.own_replies = own_replies  # [G lines the command itself prints before the $G's
         self.since = time.monotonic()
@@ -132,6 +131,20 @@ class Ask:
 def parse_status(status):
     parts = status.strip('<>').split('|')
     return parts[0], dict(p.split(':', 1) for p in parts[1:] if ':' in p)
+
+
+# a job frame: "<role> <phase> <outcome> <flags> <line> <read> <secs> <size> <path>" per level,
+# outermost first, each perhaps followed by "args ..."
+Head = collections.namedtuple('Head', 'role phase line size path')
+
+
+def parse_job(text):
+    heads = []
+    for line in text.split('\n')[:-1]:  # a line without its end was cut off by the machine's buffer
+        f = line.rstrip('\r').split(None, 8)
+        if len(f) == 9 and f[0] in ('file', 'script'):
+            heads.append(Head(f[0], f[1], int(f[4]), int(f[7], 16) if f[7] != '-' else 0, f[8]))
+    return heads
 
 
 class Console:
@@ -156,22 +169,22 @@ class Console:
         self.current_sent = False  # it went out and waits for its receipt
         self.rejected = None  # an error the machine printed while the current line waited
         self.stops = 0  # Ctrl-C count, a wait started before a stop gives up
-        # what runs, from "list": [(source name, [(mark, number, text)])], mark '>' is current
-        self.program = []
-        self.list_around = 10  # lines either side of the current one, set by the pane's height
+        self.heads = []  # what runs, from the job frames
+        self.texts = {}  # (path, size) -> its lines; None while fetching, False when that failed
+        self.failed = {}  # (path, size) -> when its fetch failed
+        self.fetches = queue.Queue()
         self.want_program = False  # the UI has room for the program pane
-        self.last_modal = self.last_list = 0.0
-        self.listed_line = None  # the P: line the program was last listed at
+        self.last_modal = 0.0
         self.heard = time.monotonic()  # last frame other than a status
         self.reset_session()
-        for target in (self.supervisor, self.poller, self.sender):
+        for target in (self.supervisor, self.poller, self.sender, self.fetcher):
             threading.Thread(target=target, daemon=True).start()
 
     # per-link state, under lock: replies owed on the old link never arrive on the new one
     def reset_session(self):
         self.want_status = False  # show the next status: a typed ? answers the same way as our polls
         self.asks = collections.deque()  # the Ask in flight, at most one
-        self.collected = []  # the "list" reply so far
+        self.watching = False  # "job watch on" went out on this link
         self.asked = 0  # $G sent on this link
         self.answered = 0  # $G replies seen; the nth reply is the receipt of the line before the nth $G
         self.upload = None
@@ -316,9 +329,12 @@ class Console:
             else:
                 self.listing_dir = None
             return
+        if ftype == JOB:
+            self.heads = parse_job(payload.decode(errors='replace'))
+            return
         text = payload.decode(errors='replace').rstrip()
         ask = self.asks[0] if self.asks else None
-        if ftype == INFO and ask is not None and ask.kind == 'list' and self.collect(text):
+        if ftype == INFO and ask is not None and ask.kind == 'watch' and text == 'job watch on':
             return
         # the modal state; "$#" and "get wcs" print [G54:x,y,z] and the like, which carry a colon
         if ftype == INFO and text.startswith('[G') and ':' not in text:
@@ -327,9 +343,7 @@ class Console:
                 ask.own_replies -= 1  # "$I" or "get state" answering for itself; the $G's comes after
             elif ask is not None:
                 self.asks.popleft()
-                if ask.kind == 'list':
-                    self.program, self.collected = self.collected, []
-                elif ask.kind == 'ls':
+                if ask.kind == 'ls':
                     self.listing_dir = None  # an ls that printed no LOAD_FINISH ends here all the same
                 with self.cond:
                     self.answered += 1
@@ -346,19 +360,33 @@ class Console:
             self.want_status = False
         self.print_frame(ftype, payload)
 
-    # takes the lines of a "list" reply: a "name:" header per source, then "%c %5u  text" lines
-    def collect(self, text):
-        taken = False
-        for line in text.splitlines():
-            m = LIST_LINE.match(line)
-            if m and self.collected:
-                self.collected[-1][1].append((m.group(1), int(m.group(2)), m.group(3) or ''))
-            elif LIST_HEADER.match(line):
-                self.collected.append((line[:-1], []))
-            elif line != 'Nothing running':
-                continue
-            taken = True
-        return taken
+    # the levels the pane shows: a finished job is no longer running
+    def shown_heads(self):
+        heads = self.heads
+        return heads if heads and heads[0].phase != 'idle' else []
+
+    # each file a head names, once, on a connection of its own
+    def fetcher(self):
+        while not self.stopping:
+            key = self.fetches.get()
+            try:
+                data = fetch(self.host, self.port, key[0])
+                # numbered as the machine numbers them: by newline alone
+                self.texts[key] = [l.rstrip('\r') for l in data.decode(errors='replace').split('\n')]
+            except Exception as e:
+                if key not in self.failed:
+                    self.show(f'could not fetch {key[0]}: {e}')
+                self.texts[key] = False
+                self.failed[key] = time.monotonic()
+
+    def fetch_missing(self):
+        now = time.monotonic()
+        for h in self.shown_heads():
+            key = (h.path, h.size)
+            if key not in self.texts or (self.texts[key] is False
+                                         and now - self.failed[key] >= REFETCH_S):
+                self.texts[key] = None
+                self.fetches.put(key)
 
     def print_frame(self, ftype, payload):
         text = payload.decode(errors='replace').rstrip()
@@ -392,21 +420,18 @@ class Console:
         ask = self.asks[0] if self.asks else None
         # our own queries are answered at once and only go out when the line before was taken, so one
         # unanswered while nothing else arrives lost its reply; a reconnect starts the count over
-        if (ask is not None and ask.kind in ('poll', 'list', 'ls') and not self.running
+        if (ask is not None and ask.kind in ('poll', 'watch', 'ls') and not self.running
                 and now - ask.since > RESYNC_S and now - self.heard > RESYNC_S):
             self.drop('a reply went missing, reconnecting to resync')
             return
         try:
             self.poll_status()
-            if self.want_program and (self.running or self.program):
-                line = parse_status(self.status)[1].get('P', '').split(',')[0]
-                # the program again when the line moved, or now and then for a script, which has no P:
-                if line != self.listed_line or now - self.last_list >= LIST_S:
-                    if self.ask(f'list {self.list_around}', 'list') is not None:
-                        self.listed_line, self.last_list = line, now
-            elif self.program and not self.want_program:
-                self.program = []
-            elif now - self.last_modal >= MODAL_S:
+            if not self.watching:
+                if self.ask('job watch on', 'watch') is not None:
+                    self.watching = True
+            elif self.want_program:
+                self.fetch_missing()
+            if now - self.last_modal >= MODAL_S:
                 if self.ask(None, 'poll') is not None:
                     self.last_modal = now
         except OSError:
@@ -511,6 +536,7 @@ class Console:
         up.result = up.result or 'cancelled'
         if up.result == 'done':
             self.listing.clear()  # the card changed
+            self.texts = {k: v for k, v in self.texts.items() if k[0] != up.remote}
         self.show(message)
         self.wake()
 
@@ -846,9 +872,9 @@ class Ui:
 
     def layout(self):
         size = self.size()
-        # the program is listed only while there is room to show it
+        # the files are fetched only while there is room to show them
         self.con.want_program = size.columns >= self.WIDE_COLS or size.rows >= self.STACK_ROWS
-        if not self.con.program:
+        if not self.con.shown_heads():
             return self.layouts['plain']
         if size.columns >= self.WIDE_COLS:
             return self.layouts['side']
@@ -899,31 +925,33 @@ class Ui:
 
     def program_text(self):
         con = self.con
-        program = con.program
+        heads = con.shown_heads()
         info = self.program_window.render_info
         height = info.window_height if info else 20
         width = info.window_width if info else 80
         # as many lines as the pane holds; each source gets a header and an equal share
-        per = max(3, height // max(1, len(program)) - 1)
-        con.list_around = min(30, (per - 1) // 2)
+        per = max(3, height // max(1, len(heads)) - 1)
+        around = min(30, (per - 1) // 2)
         fields = parse_status(con.status)[1]
         out = []
-        for index, (name, lines) in enumerate(program):
-            active = index == len(program) - 1  # the deepest source is the one running
-            head = f' {name}'
+        for index, h in enumerate(heads):
+            active = index == len(heads) - 1  # the deepest source is the one running
+            head = f' {os.path.basename(h.path)}'
             if index == 0 and 'P' in fields:
                 head += '   ' + play_progress(fields['P'])
             if out:
                 out.append(('', '\n'))
             out.append(('class:header', head.ljust(width)))
-            for mark, number, text in lines:
-                here = mark == '>'
+            lines = con.texts.get((h.path, h.size))
+            if lines is None or lines is False:
+                out.append(('class:dim', '\n fetching' if lines is None else '\n not readable'))
+                continue
+            for number in range(max(1, h.line - around), min(len(lines), h.line + around) + 1):
+                here = number == h.line
                 base = ('class:current' if active else 'class:caller') if here else ''
-                gutter = {'>': '▶', '+': '·'}.get(mark, ' ')
                 out.append(('', '\n'))
-                gutter_style = base + (' class:ahead' if mark == '+' else ' class:gutter')
-                out.append((gutter_style, f'{gutter}{number:>6}  '))
-                out.extend(gcode_fragments(text, base))
+                out.append((base + ' class:gutter', f'{"▶" if here else " "}{number:>6}  '))
+                out.extend(gcode_fragments(lines[number - 1], base))
                 if here:
                     out.append((base, ' ' * width))  # the bar runs the full width; the window cuts it
         return out or [('class:dim', ' nothing running')]

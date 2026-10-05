@@ -120,6 +120,123 @@ class Upload:
         return None
 
 
+# QuickLZ level 3, one block: the inverse of the machine's qlz_compress (src/libs/quicklz.c)
+def qlz_block(src):
+    n = 4 if src[0] & 2 else 1
+    size = int.from_bytes(src[1 + n:1 + 2 * n], 'little')
+    pos = 1 + 2 * n
+    if not src[0] & 1:
+        return bytes(src[pos:pos + size])
+    out = bytearray()
+    cword = 1
+    while True:
+        if pos >= len(src):
+            raise ValueError('block ends early')
+        if cword == 1:
+            cword = int.from_bytes(src[pos:pos + 4], 'little')
+            pos += 4
+        fetch = int.from_bytes(src[pos:pos + 4].ljust(4, b'\0'), 'little')
+        if cword & 1:
+            cword >>= 1
+            if fetch & 3 == 0:
+                offset, length, pos = (fetch & 0xff) >> 2, 3, pos + 1
+            elif fetch & 2 == 0:
+                offset, length, pos = (fetch & 0xffff) >> 2, 3, pos + 2
+            elif fetch & 1 == 0:
+                offset, length, pos = (fetch & 0xffff) >> 6, ((fetch >> 2) & 15) + 3, pos + 2
+            elif fetch & 127 != 3:
+                offset, length, pos = (fetch >> 7) & 0x1ffff, ((fetch >> 2) & 0x1f) + 2, pos + 3
+            else:
+                offset, length, pos = fetch >> 15, ((fetch >> 7) & 255) + 3, pos + 4
+            start = len(out) - offset
+            if offset < 3 or start < 0:
+                raise ValueError('bad match')
+            for i in range(length):  # the copy may overlap what it writes
+                out.append(out[start + i])
+        elif len(out) < size - 11:
+            count = (4, 1, 2, 1, 3, 1, 2, 1)[(cword & 0xf) >> 1]
+            out += src[pos:pos + count]
+            cword >>= count
+            pos += count
+        else:
+            while len(out) < size:
+                if cword == 1:
+                    pos += 4
+                    cword = 1 << 31
+                out.append(src[pos])
+                pos += 1
+                cword >>= 1
+            return bytes(out)
+
+
+# a .lz file: blocks of a 4-byte size and a QuickLZ block, then the 16-bit sum of the bytes they hold
+def unpack_lz(data):
+    out = bytearray()
+    pos = 0
+    while pos < len(data) - 2:
+        size = int.from_bytes(data[pos:pos + 4], 'big')
+        out += qlz_block(data[pos + 4:pos + 4 + size])
+        pos += 4 + size
+    if sum(out) & 0xffff != int.from_bytes(data[-2:], 'big'):
+        raise ValueError('bad sum')
+    return bytes(out)
+
+
+# asks the machine for one file; a file uploaded packed comes back packed and is unpacked here
+class Download:
+    def __init__(self, remote):
+        self.remote = remote
+        self.md5 = None
+        self.total = None
+        self.chunks = []
+        self.started = False
+        self.result = None  # 'done', 'failed', 'cancelled' or 'refused'
+        self.data = None
+
+    def start(self):
+        return [frame(CTRL_MULTI, f'download {self.remote}'.encode())]
+
+    # the reply frame, b'' when the frame ends the transfer, None when it is not part of it
+    def answer(self, ftype, payload):
+        if ftype == INFO:
+            if not self.started and payload.decode(errors='replace').lower().startswith('error'):
+                self.result = 'refused'
+            return None
+        if ftype == MD5:
+            self.started = True
+            self.md5 = payload[:32].decode(errors='replace').lower()
+            return frame(VIEW)
+        if ftype == VIEW and len(payload) >= 6:
+            self.total = struct.unpack('>IH', payload[:6])[0]
+            return frame(DATA, struct.pack('>I', 1)) if self.total else frame(END)
+        if ftype == DATA and len(payload) >= 4:
+            seq = struct.unpack('>I', payload[:4])[0]
+            if seq != len(self.chunks) + 1:
+                return frame(DATA, struct.pack('>I', len(self.chunks) + 1))
+            self.chunks.append(payload[4:])
+            return frame(DATA, struct.pack('>I', seq + 1)) if seq < self.total else frame(END)
+        if ftype == END:
+            self.finish()
+            return b''
+        if ftype == CAN:
+            self.result = self.result or 'cancelled'
+            return b''
+        return None
+
+    def finish(self):
+        data = b''.join(self.chunks)
+        if hashlib.md5(data).hexdigest() != self.md5:
+            try:
+                data = unpack_lz(data)
+            except (ValueError, IndexError):
+                data = None
+        if data is None or hashlib.md5(data).hexdigest() != self.md5:
+            self.result = 'failed'
+            return
+        self.data = data
+        self.result = 'done'
+
+
 class FrameReader:
     def __init__(self, sock):
         self.sock = sock
@@ -149,6 +266,28 @@ class FrameReader:
             if not chunk:
                 raise Closed('connection closed')
             self.buf += chunk
+
+
+# one file on a connection of its own, so the console's stays free
+def fetch(host, port, remote, timeout=TIMEOUT):
+    sock = socket.create_connection((host, port), timeout=timeout)
+    try:
+        reader = FrameReader(sock)
+        dl = Download(remote)
+        for f in dl.start():
+            sock.sendall(f)
+        while dl.result is None:
+            ftype, payload = reader.next(timeout)
+            if ftype is None:
+                raise TimeoutError(f'no reply to the download of {remote}')
+            reply = dl.answer(ftype, payload)
+            if reply:
+                sock.sendall(reply)
+        if dl.result != 'done':
+            raise OSError(f'download of {remote} {dl.result}')
+        return dl.data
+    finally:
+        sock.close()
 
 
 def main():
