@@ -19,6 +19,7 @@
 #include "GcodeDispatch.h"
 #include "Player.h"
 #include "SerialMessage.h"
+#include "libs/MainWake.h"
 
 #define switch_checksum CHECKSUM("switch")
 #define state_checksum  CHECKSUM("state")
@@ -194,6 +195,8 @@ void Pendant::post(Request::What what, int32_t value)
     Request r{what, value};
     if (xQueueSend(requests, &r, 0) != pdTRUE)
         printk("error:pendant busy, key dropped\n");
+    else
+        wake_main();
 }
 
 static void mdi(const char *fmt, int32_t value = 0)

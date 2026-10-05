@@ -6,6 +6,7 @@
 */
 
 #include "libs/Kernel.h"
+#include "libs/MainWake.h"
 
 #include "modules/tools/laser/Laser.h"
 #include "modules/tools/ToolHead.h"
@@ -280,8 +281,7 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName) {
 }
 
 void vTaskMainLoop(void *pvParameters) {
-    uint16_t cnt = 0;
-
+    main_wake_init(xTaskGetCurrentTaskHandle());
     init();
 
     machine_task.post_startup();
@@ -291,11 +291,11 @@ void vTaskMainLoop(void *pvParameters) {
     while (true) {
         if(THEKERNEL->is_using_leds()) {
             // flash led 2 to show we are alive
-            leds[1]= (cnt++ & 0x1000) ? 1 : 0;
+            leds[1]= (xTaskGetTickCount() & 0x1000) ? 1 : 0;
         }
 
         THEKERNEL->serve_main();
-        vTaskDelay(1);
+        wait_main(1);
     }
 }
 
