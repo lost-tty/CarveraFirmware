@@ -41,13 +41,15 @@ from upload import frame, Closed, FrameReader, Upload, INFO, CTRL_MULTI, CAN
 
 CTRL_SINGLE = 0xA1
 STATUS = 0x81
-LOAD_INFO, LOAD_FINISH, LOAD_ERROR = 0x83, 0x84, 0x85
-NAMES = {0x82: 'diag', LOAD_INFO: 'load', LOAD_FINISH: 'load-end', LOAD_ERROR: 'load-err', INFO: ''}
+LOAD_INFO, LOAD_FINISH, LOAD_ERROR, JOB = 0x83, 0x84, 0x85, 0x86
+NAMES = {0x82: 'diag', LOAD_INFO: 'load', LOAD_FINISH: 'load-end', LOAD_ERROR: 'load-err', JOB: 'job',
+         INFO: ''}
 # upload and download are left out: typed, they start a transfer this console does not drive
 SHELL = ('ls cd pwd cat echo rm mv mkdir reset dfu break help ftype version model mem task get '
          'set_temp switch net ap wlan diagnose sleep power remount calc_thermistor thermistors time test '
-         'play progress abort suspend resume goto list').split()
+         'play progress abort suspend resume step goto list job trace macro').split()
 REMOTE_PATH = 'ls cd cat rm mv mkdir play'.split()  # commands taking a path on the machine
+SUBCOMMANDS = {'job': 'status watch load', 'step': 'over out', 'trace': 'on off', 'macro': 'list params'}
 REALTIME = {'?': b'?', '!': b'!', '~': b'~', '^X': b'\x18', '^x': b'\x18'}
 REALTIME_NAMES = {b'\x18': '^X abort', b'!': 'feed hold', b'~': 'resume', b'?': 'status'}
 MODAL_PRINTERS = (['$I'], ['get', 'state'])  # print a [G...] line of their own, like the $G receipt
@@ -713,9 +715,11 @@ class CarveraCompleter(Completer):
         word = words[-1]
         if len(words) == 1:
             options = [c + ' ' for c in SHELL + [u.split()[0] for u in LOCAL] if c.startswith(word)]
+        elif len(words) == 2 and words[0] in SUBCOMMANDS:
+            options = [c + ' ' for c in SUBCOMMANDS[words[0]].split() if c.startswith(word)]
         elif words[0] == '/upload' and len(words) == 2:
             options = [p + '/' if os.path.isdir(p) else p for p in glob.glob(os.path.expanduser(word) + '*')]
-        elif words[0] in REMOTE_PATH and word.startswith('/'):
+        elif (words[0] in REMOTE_PATH or words[:2] == ['job', 'load']) and word.startswith('/'):
             directory, _, name = word.rpartition('/')
             directory = directory or '/'
             entries = self.con.listing.get(directory)  # the reader may clear it meanwhile
