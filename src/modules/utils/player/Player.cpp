@@ -157,8 +157,9 @@ void Player::shell(void *self, const char *name, std::string args, StreamOutput 
 
 void Player::buffer_command( string parameters, StreamOutput *stream )
 {
-    if (!program.insert(parameters)) {
-        stream->printf("error:buffer queue full, an abort clears it\r\n");
+    string err;
+    if (!gcode_dispatch.offer(parameters, stream, true, err)) {
+        stream->printf("error:%s\r\n", err.c_str());
         return;
     }
     stream->printf("Command buffered: %s\r\n", parameters.c_str());
@@ -290,6 +291,7 @@ void Player::abort_command( string parameters, StreamOutput *stream )
 {
     bool file= program.busy();
     program.stop(); // the file and any script on top of it, or a script alone
+    gcode_dispatch.drop_offered();
 
     if(machine_task.is_halted()) {
         printk("Aborted by halt\n");

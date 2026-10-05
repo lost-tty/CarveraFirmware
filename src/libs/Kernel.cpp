@@ -475,6 +475,7 @@ void Kernel::serve_main()
 {
     machine_task.trace();
     serve_io();
+    gcode_dispatch.service();
     call_event(ON_MAIN_LOOP);
 }
 

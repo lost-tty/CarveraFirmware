@@ -8,12 +8,14 @@
 #pragma once
 
 #include "libs/Module.h"
+#include "libs/Killable.h"
 #include "libs/McodeRegistry.h"
 #include "utils/GcodeLine.h"
 #include "utils/Parameters.h"
 #include "modules/robot/MachineTask.h"
 
 #include <cstdint>
+#include <deque>
 #include <string>
 
 struct SerialMessage;
@@ -29,10 +31,12 @@ public:
     virtual bool call(const std::string &line, StreamOutput *stream, std::string &err) = 0;
 };
 
-class GcodeDispatch : public Module
+class GcodeDispatch : public Module, public Killable
 {
-    friend class Program;
 public:
+    void service();
+    void kill() override {}
+    void cleanup() override { offered.clear(); }
     static bool run_mcode(Gcode &gcode);
     void report_settings(Gcode *);
     void say(Gcode *);   // M118
@@ -48,6 +52,9 @@ public:
     Parameters &parameters() { return params; }
     void set_script_hook(ScriptHook *hook) { scripts= hook; }
     void run_mdi(const SerialMessage &msg);
+    // queued console G-code; beside_job: accepted while a job plays
+    bool offer(const std::string &line, StreamOutput *stream, bool beside_job, std::string &err);
+    void drop_offered() { offered.clear(); }
     void program_end();
 private:
     enum Gate { PASS, HANDLED, REFUSED };
@@ -74,4 +81,10 @@ private:
     uint8_t modal_cycle;
     float cycle_initial;
     bool homed_check;
+    struct Offered {
+        std::string line;
+        StreamOutput *stream;
+    };
+    std::deque<Offered> offered;
+    static const unsigned OFFER_LIMIT = 32; // a remote client must not grow it without bound
 };

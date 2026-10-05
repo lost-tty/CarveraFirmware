@@ -15,7 +15,6 @@
 void Program::on_module_loaded()
 {
     runner= new script::Runner(library.program(), gcode_dispatch.parameters());
-    register_for_event(ON_MAIN_LOOP);
     SimpleShell::add_command(shell_slot, "list", &Program::shell, this,
                              "list [n] - lines around the one running");
 }
@@ -68,52 +67,44 @@ bool Program::call_line(const std::string &text, StreamOutput *stream, std::stri
     return can_call(err) && runner->call_line(text, sub, err) && called(sub, stream, on_job);
 }
 
-void Program::on_main_loop(void *)
+bool Program::step(SerialMessage &msg)
 {
-    if(!busy() || machine_task.is_halted() || frozen() || machine_task.full())
-        return;
+    if(!busy() || machine_task.is_halted() || frozen())
+        return false;
 
-    if(stopping) {
-        // the job is over, it just has to finish moving
-        if(!machine_task.motion_passed(stop_after))
-            return;
+    if(!stopping)
+        return advance(msg);
 
-        stopping= false;
-        printk("job stopped at line %u\n", stop_line);
-        stop();
-        return;
-    }
+    // the job is over, it just has to finish moving
+    if(!machine_task.motion_passed(stop_after))
+        return false;
 
-    SerialMessage msg{&THEKERNEL->streams, "", 0, nullptr};
-    if(!next(msg))
-        return;
-
-    // a halt inside stops everything, so nothing is left to stop here
-    if(!gcode_dispatch.run_line(msg) && busy()) {
-        if(stop_after_queued(msg.line))
-            return;
-
-        printk("job stopped at line %u\n", msg.line);
-        stop();
-    }
+    stopping= false;
+    printk("job stopped at line %u\n", stop_line);
+    stop();
+    return false;
 }
 
-// false: nothing to dispatch this loop
-bool Program::next(SerialMessage &msg)
+void Program::refused(unsigned at)
+{
+    // a halt inside stops everything, so nothing is left to stop here
+    if(!busy())
+        return;
+
+    if(stop_after_queued(at))
+        return;
+
+    printk("job stopped at line %u\n", at);
+    stop();
+}
+
+bool Program::advance(SerialMessage &msg)
 {
     if(pause_asked && runner->at_main()) {
         pause_asked= false;
         suspend();
         printk("Suspended, resume to continue playing\n");
         return false;
-    }
-
-    if(runner->at_main() && !inserted.empty()) {
-        msg.message= inserted.front();
-        inserted.pop_front();
-        // an inserted line runs ahead of the next job line, so that is the line a stop here reports
-        msg.line= line + 1;
-        return true;
     }
 
     if(!runner->running()) {
@@ -209,15 +200,6 @@ bool Program::cancel_pause()
     return true;
 }
 
-bool Program::insert(const std::string &text)
-{
-    if(inserted.size() >= INSERT_LIMIT)
-        return false;
-
-    inserted.push_back(text);
-    return true;
-}
-
 bool Program::jump(unsigned to, std::string &err)
 {
     if(!runner->goto_main(to, err))
@@ -287,7 +269,6 @@ void Program::end_job()
     line= 0;
     echo= false;
     pause_asked= false;
-    inserted.clear();
     machine_task.enforce_keepout();
 }
 

@@ -184,6 +184,37 @@ void GcodeDispatch::add_handler(Module *module)
     handlers = module;
 }
 
+void GcodeDispatch::service()
+{
+    if(machine_task.full())
+        return;
+
+    if(!offered.empty() && program.yields()) {
+        Offered o= offered.front();
+        offered.pop_front();
+        run_line(SerialMessage{o.stream, o.line, 0, nullptr});
+        return;
+    }
+    SerialMessage msg{&THEKERNEL->streams, "", 0, nullptr};
+    if(program.step(msg) && !run_line(msg))
+        program.refused(msg.line);
+}
+
+bool GcodeDispatch::offer(const std::string &line, StreamOutput *stream, bool beside_job,
+                          std::string &err)
+{
+    if(!beside_job && !program.takes_console()) {
+        err= "busy, a job or script is running";
+        return false;
+    }
+    if(offered.size() >= OFFER_LIMIT) {
+        err= "busy, queue full, an abort clears it";
+        return false;
+    }
+    offered.push_back(Offered{line, stream});
+    return true;
+}
+
 void GcodeDispatch::init()
 {
     Parameters::init();
@@ -225,7 +256,7 @@ bool GcodeDispatch::safe_while_running(const gcode::Words &words)
     return found_one;
 }
 
-// an interleaved line would move the machine out of sequence; a suspended job is safe to jog
+// lines safe beside a running program go at once, the rest is queued
 void GcodeDispatch::run_mdi(const SerialMessage &msg)
 {
     if(machine_task.is_jogging()) {
@@ -233,22 +264,19 @@ void GcodeDispatch::run_mdi(const SerialMessage &msg)
         return;
     }
 
-    if(program.active()) {
-        // without the parameters: reading #5021 drains the queue, and the letters decide this
-        const char *text= msg.message.c_str();
-        gcode::skip_space(text);
-        bool call= script::is_control(text);
-        gcode::Line parsed;
-        if(!call && !parsed.parse(text, nullptr)) {
-            printk("error:%s, and parameters are not read while a job runs\r\n", parsed.error_text().c_str());
-            return;
-        }
-        if(call || !safe_while_running(parsed.words())) {
-            printk("error:busy, a job or script is running\r\n");
-            return;
-        }
+    // no parameters: reading a machine one waits for the motion to finish
+    const char *text= msg.message.c_str();
+    gcode::skip_space(text);
+    gcode::Line parsed;
+    bool now= !script::is_control(text) && parsed.parse(text, nullptr)
+              && safe_while_running(parsed.words());
+    if(now) {
+        run_line(msg);
+        return;
     }
-    run_line(msg);
+    std::string err;
+    if(!offer(msg.message, msg.stream, false, err))
+        printk("error:%s\r\n", err.c_str());
 }
 
 bool GcodeDispatch::run_line(const SerialMessage &msg)

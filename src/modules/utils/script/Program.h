@@ -12,13 +12,9 @@
 
 struct SerialMessage;
 
-// Runs what the machine executes, one line per main loop: the job as the bottom frame and the subs
-// it calls or triggers on top of it, or a sub alone. Console G-code is refused while a line will
-// be fed.
 class Program : public Module, public Killable {
 public:
     void on_module_loaded() override;
-    void on_main_loop(void *) override;
     void kill() override {}
     void cleanup() override;
     static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
@@ -32,8 +28,11 @@ public:
     bool set_local(const char *name, float v) { return runner->set_local(name, v); }
     void set_trace(bool on) { trace= on; }
 
+    bool step(SerialMessage &msg);   // true: msg holds a line to dispatch
+    void refused(unsigned line);
+    bool yields() const { return !in_sub(); }
+    bool takes_console() const { return !playing() || paused; }
     bool busy() const { return ending || runner->running(); }
-    bool active() const { return busy() && !frozen(); } // something will feed; MDI would interleave
     bool in_sub() const { return runner->running() && !runner->at_main(); }
     bool playing() const { return library.source().job() >= 0; }
     const char *job_name() const;
@@ -45,7 +44,6 @@ public:
     void resume();
     void ask_pause() { pause_asked= playing(); }  // at the next job line
     bool cancel_pause();
-    bool insert(const std::string &line);       // fed before the next job line
     bool jump(unsigned line, std::string &err);
     void stop();            // the job and any sub on it, or a sub alone
 
@@ -55,7 +53,7 @@ public:
 private:
     bool can_call(std::string &err) const;
     bool called(const std::string &sub, StreamOutput *reply, bool on_job);
-    bool next(SerialMessage &msg);
+    bool advance(SerialMessage &msg);
     bool frozen() const { return paused && !in_sub(); }
     void finish();
     void end_job();
@@ -67,8 +65,6 @@ private:
     StreamOutput *reply= nullptr;       // caller waiting for ok/error
     std::string name;                   // what runs, for messages
     unsigned line= 0;                   // the last job line read
-    std::deque<std::string> inserted;
-    static const unsigned INSERT_LIMIT = 32; // a remote client must not grow it without bound
     uint32_t stop_after= 0;             // the queue mark the refused line was written before
     unsigned int stop_line= 0;
     bool trace= false;                  // echo every sub line with its origin
