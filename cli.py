@@ -29,7 +29,9 @@ from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.data_structures import Point, Size
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout import (DynamicContainer, Float, FloatContainer, HSplit, Layout, VSplit, Window)
+from prompt_toolkit.filters import Condition
+from prompt_toolkit.layout import (ConditionalContainer, DynamicContainer, Float, FloatContainer, HSplit, Layout,
+                                   VSplit, Window)
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
@@ -93,6 +95,10 @@ STYLE = Style.from_dict({
     'current': 'bg:#264f78',
     'caller': 'bg:#3a3d41',
     'gutter': '#606060',
+    'ahead': '#4ec9b0',
+    'mark-run': '#55cc55 bold',
+    'mark-hold': '#ddbb33 bold',
+    'mark-halt': '#ff5555 bold',
     'comment': '#6a9955 italic',
     'g': '#569cd6 bold',
     'm': '#c586c0 bold',
@@ -134,7 +140,7 @@ def parse_status(status):
 
 # a job frame: "<role> <phase> <outcome> <flags> <line> <read> <secs> <size> <path>" per level,
 # outermost first, each perhaps followed by "args ..."
-Head = collections.namedtuple('Head', 'role phase line size path')
+Head = collections.namedtuple('Head', 'role phase outcome line read size path')
 
 
 def parse_job(text):
@@ -142,8 +148,20 @@ def parse_job(text):
     for line in text.split('\n')[:-1]:  # a line without its end was cut off by the machine's buffer
         f = line.rstrip('\r').split(None, 8)
         if len(f) == 9 and f[0] in ('file', 'script'):
-            heads.append(Head(f[0], f[1], int(f[4]), int(f[7], 16) if f[7] != '-' else 0, f[8]))
+            heads.append(Head(f[0], f[1], f[2], int(f[4]), int(f[5]), int(f[7], 16) if f[7] != '-' else 0,
+                              f[8]))
     return heads
+
+
+# the mark at the current line, as the sim draws it: running, held or paused, or how it ended
+def line_mark(h):
+    if h.phase == 'run':
+        return '▶', 'class:mark-run'
+    if h.phase in ('hold', 'pause'):
+        return '‖', 'class:mark-hold'
+    if h.phase == 'idle':
+        return '■', 'class:mark-halt' if h.outcome == 'halted' else 'class:gutter'
+    return ' ', 'class:gutter'
 
 
 class Console:
@@ -151,6 +169,7 @@ class Console:
         self.host, self.port = host, port
         if show is not None:
             self.show = show
+        self.redraw = lambda: None  # the UI's, so a job frame shows at once and not on the next tick
         self.lock = threading.Lock()  # guards sock, the per-link state and every send
         # wakes the sender on replies, transfer ends, link changes and Ctrl-C; never held while taking lock
         self.cond = threading.Condition()
@@ -332,6 +351,7 @@ class Console:
             return
         if ftype == JOB:
             self.heads = parse_job(payload.decode(errors='replace'))
+            self.redraw()
             return
         text = payload.decode(errors='replace').rstrip()
         ask = self.asks[0] if self.asks else None
@@ -361,16 +381,16 @@ class Console:
             self.want_status = False
         self.print_frame(ftype, payload)
 
-    # the levels the pane shows: a finished job is no longer running
+    # the levels the pane shows: the last job stays, with how it ended
     def shown_heads(self):
-        heads = self.heads
-        return heads if heads and heads[0].phase != 'idle' else []
+        return self.heads
 
     # a download for the pane has ended, one way or the other
     def fetched(self, dl):
         if dl.result == 'done':
             # numbered as the machine numbers them: by newline alone
             self.texts[dl.key] = [l.rstrip('\r') for l in dl.data.decode(errors='replace').split('\n')]
+            self.redraw()
             return
         if dl.key not in self.failed:
             self.show(f'could not fetch {dl.remote}: {dl.result}')
@@ -727,6 +747,13 @@ def status_block(con, progress=True):
             out.append((body, '\n' + line))
     if con.modal:
         out.append(('class:dim', '\n' + con.modal.strip('[]')))
+    return out
+
+
+# what goes out now and what waits: the bottom line, under the program
+def activity_block(con):
+    out = []
+    live = con.connected
     up = con.transfer
     if up is not None:
         out.append(('class:run', f'\n{up.kind} {up.progress.line()}   Ctrl-C cancels'))
@@ -743,6 +770,8 @@ def status_block(con, progress=True):
         if con.current_sent and con.state == 'Idle' and quiet > STUCK_S:
             # a dwell also sits Idle, so this is left to the user
             out.append(('class:dim', f'\nno receipt for {quiet:.0f} s while idle: /reconnect if it is lost'))
+    if out:
+        out[0] = (out[0][0], out[0][1][1:])
     return out
 
 
@@ -847,6 +876,7 @@ class Ui:
 
     def attach(self, con):
         self.con = con
+        con.redraw = lambda: self.app.invalidate() if self.app is not None else None
         self.input = Buffer(history=FileHistory(HISTORY_FILE), completer=CarveraCompleter(con),
                             complete_while_typing=False, multiline=False, accept_handler=self.accept)
         search = SearchToolbar()
@@ -861,16 +891,20 @@ class Ui:
         # the program pane's header carries the play progress when it shows
         plain = lambda: self.layout() is self.layouts['plain']
         status = Window(FormattedTextControl(lambda: status_block(con, plain())), dont_extend_height=True)
+        activity = ConditionalContainer(
+            Window(FormattedTextControl(lambda: activity_block(con)), dont_extend_height=True),
+            filter=Condition(lambda: bool(activity_block(con))))
         hline = Window(height=1, char='─', style='class:sep')
         vline = Window(width=1, char='│', style='class:sep')
         typing = [self.log_window, self.input_window, search]
         self.layouts = {
             'side': VSplit([HSplit(typing), vline,
-                            HSplit([status, hline, self.program_window], width=self.side_width)]),
+                            HSplit([status, hline, self.program_window, activity],
+                                   width=self.side_width)]),
             'stack': HSplit([self.log_window, hline,
                              HSplit([self.program_window], height=self.stack_height), hline,
-                             self.input_window, search, hline, status]),
-            'plain': HSplit(typing[:2] + [search, hline, status]),
+                             self.input_window, search, hline, status, activity]),
+            'plain': HSplit(typing[:2] + [search, hline, status, activity]),
         }
         root = FloatContainer(DynamicContainer(self.layout),
                               floats=[Float(xcursor=True, ycursor=True,
@@ -945,7 +979,6 @@ class Ui:
         width = info.window_width if info else 80
         # as many lines as the pane holds; each source gets a header and an equal share
         per = max(3, height // max(1, len(heads)) - 1)
-        around = min(30, (per - 1) // 2)
         fields = parse_status(con.status)[1]
         out = []
         for index, h in enumerate(heads):
@@ -960,11 +993,21 @@ class Ui:
             if lines is None or lines is False:
                 out.append(('class:dim', '\n fetching' if lines is None else '\n not readable'))
                 continue
-            for number in range(max(1, h.line - around), min(len(lines), h.line + around) + 1):
+            # the whole file when it fits, else a full window with the current line in the middle
+            first = min(max(1, h.line - per // 2), max(1, len(lines) - per + 1))
+            for number in range(first, min(len(lines), first + per - 1) + 1):
                 here = number == h.line
+                ahead = h.line < number <= h.read   # read by the machine, not yet run
                 base = ('class:current' if active else 'class:caller') if here else ''
+                if here and active:
+                    mark, style = line_mark(h)
+                elif here:
+                    mark, style = '▶', 'class:gutter'
+                else:
+                    mark, style = ('·', 'class:ahead') if ahead else (' ', 'class:gutter')
                 out.append(('', '\n'))
-                out.append((base + ' class:gutter', f'{"▶" if here else " "}{number:>6}  '))
+                out.append((base + ' ' + style, mark))
+                out.append((base + (' class:ahead' if ahead else ' class:gutter'), f'{number:>6}  '))
                 out.extend(gcode_fragments(lines[number - 1], base))
                 if here:
                     out.append((base, ' ' * width))  # the bar runs the full width; the window cuts it
