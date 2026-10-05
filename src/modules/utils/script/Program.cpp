@@ -29,8 +29,6 @@ void Program::on_module_loaded()
                              "macro list | params");
     SimpleShell::add_command(trace_slot, "trace", &Program::trace_shell, this,
                              "trace on|off - echo every line with its file and number");
-    SimpleShell::add_command(list_slot, "list", &Program::list_shell, this,
-                             "list [n] - lines around the one running");
 }
 
 bool Program::remap(const char *sub, const gcode::Words &words, std::string &err)
@@ -527,45 +525,6 @@ void Program::trace_shell(void *self, const char *, std::string cmd, StreamOutpu
         return;
     }
     stream->printf("trace %s\r\n", me->trace ? "on" : "off");
-}
-
-void Program::list_shell(void *self, const char *, std::string cmd, StreamOutput *stream)
-{
-    Program *me= static_cast<Program *>(self);
-    std::string n= shift_parameter(cmd);
-    unsigned around= n.empty() ? 10 : strtoul(n.c_str(), nullptr, 10);
-    if(!me->busy()) {
-        stream->printf("Nothing running\r\n");
-        return;
-    }
-
-    uint32_t at[script::Runner::MAX_DEPTH];
-    unsigned levels= me->shown_chain(at);
-    while(levels-- > 0) {
-        int segment= me->file_of(at[levels]);
-        if(segment < 0)
-            continue;
-
-        stream->printf("%s:\r\n", me->source.basename(segment).c_str());
-        me->list(stream, segment, line_of(at[levels]), around);
-    }
-}
-
-// the lines of a segment around the current one, like a debugger
-void Program::list(StreamOutput *stream, int segment, unsigned current, unsigned around)
-{
-    if(segment < 0)
-        return;
-
-    script::Source &src= source;
-    unsigned at= src.segments[segment].base, end= at + src.segments[segment].size, n= 1;
-    for (; n + around < current && at < end; n++) at= src.next(at); // `around` lines before
-    std::string text;
-    for (unsigned next; at < end && n <= current + around && src.line_at(at, text, next);
-         at= next, n++) {
-        stream->printf("%c %5u  %s\r\n", n == current ? '>' : ' ', n, text.c_str());
-    }
-    src.release();
 }
 
 const SimpleShell::Sub<Program> Program::MACRO_SUBS[] = {

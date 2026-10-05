@@ -187,12 +187,17 @@ static bool homed(StreamOutput *stream)
 void Player::play_command( string parameters, StreamOutput *stream )
 {
     string name = shift_parameter(parameters);
-    if (name.empty()) {
+    if (name.empty() && (program.busy() || program.suspended())) {
         resume_command("", stream);
         return;
     }
 
-    string path = absolute_from_relative(name, stream);
+    string path = name.empty() ? last.path : absolute_from_relative(name, stream);
+    if (path.empty()) {
+        stream->printf("error:no job to play\r\n");
+        return;
+    }
+
     if (!homed(stream) || !open_job(path, stream))
         return;
 

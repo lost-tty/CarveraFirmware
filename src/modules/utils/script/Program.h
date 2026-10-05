@@ -16,13 +16,12 @@ public:
     void on_module_loaded() override;
     void kill() override {}
     void cleanup() override;
-    static void list_shell(void *self, const char *name, std::string args, StreamOutput *stream);
     static void trace_shell(void *self, const char *name, std::string args, StreamOutput *stream);
     static void macro_shell(void *self, const char *name, std::string args, StreamOutput *stream);
     static const SimpleShell::Sub<Program> MACRO_SUBS[];
     void macro_list(std::string args, StreamOutput *stream);
     void macro_params(std::string args, StreamOutput *stream);
-    SimpleShell::Registered list_slot, trace_slot, macro_slot;
+    SimpleShell::Registered trace_slot, macro_slot;
 
     Macros &macros() { return files; }
     bool load_job(const std::string &path, std::string &err);   // waits for resume
@@ -100,7 +99,6 @@ private:
     void forget();
     void end_job();
     void halt(int reason);
-    void list(StreamOutput *stream, int segment, unsigned current, unsigned around);
 
     Macros files;
     script::Source source;
