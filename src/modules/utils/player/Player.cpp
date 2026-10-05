@@ -127,6 +127,7 @@ const Player::Cmd Player::COMMANDS[] = {
     {"suspend",  &Player::suspend_command,  "suspend [h] - suspend the job, h keeps the spindle on"},
     {"resume",   &Player::resume_command,   "resume - resume a suspended job"},
     {"step",     &Player::step_command,     "step [over|out] - next line, over a sub, out of it"},
+    {"s",        &Player::step_command,     "s [over|out] - step"},
     {"goto",     &Player::goto_command,     "goto line - jump to a line while suspended"},
     {"buffer",   &Player::buffer_command,   "buffer <gcode> - queue a gcode line to run before the next file line"},
     {"job",      &Player::job_command,      "job status|watch|load"},

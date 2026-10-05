@@ -50,9 +50,10 @@ FETCHED = 'Info: Download success:'  # follows each download the pane asked for
 # upload and download are left out: typed, they start a transfer this console does not drive
 SHELL = ('ls cd pwd cat echo rm mv mkdir reset dfu break help ftype version model mem task get '
          'set_temp switch net ap wlan diagnose sleep power remount calc_thermistor thermistors time test '
-         'play progress abort suspend resume step goto job trace macro').split()
+         'play progress abort suspend resume step s goto job trace macro').split()
 REMOTE_PATH = 'ls cd cat rm mv mkdir play'.split()  # commands taking a path on the machine
-SUBCOMMANDS = {'job': 'status watch load', 'step': 'over out', 'trace': 'on off', 'macro': 'list params'}
+SUBCOMMANDS = {'job': 'status watch load', 'step': 'over out', 's': 'over out', 'trace': 'on off',
+               'macro': 'list params'}
 REALTIME = {'?': b'?', '!': b'!', '~': b'~', '^X': b'\x18', '^x': b'\x18'}
 REALTIME_NAMES = {b'\x18': '^X abort', b'!': 'feed hold', b'~': 'resume', b'?': 'status'}
 MODAL_PRINTERS = (['$I'], ['get', 'state'])  # print a [G...] line of their own, like the $G receipt

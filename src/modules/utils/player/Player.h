@@ -52,7 +52,7 @@ class Player : public Module {
     private:
         typedef void (Player::*command_t)(string, StreamOutput *);
         static const struct Cmd { const char *name; command_t fn; const char *help; } COMMANDS[];
-        SimpleShell::Registered shell_slots[9];
+        SimpleShell::Registered shell_slots[10];
         static const SimpleShell::Sub<Player> JOB_SUBS[];
         void play_command( string parameters, StreamOutput* stream );
         bool open_job(const string &path, StreamOutput *stream);
