@@ -202,7 +202,8 @@ bool MachineTask::post_move(const float delta[], float rate_mm_s)
     ring[slot].move.scale= rate_mm_s;
 
     publish(slot);
-    return post_drain();
+    ask_drain();
+    return wait_idle();
 }
 
 // the boot script may read positions, which only mean anything after homing
@@ -230,7 +231,7 @@ bool MachineTask::post_stop()
     return wait_idle(k_halted);
 }
 
-bool MachineTask::post_drain()
+void MachineTask::ask_drain()
 {
     vTaskSuspendAll();
     xEventGroupClearBits(state, k_idle);
@@ -238,7 +239,6 @@ bool MachineTask::post_drain()
     xTaskResumeAll();
 
     xTaskNotifyGiveIndexed(handle, k_notify_index);
-    return wait_idle();
 }
 
 void MachineTask::drop_all()

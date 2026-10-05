@@ -128,6 +128,79 @@ static std::string run_job(const char *lib, const char *job, Machine &m,
     return out + "|TIMEOUT";
 }
 
+// a machine that still moves: each read of its state is refused once, until the runner waits
+struct Moving : Machine {
+    mutable bool busy = true, lagging = false;
+    bool every = false;   // busy again after each read that went through
+    mutable int refused = 0;
+    bool refuse() const {
+        if (!busy) {
+            busy = every;
+            return false;
+        }
+        busy = false;
+        lagging = true;
+        refused++;
+        return true;
+    }
+    bool get_named(const char *name, float &out) const override {
+        if (name[0] == '_' && refuse())
+            return false;
+
+        return Machine::get_named(name, out);
+    }
+    bool get(int n, float &out) const override {
+        if (n >= 5021 && refuse())
+            return false;
+
+        return Machine::get(n, out);
+    }
+    bool behind() const override { return lagging; }
+};
+
+// as the program does: a WAIT steps the same line again, a line the dispatcher could not read goes again
+static std::string run_moving(const char *text, Moving &m, int &waits) {
+    script::Source src;
+    add(src, "run", text);
+    script::Library prog;
+    std::string err;
+    if (!prog.load(src, err)) return "LOAD: " + err;
+    script::Runner r(prog, m);
+    if (!r.call("t", nullptr, 0, err))
+        return "START: " + err;
+
+    std::string out, line;
+    bool waited = false;
+    for (int i = 0; i < 100000; i++) {
+        m.busy = !waited;   // after a wait the machine has caught up, else the step before queued more
+        m.lagging = false;
+        script::Runner::Result res = r.step(line, err);
+        waited = res == script::Runner::WAIT;
+        if (waited) {
+            waits++;
+            continue;
+        }
+        if (res == script::Runner::DONE || res == script::Runner::RETURNED)
+            return out;
+
+        if (res == script::Runner::ERROR)
+            return out + "|ERROR: " + located(r, err);
+
+        std::string text = line;
+        while (res == script::Runner::LINE && !evaluate(r, line, err)) {
+            if (!m.behind())
+                return out + "|ERROR: " + err;
+
+            m.lagging = false;
+            waits++;
+            line = text;
+        }
+        if (!out.empty()) out += '|';
+        out += res == script::Runner::MESSAGE ? "[" + line + "]" : line;
+    }
+    return out + "|TIMEOUT";
+}
+
 static std::string load_error(const char *text) {
     script::Source src;
     add(src, "load", text);
@@ -347,6 +420,50 @@ int main() {
         // a pause can come in here
         CHECK(r.step(line, err) == script::Runner::RETURNED && r.at_main());
         CHECK(r.step(line, err) == script::Runner::LINE && line == "G1");
+    }
+    {
+        // a read of machine state while the machine moves: the line waits and runs once, as late as it must
+        const char *t = "o<t> sub\n"
+                        "  #<a> = [#<_tlo> + 1]\n"
+                        "  (DEBUG, tlo #<_tlo>)\n"
+                        "  o1 if [#<_tlo> GT 4]\n"
+                        "    G0 X#<a> Y#5021\n"
+                        "  o1 endif\n"
+                        "  #<n> = 0\n"
+                        "  o2 while [#<n> LT [#<_tlo> - 2]]\n"
+                        "    #<n> = [#<n> + 1]\n"
+                        "  o2 endwhile\n"
+                        "  o3 repeat [#<_tlo>]\n"
+                        "    G1 Z#<n>\n"
+                        "  o3 endrepeat\n"
+                        "  o<u> call [#<_tlo>]\n"
+                        "o<t> endsub\n"
+                        "o<u> sub\n"
+                        "  G2 X#1\n"
+                        "o<u> endsub\n";
+        Moving lag;
+        lag.every = true;
+        lag.v[5021] = 12.5f;
+        lag.named["_tlo"] = 5;
+        int waits = 0;
+        CHECK(run_moving(t, lag, waits) == "[tlo 5]|G0 X6 Y12.5|G1 Z3|G1 Z3|G1 Z3|G1 Z3|G1 Z3|G2 X5");
+
+        CHECK(waits == 10 && lag.refused == 10);   // each read of machine state waited once
+
+        // a step that waits does not count as one without progress
+        const char *spin = "o<t> sub\n"
+                           "  #<n> = 0\n"
+                           "  o1 while [#<n> LT 3000]\n"
+                           "    #<n> = [#<n> + #<_tlo> - 4]\n"
+                           "  o1 endwhile\n"
+                           "  G0 X#<n>\n"
+                           "o<t> endsub\n";
+        Moving lag2;
+        lag2.every = true;
+        lag2.named["_tlo"] = 5;
+        waits = 0;
+        CHECK(run_moving(spin, lag2, waits) == "G0 X3000");
+        CHECK(waits == 3000);
     }
     printf(failures ? "%d failures\n" : "all passed\n", failures);
     return failures != 0;

@@ -22,12 +22,6 @@ static void machine_position(float *mpos)
     THEROBOT.get_real_machine_position(mpos);
 }
 
-static bool settle()
-{
-    if(machine_task.on_task()) return THECONVEYOR.wait_for_idle();
-    return machine_task.post_drain();
-}
-
 static bool machine_state(int n)
 {
     return n == 2000 || n == 3026 || n == 3027 || (n >= 5021 && n <= 5044);
@@ -44,7 +38,7 @@ bool Parameters::get(int n, float &v) const
         return !std::isnan(v); // blank EEPROM reads as NaN
     }
 
-    if (machine_state(n) && !settle()) return false;
+    if (machine_state(n) && !caught_up()) return false;
     float mpos[3];
     switch (n) {
         case 2000: v = persist.tool_length(); return true;
@@ -162,9 +156,24 @@ bool Parameters::get_named(const char *name, float &v) const
     void *context;
     const Named *p = find(name, context);
     if (p == nullptr) return false;
-    if (p->machine && !settle()) return false;
+    if (p->machine && !caught_up()) return false;
     v = p->get(context);
     return true;
+}
+
+bool Parameters::caught_up() const
+{
+    if(machine_task.on_task())
+        return THECONVEYOR.wait_for_idle();
+
+    if(machine_task.idle())
+        return true;
+
+    if(!machine_task.is_halted()) {
+        machine_task.ask_drain();
+        behind_ = true;
+    }
+    return false;
 }
 
 bool Parameters::set_named(const char *name, float v, std::string &err)

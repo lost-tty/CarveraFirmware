@@ -704,6 +704,18 @@ bool Runner::set_local(const char *name, float v)
     return !frames.empty() && name[0] != '_' && store.set_named(name, v, ignored);
 }
 
+// the line stays where it is, to be read again
+Runner::Result Runner::refused(std::string &err, const std::string &msg, bool counted)
+{
+    if (!machine.behind())
+        return fail(err, msg);
+
+    if (counted)
+        silent_steps--;
+
+    return WAIT;
+}
+
 Runner::Result Runner::fail(std::string &err, const std::string &msg)
 {
     last_place = frames.empty() ? Place{0, 0} : Place{frames.back().at, frames.back().line};
@@ -968,7 +980,9 @@ Runner::Result Runner::step(std::string &out, std::string &err)
         std::string e;
         bool msg = text.size() > 5 && text[0] == '(' && (strncasecmp(text.c_str() + 1, "MSG,", 4) == 0 || strncasecmp(text.c_str() + 1, "DEBUG,", 6) == 0 || strncasecmp(text.c_str() + 1, "PRINT,", 6) == 0);
         if (msg) {
-            if (!message(text, out, e)) return fail(err, e);
+            if (!message(text, out, e))
+                return refused(err, e, false);
+
             took(f, at, next);
             silent_steps = 0;
             return MESSAGE;
@@ -984,13 +998,13 @@ Runner::Result Runner::step(std::string &out, std::string &err)
         if (ctl) {
             size_t depth = frames.size();
             if (!control(Mark{at, f.line, next}, text, e))
-                return fail(err, e);
+                return refused(err, e, true);
 
             if (frames.size() < depth && at_main())
                 return RETURNED;
         } else if (text[0] == '#') {
             if (!gcode::assign(text.c_str(), store, e))
-                return fail(err, e);
+                return refused(err, e, true);
 
             advance(f, next);
         } else {

@@ -54,6 +54,8 @@ public:
     virtual bool get_named(const char *name, float &v) const { (void)name; (void)v; return false; } // #<name>, scripts only
     virtual bool set_named(const char *name, float v, std::string &err) { (void)name; (void)v; (void)err; return false; }
     virtual bool has_named(const char *name) const { float v; return get_named(name, v); }
+    // a read was refused because the machine has not caught up yet
+    virtual bool behind() const { return false; }
 };
 
 inline void skip_space(const char *&p) { while (*p == ' ' || *p == '\t') p++; }

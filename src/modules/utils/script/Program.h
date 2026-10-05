@@ -47,6 +47,7 @@ public:
     unsigned heads(Head *out);   // the job's first, then each sub the machine is in
     enum Outcome { DONE, STOPPED, HALTED };
     void refused(uint32_t mark);
+    void park(const SerialMessage &msg);   // the line waits for the machine, then goes again
     bool yields() const { return !in_sub(); }
     bool takes_console() const { return !playing() || paused; }
     bool busy() const { return ending || runner->running(); }

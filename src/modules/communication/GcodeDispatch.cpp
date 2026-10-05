@@ -190,6 +190,14 @@ void GcodeDispatch::service()
     if(machine_task.full())
         return;
 
+    // nothing overtakes a line that waits for the machine
+    if(params.behind()) {
+        if(!machine_task.idle())
+            return;
+
+        params.clear_behind();
+    }
+
     if(rest.from != 0 && !program.in_sub()) {
         Rest r{};
         std::swap(r, rest);
@@ -202,12 +210,20 @@ void GcodeDispatch::service()
     if(!buffered.empty() && program.yields()) {
         Buffered b= buffered.front();
         buffered.pop_front();
-        run_line(SerialMessage{b.stream, b.text, 0, nullptr});
+        if(!run_line(SerialMessage{b.stream, b.text, 0, nullptr}) && params.behind())
+            buffered.push_front(b);
+
         return;
     }
     SerialMessage msg{&THEKERNEL->streams, "", 0, nullptr};
-    if(program.step(msg) && !run_line(msg))
+    if(!program.step(msg) || run_line(msg))
+        return;
+
+    if(params.behind()) {
+        program.park(msg);
+    } else {
         program.refused(msg.mark);
+    }
 }
 
 bool GcodeDispatch::buffer(const std::string &line, StreamOutput *stream, std::string &err)
@@ -239,10 +255,12 @@ void GcodeDispatch::report_settings(Gcode *)
     Settings::report_all();
 }
 
-// an error goes to every console
+// an error goes to every console; a line that waits is none
 bool GcodeDispatch::fail(const char *msg)
 {
-    printk("error:%s\n", msg);
+    if(!params.behind())
+        printk("error:%s\n", msg);
+
     return false;
 }
 
@@ -356,6 +374,7 @@ bool GcodeDispatch::run_line(const SerialMessage &msg)
 void GcodeDispatch::program_end()
 {
     rest= Rest{};
+    params.clear_behind();
     modal_motion= 0;
     modal_cycle= 0;
     cycle_initial= 0;

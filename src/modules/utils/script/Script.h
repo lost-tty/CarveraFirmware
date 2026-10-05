@@ -107,7 +107,7 @@ public:
     bool set_local(const char *name, float v); // a #<name> for the sub just started, e.g. a G-code block's words
     // MESSAGE: a (MSG,..) (DEBUG,..) or (PRINT,..) comment, text in out; RETURNED: a sub returned
     // to the bottom frame, before its next line
-    enum Result { LINE, MESSAGE, RETURNED, DONE, ERROR };
+    enum Result { LINE, MESSAGE, RETURNED, DONE, ERROR, WAIT };   // WAIT: the same line again later
     Result step(std::string &out, std::string &err);
     struct Place {
         uint32_t offset, line;
@@ -174,6 +174,7 @@ private:
     };
 
     Result fail(std::string &err, const std::string &msg);
+    Result refused(std::string &err, const std::string &msg, bool counted);
     void reset() { stop(); silent_steps = 0; abort_reason = 0; }
     bool control(const Mark &here, const std::string &text, std::string &err);
     bool find(const Mark &from, const char *label, size_t length, unsigned kinds, Mark &out,

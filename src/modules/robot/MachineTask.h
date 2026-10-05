@@ -80,7 +80,7 @@ public:
     // only this task may wait on a block
     bool post_stop();
 
-    bool post_drain();
+    void ask_drain();   // idle() tells when it is done
     bool idle() const { return (xEventGroupGetBits(state) & k_idle) != 0; }
     bool full() const { return uxQueueMessagesWaiting(free_slots) == 0; }
     bool work_pending() const { return uxQueueMessagesWaiting(full_slots) != 0; }

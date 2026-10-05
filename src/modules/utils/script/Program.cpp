@@ -81,7 +81,8 @@ bool Program::load_job(const std::string &path, std::string &err)
 bool Program::can_call(std::string &err) const
 {
     if(holding()) {
-        err= "paused before a line, step or resume first";
+        err= gcode_dispatch.parameters().behind() ? "a line waits for the machine"
+                                                    : "paused before a line, step or resume first";
         return false;
     }
     if(!in_sub())
@@ -235,6 +236,11 @@ void Program::note_calls()
     }
 }
 
+void Program::park(const SerialMessage &msg)
+{
+    stepper.held= msg;
+}
+
 void Program::refused(uint32_t at)
 {
     // a halt inside stops everything, so nothing is left to stop here
@@ -310,6 +316,8 @@ bool Program::advance(SerialMessage &msg)
             }
             return false;
         }
+        case script::Runner::WAIT:
+            return false;
         case script::Runner::ERROR: {
             std::string where= file_line(source.segment_of(runner->last().offset),
                                          runner->last().line) + ": " + err;

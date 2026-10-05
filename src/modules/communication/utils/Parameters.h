@@ -24,11 +24,15 @@ public:
     bool get_named(const char *name, float &v) const override;
     bool has_named(const char *name) const override;
     bool set_named(const char *name, float v, std::string &err) override;  // only _motion_mode
+    bool behind() const override { return behind_; }
+    void clear_behind() { behind_ = false; }
     static void list_named(StreamOutput *stream);
     static void init();
 
 private:
     static const Named *find(const char *name, void *&context);
+    bool caught_up() const;
     static Table *tables;
     float local[20] = {};
+    mutable bool behind_ = false;
 };
