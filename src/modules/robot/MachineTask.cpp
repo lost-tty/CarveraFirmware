@@ -512,7 +512,7 @@ void MachineTask::loop()
         else xEventGroupClearBits(state, k_held);
         bool changed= (xEventGroupGetBits(state) ^ was) & (k_idle | k_held);
         xTaskResumeAll();
-        if(changed)
+        if(changed || tracing || program.waits_for_blocks())
             wake_main();
 
         tick();

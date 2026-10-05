@@ -33,6 +33,7 @@ public:
     bool remap(const char *sub, const gcode::Words &words, std::string &err);
 
     enum Next : uint8_t { NOTHING, LINE, MORE };
+    bool waits_for_blocks() const { return stopping || stepper.fencing; }
     Next step(SerialMessage &msg);
     unsigned played_line();          // the job line the machine has reached
     std::string place(uint32_t mark) const;   // "file.ngc:12", empty for none
