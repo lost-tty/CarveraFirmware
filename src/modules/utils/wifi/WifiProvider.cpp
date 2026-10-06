@@ -54,9 +54,12 @@ CONFIG_GROUPS(wifi_provider_config_groups,
     CFG_GROUP("wifi", wifi_config_keys, WifiConfig, wifi_config_changed));
 
 // status: the module's status register in the high byte, the error code in the low byte
-static void module_error(const char* what, u16 status)
+static void module_error(const char* what, u16 status, StreamOutput* to = nullptr)
 {
-    printk("error:wifi %s failed, status 0x%04x\n", what, status);
+    if (to)
+        to->printf("error:wifi %s failed, status 0x%04x\r\n", what, status);
+    else
+        printk("error:wifi %s failed, status 0x%04x\n", what, status);
 }
 
 // Ports take effect on the next connection setup, the name on the next broadcast.
@@ -110,6 +113,9 @@ void WifiProvider::on_module_loaded()
 
     // Add this stream to the kernel's stream pool for broadcasting
     THEKERNEL->streams.append_stream(this);
+
+    SimpleShell::add_command(shell_slot, "wifi", &WifiProvider::shell, this,
+                             "wifi webserver|tcp - the module's web page, its TCP window");
 
     // Register for events
     ADD_MCODE(m482, 482, IMMEDIATE, WifiProvider::query_sta_param);
@@ -374,6 +380,82 @@ void WifiProvider::query_sta_param(Gcode *gcode)
 void WifiProvider::query_ap_param(Gcode *gcode)
 {
     query_param(483, ap_params, false, gcode->subcode());
+}
+
+const SimpleShell::Sub<WifiProvider> WifiProvider::SUBS[] = {
+    {"webserver", &WifiProvider::sub_webserver, "on [port] | off - the module's own web server"},
+    {"tcp", &WifiProvider::sub_tcp, "- the console server's TCP window"},
+    {nullptr, nullptr, nullptr},
+};
+
+void WifiProvider::shell(void* self, const char* cmd, std::string args, StreamOutput* stream)
+{
+    SimpleShell::dispatch(static_cast<WifiProvider*>(self), SUBS, cmd, args, stream);
+}
+
+// the window can only be set at boot: a connection keeps the window its server had when it
+// connected
+void WifiProvider::sub_tcp(std::string, StreamOutput* stream)
+{
+    u16 status = 0;
+    u8 window = 0;
+    u8 ok = locked([&] {
+        return M8266WIFI_SPI_Query_Tcp_Window_num(tcp_link_no, &window, &status);
+    });
+    if (!ok) {
+        module_error("TCP window query", status, stream);
+        return;
+    }
+    stream->printf("wifi tcp window %u segments, %u asked for at boot\r\n", window,
+                   WIFI_TCP_WINDOW);
+}
+
+// the module's built-in web page for the WLAN setup, not the firmware's web server; "on"
+// without a port uses the port saved on the module, and nothing is saved there
+void WifiProvider::sub_webserver(std::string args, StreamOutput* stream)
+{
+    std::string what = shift_parameter(args);
+    bool on = what == "on";
+    if (!on && what != "off") {
+        stream->printf("usage: wifi webserver on [port] | off\r\n");
+        return;
+    }
+
+    unsigned long want = 0;
+    if (on && !args.empty()) {
+        char* end;
+        want = strtoul(args.c_str(), &end, 10);
+        if (*end != '\0' || want < 1 || want > 65535) {
+            stream->printf("error:port must be 1 to 65535\r\n");
+            return;
+        }
+    }
+
+    u8 boot = 0, running = 0;
+    u16 saved_port = 0, port = 0, status = 0;
+    u8 ok = locked([&] {
+        return M8266WIFI_SPI_Query_WebServer(&boot, &running, &saved_port, &port, &status);
+    });
+    if (!ok) {
+        module_error("web server query", status, stream);
+        return;
+    }
+
+    if (want == 0)
+        want = saved_port;
+    ok = locked([&] {
+        return M8266WIFI_SPI_Set_WebServer(on, on ? want : port, 0, &status)
+               && M8266WIFI_SPI_Query_WebServer(&boot, &running, &saved_port, &port, &status);
+    });
+    if (!ok) {
+        module_error("web server", status, stream);
+        return;
+    }
+
+    if (running)
+        stream->printf("wifi webserver on, port %u\r\n", port);
+    else
+        stream->printf("wifi webserver off\r\n");
 }
 
 void WifiProvider::report_status(Gcode *gcode)

@@ -19,6 +19,7 @@ using namespace std;
 #include "SoftTimer.h"
 #include "StreamOutput.h"
 #include "libs/McodeRegistry.h"
+#include "SimpleShell.h"
 
 #include "M8266WIFIDrv.h"
 #include "libs/RingBuffer.h"
@@ -90,6 +91,13 @@ private:
     void report_status(Gcode *);
 
     McodeRegistry::Mcode m482, m483, m489;
+
+    static void shell(void* self, const char* cmd, std::string args, StreamOutput* stream);
+    void sub_webserver(std::string args, StreamOutput* stream);
+    void sub_tcp(std::string args, StreamOutput* stream);
+    static const SimpleShell::Sub<WifiProvider> SUBS[];
+    SimpleShell::Registered shell_slot;
+
     void set_wifi_op_mode(u8 op_mode);
 
     void M8266WIFI_Module_Hardware_Reset(void);
