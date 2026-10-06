@@ -41,14 +41,19 @@ public:
         StreamOutput::unlock_broadcast();
     }
 
+    // under the broadcast lock: other tasks may be broadcasting over the set
     void append_stream(StreamOutput* stream)
     {
+        StreamOutput::lock_broadcast();
         this->streams.insert(stream);
+        StreamOutput::unlock_broadcast();
     }
 
     void remove_stream(StreamOutput* stream)
     {
+        StreamOutput::lock_broadcast();
         this->streams.erase(stream);
+        StreamOutput::unlock_broadcast();
     }
 
 private:
