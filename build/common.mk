@@ -295,7 +295,7 @@ $(OUTDIR)/$(PROJECT).disasm: $(OUTDIR)/$(PROJECT).elf
 $(OUTDIR)/$(PROJECT).elf: $(LSCRIPT) $(OBJECTS)
 	@echo Linking $@
 	$(Q) $(MKDIR) $(call convert-slash,$(dir $@)) $(QUIET)
-	$(Q) $(LD) $(LDFLAGS) $(OBJECTS) ../build/M8266WIFIDrv_LPC17xx.a $(LIBS) -o $@
+	$(Q) $(LD) $(LDFLAGS) $(OBJECTS) $(LIBS) -o $@
 
 size: $(OUTDIR)/$(PROJECT).elf
 	$(Q) $(SIZE) $<
