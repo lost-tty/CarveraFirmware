@@ -59,6 +59,7 @@ public:
 
     void service_transfer() { transfer.service(); }
     static void cancel_transfer(StreamOutput* s);
+    static void transfer_frame(StreamOutput* s, uint8_t type, const uint8_t* p, uint16_t len);
     bool parse_command(const char *cmd, string args, StreamOutput *stream);
     void print_mem(StreamOutput *stream) { mem_command("", stream); }
     void print_state(StreamOutput *stream);

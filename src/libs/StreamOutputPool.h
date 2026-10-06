@@ -21,7 +21,6 @@ public:
         StreamOutput::lock_broadcast();
         for(std::set<StreamOutput*>::iterator i = this->streams.begin(); i != this->streams.end(); i++)
         {
-            if (!(*i)->accept_event()) continue; // text would corrupt the transfer
             int k = (*i)->puts(s, size);
             if (k > r)
                 r = k;
@@ -35,13 +34,12 @@ public:
         StreamOutput::lock_broadcast();
         for(std::set<StreamOutput*>::iterator i = this->streams.begin(); i != this->streams.end(); i++)
         {
-            if (!(*i)->accept_event()) continue; // text would corrupt the transfer
             (*i)->send(type, payload, len);
         }
         StreamOutput::unlock_broadcast();
     }
 
-    // under the broadcast lock: other tasks may be broadcasting over the set
+    // under the broadcast lock: a wifi client joins and leaves while other tasks broadcast
     void append_stream(StreamOutput* stream)
     {
         StreamOutput::lock_broadcast();

@@ -47,15 +47,24 @@ void SerialConsole::on_serial_char_received() {
 
 void SerialConsole::service()
 {
-    while (!transferring && rx_raw.size() > 0) {
-        char chunk[32];
-        size_t n = 0;
-        while (n < sizeof(chunk) && rx_raw.size() > 0) rx_raw.pop_front(chunk[n++]);
-        queue((const uint8_t *)chunk, n);
+    // taken where the interrupt put them: by an upload's sink, else decoded
+    while (rx_raw.size() > 0) {
+        int tail = rx_raw.tail, head = rx_raw.head;
+        int n = (head > tail ? head : RX_RAW_BUF) - tail;
+        int taken = n;
+        if (sink != nullptr) {
+            sink->take((const uint8_t *)&rx_raw.buffer[tail], n);
+            answer_sink();
+        } else {
+            taken = feed((const uint8_t *)&rx_raw.buffer[tail], n);
+        }
+
+        rx_raw.tail = (tail + taken) & (RX_RAW_BUF - 1);
+        // a FILE_START stopped it: the rest waits for the upload its line starts
+        if (taken < n)
+            break;
     }
-    while (act_key()) { }
-    string line;
-    if (next_line(line)) SimpleShell::run(line, this);
+    pump();
 }
 
 int SerialConsole::puts(const char* s, int size)
@@ -67,31 +76,31 @@ int SerialConsole::puts(const char* s, int size)
     return n;
 }
 
-int SerialConsole::gets(char** buf, int size)
+void SerialConsole::answer_sink()
 {
-	int n = 0;
-	while (n < (int)sizeof(raw_chunk) && rx_raw.size() > 0) {
-		rx_raw.pop_front(raw_chunk[n++]);
-	}
-	*buf = raw_chunk;
-	return n;
+    uint8_t out[16];
+    size_t n = sink->reply(out, sizeof(out));
+    if (n != 0) {
+        console_lock();
+        puts((const char *)out, n);
+        console_unlock();
+    }
+    sink->settle();
+}
+
+bool SerialConsole::attach_sink(RxSink *s)
+{
+    sink = s;
+    return true;
+}
+
+void SerialConsole::detach_sink()
+{
+    sink = nullptr;
 }
 
 int SerialConsole::putc(int c)
 {
     return this->serial->putc(c);
-}
-
-int SerialConsole::getc()
-{
-    char c = 0;
-    if (rx_raw.size() == 0) return -1;
-    rx_raw.pop_front(c);
-    return (uint8_t)c;
-}
-
-bool SerialConsole::ready()
-{
-    return rx_raw.size() > 0;
 }
 

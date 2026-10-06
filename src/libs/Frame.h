@@ -38,6 +38,19 @@ static const size_t   PAYLOAD_AT = 5;
 
 uint16_t crc16(uint16_t crc, const uint8_t *data, size_t len);
 
+inline uint32_t be32(const uint8_t *p)
+{
+    return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
+}
+
+inline void put_be32(uint8_t *p, uint32_t v)
+{
+    p[0] = v >> 24;
+    p[1] = v >> 16;
+    p[2] = v >> 8;
+    p[3] = v;
+}
+
 // out must hold len + OVERHEAD bytes; returns bytes written
 size_t encode(uint8_t type, const void *payload, size_t len, uint8_t *out);
 

@@ -1235,13 +1235,14 @@ void SimpleShell::md5sum_command( string parameters, StreamOutput *stream )
 		return;
 	}
 	MD5 md5;
-	uint8_t buf[64];
-	do {
-		size_t n= fread(buf, 1, sizeof buf, lp);
-		if(n > 0) md5.update(buf, n);
-	} while(!feof(lp));
+	int n;
+	while ((n = transfer.hash_piece(lp, md5, this)) > 0) {}
 
-	stream->printf("%s %s\n", md5.finalize().hexdigest().c_str(), filename.c_str());
+	if (n < 0)
+		stream->printf("error: could not read %s\n", filename.c_str());
+	else
+		stream->printf("%s %s\n", md5.finalize().hexdigest().c_str(), filename.c_str());
+
 	fclose(lp);
 
 }
@@ -1704,20 +1705,26 @@ void SimpleShell::config_default_command( string parameters, StreamOutput *strea
 void SimpleShell::upload_command(std::string parameters, StreamOutput* stream) {
     std::string filename = absolute_from_relative(shift_parameter(parameters), stream);
     // a .lz upload replaces the file without the suffix
-    if(being_played(filename.substr(0, filename.find(FileTransfer::LZ_SUFFIX)), stream))
+    if(being_played(FileTransfer::without_lz(filename), stream))
         return;
 
-    transfer.upload(filename, stream);
+    transfer.begin(filename, stream, true);
 }
 
 void SimpleShell::download_command( string parameters, StreamOutput *stream )
 {
     std::string filename = absolute_from_relative(shift_parameter(parameters), stream);
 
-    transfer.download(filename, stream);
+    transfer.begin(filename, stream, false);
 }
 
 void SimpleShell::cancel_transfer(StreamOutput* stream)
 {
     simpleshell.transfer.cancel_if(stream);
+}
+
+void SimpleShell::transfer_frame(StreamOutput* stream, uint8_t type, const uint8_t* p,
+                                 uint16_t len)
+{
+    simpleshell.transfer.take_frame(stream, type, p, len);
 }

@@ -1,83 +1,69 @@
 #include "Session.h"
 
-#include "modules/utils/wifi/WifiProvider.h"
+#include "modules/utils/wifi/WifiLink.h"
 #include "SimpleShell.h"
 #include "ConsoleWatch.h"
+#include "libs/Kernel.h"
 
 #include <string>
 
-void Session::bind(WifiProvider* provider, uint8_t link, const uint8_t ip[4], uint16_t port)
+void Session::bind(WifiLink* owner, uint8_t link, const uint8_t ip[4], uint16_t port)
 {
     SimpleShell::cancel_transfer(this);
     console_watch.remove(this);
-    provider->drop_held(this);
-    owner = provider;
+    // what still waits went to the slot's last client
+    owner->forget(this);
+    this->owner = owner;
     this->link = link;
     who = Endpoint(ip, port);
-    set_transferring(false);
+    rx_bytes = tx_bytes = 0;
+    // the client gets broadcasts as a stream of the kernel's pool while it is connected
+    THEKERNEL->streams.append_stream(this);
     drop_queued();
     set_cwd("/");
     fresh = true;
-    stall = 0;
 }
 
 void Session::release()
 {
+    THEKERNEL->streams.remove_stream(this);
     SimpleShell::cancel_transfer(this);
     console_watch.remove(this);
-    if (owner) owner->drop_held(this);
-    set_transferring(false);
     drop_queued();
+    if (owner)
+        owner->forget(this);
+
     who = Endpoint();
     owner = nullptr;
     fresh = false;
-    stall = 0;
-}
-
-bool Session::is(const uint8_t ip[4], uint16_t port) const
-{
-    return who == Endpoint(ip, port);
-}
-
-void Session::pump()
-{
-    while (act_key()) { }
-    std::string line;
-    if (next_line(line)) SimpleShell::run(line, this);
-    if (owner) owner->flush_tx();
 }
 
 int Session::puts(const char* s, int size)
 {
-    if (!owner || !live()) return 0;
+    if (!owner || !live())
+        return 0;
+
     size_t n = size == 0 ? strlen(s) : size;
-    return owner->stage(this, (const uint8_t *)s, n);
+    return owner->write(this, (const uint8_t *)s, n);
 }
 
-void Session::set_transferring(bool f)
+void Session::puts_source(TxSource* s)
 {
-    if (owner) {
-        if (f) owner->flush_tx(false);
-        else owner->drop_held(this);
-    }
-    FrameConsole::set_transferring(f);
+    if (!owner || !live())
+        return;
+
+    // a frame that cannot go now is asked for again by the client
+    flush_gathered();
+    owner->write_source(this, s);
 }
 
-bool Session::ready()
+bool Session::attach_sink(RxSink* s)
 {
-    if (!owner) return false;
-    bool more = true;
-    while (more) {
-        more = owner->read_chunk(false);
-        if (owner->held_for(this)) return true;
-    }
-    return false;
+    return owner && owner->attach(this, s);
 }
 
-int Session::gets(char** buf, int size)
+void Session::detach_sink()
 {
-    if (!owner) return 0;
-    int n = 0;
-    if (!owner->take_held(this, buf, &n)) return 0;
-    return n;
+    if (owner)
+        owner->detach(this);
 }

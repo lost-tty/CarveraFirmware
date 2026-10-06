@@ -2,40 +2,32 @@
 #define SESSION_H
 
 #include "FrameConsole.h"
-#include "modules/utils/wifi/Endpoint.h"
+#include "modules/utils/wifi/WifiPeer.h"
 
 #include <string>
 
-class WifiProvider;
+class WifiLink;
 
-class Session : public FrameConsole {
+// A wifi console client: a frame console whose output and transfer input go through the link.
+class Session : public FrameConsole, public WifiPeer {
 public:
     Session() {}
 
-    void bind(WifiProvider* provider, uint8_t link, const uint8_t ip[4], uint16_t port);
+    void bind(WifiLink* owner, uint8_t link, const uint8_t ip[4], uint16_t port);
     void release();
 
-    Endpoint who;
-    uint8_t link = 0;
-    bool live() const { return who.port != 0; }
-    bool is(const uint8_t ip[4], uint16_t port) const;
-
-    bool fresh = false;
-    static const uint8_t STALL_TICKS = 5;
-    uint8_t stall = 0;
+    bool fresh = false;                 // it sent something since the client list last came
 
     int puts(const char* s, int size = 0) override;
-    int gets(char** buf, int size = 0) override;
-    bool ready() override;
-    void set_transferring(bool f) override;
+    void puts_source(TxSource* s) override;
+    bool attach_sink(RxSink* s) override;
+    void detach_sink() override;
 
     const std::string& cwd() const override { return path; }
     void set_cwd(const std::string& p) override { path = p; }
 
-    void pump();
-
 private:
-    WifiProvider* owner = nullptr;
+    WifiLink* owner = nullptr;
     std::string path{"/"};
 };
 

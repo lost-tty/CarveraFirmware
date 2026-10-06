@@ -14,6 +14,26 @@
 #include <stdio.h>
 #include <string>
 
+// A transfer's input: a client's bytes as they arrive, possibly in another task (the wifi
+// task feeds them while it receives them).
+class RxSink {
+    public:
+        virtual void take(const uint8_t *p, size_t n) = 0;
+        // After each feed, in the same task: a short reply for the client (its length, 0 for
+        // none), sent before settle() does what may take long.
+        virtual size_t reply(uint8_t *out, size_t room) { return 0; }
+        virtual void settle() {}
+};
+
+// Read as it goes out, maybe in another task, and left alone while busy. A piece may be asked
+// for again, but never out of order.
+class TxSource {
+    public:
+        virtual size_t size() const = 0;
+        virtual void read(size_t at, uint8_t *p, size_t n) = 0;
+        volatile bool busy = false;
+};
+
 // This is a base class for all StreamOutput objects.
 
 class StreamOutput {
@@ -24,20 +44,20 @@ class StreamOutput {
         virtual int printf(const char *format, ...) __attribute__ ((format(printf, 2, 3)));
         virtual int vprintf(const char*, va_list);
         virtual void send(uint8_t type, const void *payload, size_t len);
-        virtual int gets(char** buf, int size = 0) { return 0; }
         virtual int puts(const char* buf, int size = 0) = 0;
-        virtual bool ready() { return true; };
+
+        virtual void puts_source(TxSource *s);
+
+        // From attach_sink on, what the client sends goes to the sink, what the stream still
+        // held for it first; after detach_sink no more reaches it. false: this stream cannot.
+        virtual bool attach_sink(RxSink *s) { return false; }
+        virtual void detach_sink() {}
 
         static void console_lock();
         static void console_unlock();
 
         static void lock_broadcast();
         static void unlock_broadcast();
-
-        // set for the duration of a file transfer, which reads the stream's bytes itself
-        virtual void set_transferring(bool) {}
-        virtual bool is_transferring() const { return false; }
-        virtual bool accept_event() const { return !is_transferring(); }
 
         // Collects INFO text sent to s into as few frames as possible. They are sent when the
         // Gather is destroyed, a frame is full, or any other output is sent.
@@ -52,6 +72,9 @@ class StreamOutput {
         };
         // call before writing with puts(): the text gathered so far goes out first
         static void flush_gathered();
+
+        // a client frame a transfer found among its own, for the console behind the stream
+        virtual void console_frame(uint8_t type, const uint8_t *p, uint16_t len) {}
         virtual const std::string &cwd() const;
         virtual void set_cwd(const std::string &path);
 };

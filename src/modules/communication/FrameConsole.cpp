@@ -2,27 +2,39 @@
 
 #include "libs/Kernel.h"
 #include "libs/Logging.h"
+#include "libs/MainWake.h"
 #include "SimpleShell.h"
 
 #include <string>
 
-void FrameConsole::run_bytes(const uint8_t *p, uint16_t len, bool dispatch)
+uint16_t FrameConsole::feed(const uint8_t *p, uint16_t len)
 {
-    if (transferring) return;   // the bytes on the wire are a transfer's payload
     for (uint16_t i = 0; i < len; i++) {
         if (!decoder.feed(p[i])) continue;
-        if (dispatch) on_frame(); else queue_frame();
-        if (transferring) return;   // a frame may have started a transfer: the rest is payload
+        on_frame();
+        // A FILE_START starts an upload once its line runs, and the client sends the first of
+        // its frames with it (the MD5 frame): the rest waits for the upload to take it.
+        if (decoder.type() == Frame::FILE_START)
+            return i + 1;
     }
+    return len;
 }
 
 void FrameConsole::on_frame()
 {
-    const uint8_t *p = decoder.payload();
-    uint16_t len = decoder.length();
+    console_frame(decoder.type(), decoder.payload(), decoder.length());
+}
 
-    if (decoder.type() != Frame::CTRL_SINGLE) {
-        queue_frame();
+// A frame of this client's, from the decoder or found by an upload in its own buffer: a
+// transfer's to the transfer, a key acted on, a line queued.
+void FrameConsole::console_frame(uint8_t type, const uint8_t *p, uint16_t len)
+{
+    if (type >= Frame::FILE_MD5 && type <= Frame::FILE_RETRY) {
+        SimpleShell::transfer_frame(this, type, p, len);
+        return;
+    }
+    if (type != Frame::CTRL_SINGLE) {
+        queue_frame(type, p, len);
         return;
     }
     if (len < 1) return;
@@ -47,26 +59,19 @@ void FrameConsole::handle_key(uint8_t c)
     }
 }
 
-bool FrameConsole::act_key()
+void FrameConsole::pump()
 {
-    uint8_t c;
-    if (keys.size() == 0) return false;
-    keys.pop_front(c);
-    handle_key(c);
-    return true;
+    std::string line;
+    if (!next_line(line))
+        return;
+
+    SimpleShell::run(line, this);
+    wake_main();
 }
 
-void FrameConsole::queue_frame()
+void FrameConsole::queue_frame(uint8_t type, const uint8_t *p, uint16_t len)
 {
-    const uint8_t *p = decoder.payload();
-    uint16_t len = decoder.length();
-
-    switch (decoder.type()) {
-        case Frame::CTRL_SINGLE:
-            if (len < 1 || keys.size() >= keys.capacity()) return;
-            keys.push_back(p[0]);
-            break;
-
+    switch (type) {
         case Frame::CTRL_MULTI:
         case Frame::FILE_START: {
             if ((int)len + 1 > buffer.capacity() - buffer.size()) {

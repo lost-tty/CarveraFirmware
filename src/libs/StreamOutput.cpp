@@ -50,6 +50,20 @@ static void send_gathered()
     gather_to->puts(reinterpret_cast<const char *>(frame_buf), total);
 }
 
+void StreamOutput::puts_source(TxSource *s)
+{
+    uint8_t piece[64];
+    size_t len = s->size();
+    lock_output();
+    send_gathered();
+    for (size_t at = 0; at < len; at += sizeof(piece)) {
+        size_t n = len - at < sizeof(piece) ? len - at : sizeof(piece);
+        s->read(at, piece, n);
+        puts(reinterpret_cast<const char *>(piece), n);
+    }
+    unlock_output();
+}
+
 void StreamOutput::flush_gathered()
 {
     lock_output();

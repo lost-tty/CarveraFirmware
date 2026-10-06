@@ -1,6 +1,6 @@
 #include "ConsoleWatch.h"
 
-#include "WifiProvider.h"
+#include "ConsoleServer.h"
 #include "Player.h"
 #include "libs/Kernel.h"
 #include "libs/Frame.h"

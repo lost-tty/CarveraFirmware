@@ -29,16 +29,17 @@ class SerialConsole : public Module, public FrameConsole {
         void service();
 
         int putc(int c);
-        int getc(void);
         int puts(const char*, int size = 0);
-        int gets(char** buf, int size = 0);
-        bool ready();
+        bool attach_sink(RxSink *s) override;
+        void detach_sink() override;
 
     private:
+        void answer_sink();
+
         mbed::Serial* serial;
         static const int RX_RAW_BUF = 256;       // power of two, RingBuffer requires it
         RingBuffer<char,RX_RAW_BUF> rx_raw;
-        char raw_chunk[32];                      // gets() hands out raw bytes from here
+        RxSink *sink = nullptr;                  // an upload's, fed what arrives
 };
 
 #endif
