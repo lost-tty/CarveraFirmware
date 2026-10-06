@@ -877,8 +877,9 @@ void SimpleShell::prof_command( string parameters, StreamOutput *stream )
     }
     for (uint8_t i = 0; i < Profile::used; i++) {
         const Profile::Slot &s= Profile::slots[i];
-        stream->printf("%-20s calls %6lu  mean %5lu us  worst %5lu us\n", s.name, (unsigned long)s.calls,
-                       (unsigned long)(s.calls ? s.us / s.calls : 0), (unsigned long)s.worst);
+        stream->printf("%-20s calls %6lu  mean %5lu us  worst %5lu us  total %6lu ms\n", s.name,
+                       (unsigned long)s.calls, (unsigned long)(s.calls ? s.us / s.calls : 0),
+                       (unsigned long)s.worst, (unsigned long)(s.us / 1000));
     }
     Profile::reset();
 }
