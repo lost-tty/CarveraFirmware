@@ -299,7 +299,7 @@ void vTaskMainLoop(void *pvParameters) {
         }
 
         THEKERNEL->serve_main();
-        wait_main(1);
+        wait_main(pdMS_TO_TICKS(1000));
     }
 }
 
