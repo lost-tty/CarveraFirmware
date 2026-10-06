@@ -69,7 +69,7 @@ void WirelessProbe::on_module_loaded() {
 
     ADD_MCODE(m470, 470, IMMEDIATE, WirelessProbe::set_address);
     ADD_MCODE(m471, 471, IMMEDIATE, WirelessProbe::pair);
-    ADD_MCODE(m472, 472, IMMEDIATE, WirelessProbe::laser_on);
+    ADD_MCODE(m472, 472, BESIDE_JOB, WirelessProbe::laser_on);
     ADD_MCODE(m881, 881, IMMEDIATE, WirelessProbe::set_channel);
     ADD_MCODE(m882, 882, IMMEDIATE, WirelessProbe::stop_transmission);
 }

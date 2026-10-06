@@ -55,7 +55,7 @@ void ATCHandler::on_module_loaded()
     ADD_MCODE(m490, 490, BARRIER, ATCHandler::clamp_gcode);
     ADD_MCODE(m492, 492, BARRIER, ATCHandler::detect_gcode);
     ADD_MCODE(m493, 493, BARRIER, ATCHandler::tool_gcode);
-    ADD_MCODE(m494, 494, IMMEDIATE, ATCHandler::probe_laser_gcode);
+    ADD_MCODE(m494, 494, BESIDE_JOB, ATCHandler::probe_laser_gcode);
     ADD_MCODE(m497, 497, BARRIER, ATCHandler::state_gcode);
 
     this->on_config_reload(this);
