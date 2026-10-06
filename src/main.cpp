@@ -114,7 +114,8 @@ void vApplicationGetTimerTaskMemory( StaticTask_t **ppxTimerTaskTCBBuffer,
 
 SDFileSystem sd (P0_18, P0_17, P0_15, P0_16, 12000000);
 
-SDFAT mounter ("sd", &sd);
+// in the AHB SRAM, for DMA
+SDFAT mounter __attribute__((section("AHBSRAM"))) ("sd", &sd);
 
 GPIO leds[4] = {
     GPIO(P4_29),

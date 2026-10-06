@@ -20,6 +20,7 @@
 #include "mbed.h"
 #include "gpio.h"
 #include "disk.h"
+#include "SdSpi.h"
 //#include "FATFileSystem.h"
 
 /** SDFileSystem class.
@@ -134,20 +135,6 @@ public:
      */
     void crc(bool enabled);
 
-    /** Get whether or not 16-bit frames are enabled for data read/write operations
-     *
-     * @returns
-     *   'true' if 16-bit frames will be used during data read/write operations,
-     *   'false' if 8-bit frames will be used during data read/write operations.
-     */
-    bool large_frames();
-
-    /** Set whether or not 16-bit frames are enabled for data read/write operations
-     *
-     * @param enabled Whether or not 16-bit frames are enabled for data read/write operations.
-     */
-    void large_frames(bool enabled);
-
     /** Get whether or not write validation is enabled for data write operations
      *
      * @returns
@@ -200,14 +187,13 @@ private:
 
     //Member variables
     Timer m_Timer;
-    mbed::SPI m_Spi;
+    SdSpi m_Spi;
     GPIO m_Cs;
     InterruptIn m_Cd;
     int m_CdAssert;
     const int m_FREQ;
     SDFileSystem::CardType m_CardType;
     bool m_Crc;
-    bool m_LargeFrames;
     bool m_WriteValidation;
     int m_Status;
 

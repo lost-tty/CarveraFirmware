@@ -31,7 +31,6 @@ SDFileSystem::SDFileSystem(PinName mosi, PinName miso, PinName sclk, PinName cs,
     SwitchType cdtype = SWITCH_NONE;
     m_CardType = CARD_NONE;
     m_Crc = false;
-    m_LargeFrames = false;
     m_WriteValidation = true;
     m_Status = STA_NOINIT;
 
@@ -108,18 +107,6 @@ void SDFileSystem::crc(bool enabled)
         commandTransaction(CMD59, 0x00000000);
         m_Crc = false;
     }
-}
-
-bool SDFileSystem::large_frames()
-{
-    //Return whether or not 16-bit frames are enabled
-    return m_LargeFrames;
-}
-
-void SDFileSystem::large_frames(bool enabled)
-{
-    //Set whether or not 16-bit frames are enabled
-    m_LargeFrames = enabled;
 }
 
 bool SDFileSystem::write_validation()
@@ -616,33 +603,13 @@ bool SDFileSystem::readData(char* buffer, int length)
     if (token != 0xFE)
         return false;
 
-    //Check if large frames are enabled or not
-    if (m_LargeFrames) {
-        //Switch to 16-bit frames for better performance
-        m_Spi.format(16, 0);
+    //Read the data into the buffer
+    if (!m_Spi.exchange(nullptr, buffer, length))
+        return false;
 
-        //Read the data block into the buffer
-        unsigned short dataWord;
-        for (int i = 0; i < length; i += 2) {
-            dataWord = m_Spi.write(0xFFFF);
-            buffer[i] = dataWord >> 8;
-            buffer[i + 1] = dataWord;
-        }
-
-        //Read the CRC16 checksum for the data block
-        crc = m_Spi.write(0xFFFF);
-
-        //Switch back to 8-bit frames
-        m_Spi.format(8, 0);
-    } else {
-        //Read the data into the buffer
-        for (int i = 0; i < length; i++)
-            buffer[i] = m_Spi.write(0xFF);
-
-        //Read the CRC16 checksum for the data block
-        crc = (m_Spi.write(0xFF) << 8);
-        crc |= m_Spi.write(0xFF);
-    }
+    //Read the CRC16 checksum for the data block
+    crc = (m_Spi.write(0xFF) << 8);
+    crc |= m_Spi.write(0xFF);
 
     //Return the validity of the CRC16 checksum (if enabled)
     return (!m_Crc || crc == SDCRC::crc16(buffer, length));
@@ -660,29 +627,12 @@ char SDFileSystem::writeData(const char* buffer, char token)
     //Send the start block token
     m_Spi.write(token);
 
-    //Check if large frames are enabled or not
-    if (m_LargeFrames) {
-        //Switch to 16-bit frames for better performance
-        m_Spi.format(16, 0);
+    //Write the data block from the buffer
+    m_Spi.exchange(buffer, nullptr, 512);
 
-        //Write the data block from the buffer
-        for (int i = 0; i < 512; i += 2)
-            m_Spi.write((buffer[i] << 8) | buffer[i + 1]);
-
-        //Send the CRC16 checksum for the data block
-        m_Spi.write(crc);
-
-        //Switch back to 8-bit frames
-        m_Spi.format(8, 0);
-    } else {
-        //Write the data block from the buffer
-        for (int i = 0; i < 512; i++)
-            m_Spi.write(buffer[i]);
-
-        //Send the CRC16 checksum for the data block
-        m_Spi.write(crc >> 8);
-        m_Spi.write(crc);
-    }
+    //Send the CRC16 checksum for the data block
+    m_Spi.write(crc >> 8);
+    m_Spi.write(crc);
 
     //Return the data response token
     return (m_Spi.write(0xFF) & 0x1F);

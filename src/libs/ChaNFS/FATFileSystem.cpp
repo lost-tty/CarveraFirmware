@@ -62,6 +62,8 @@ FATFileSystem::FATFileSystem(const char* n) : FileSystemLike(n) {
             _ffs[i] = this;
             _fsid = i;
             FFSDEBUG("Mounting [%s] on ffs drive [%d]\n", _name, _fsid);
+            // FatFs needs it zeroed, and it may sit where nothing is zeroed at startup
+            memset(&_fs, 0, sizeof(_fs));
             f_mount(i, &_fs);
             return;
         }
