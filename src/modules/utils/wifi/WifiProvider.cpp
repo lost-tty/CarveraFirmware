@@ -746,34 +746,34 @@ void WifiProvider::init_wifi_module(bool reset)
     // Initialize module via SPI
     M8266HostIf_Init();
     if (M8266WIFI_Module_Init_Via_SPI() == 0) {
-        printk("M8266WIFI_Module_Init_Via_SPI, ERROR!\n");
+        printk("error:wifi module init failed\n");
     }
 
     // Set up TCP and UDP connections
     snprintf(address, sizeof(address), "192.168.4.10");
     if (M8266WIFI_SPI_Setup_Connection(2, this->tcp_port, address, 0, tcp_link_no, 3, &status) == 0) {
-        printk("M8266WIFI_SPI_Setup_Connection ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
+        module_error("console server setup", status);
     }
     snprintf(address, sizeof(address), "192.168.4.255");
     if (M8266WIFI_SPI_Setup_Connection(0, this->udp_recv_port, address, 0, udp_link_no, 3, &status) == 0) {
-        printk("M8266WIFI_SPI_Setup_Connection ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
+        module_error("beacon link setup", status);
     }
 
     if (M8266WIFI_SPI_Config_Max_Clients_Allowed_To_A_Tcp_Server(tcp_link_no, MAX_SESSIONS, &status) == 0) {
-        printk("Config_Max_Clients ERROR on link %d, status: %d\n", tcp_link_no, status);
+        module_error("console server max clients", status);
     }
 
     // Set TCP server auto-disconnect timeout
     if (M8266WIFI_SPI_Set_TcpServer_Auto_Discon_Timeout(tcp_link_no, this->tcp_timeout_s, &status) == 0) {
-        printk("M8266WIFI_SPI_Set_TcpServer_Auto_Discon_Timeout ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
+        module_error("console server timeout", status);
     }
 
     // Load current AP IP and Netmask
     if (M8266WIFI_SPI_Query_AP_Param(AP_PARAM_TYPE_IP_ADDR, (u8*)this->ap_address, &param_len, &status) == 0) {
-        printk("Get AP_PARAM_TYPE_IP_ADDR ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
+        module_error("AP address query", status);
     }
     if (M8266WIFI_SPI_Query_AP_Param(AP_PARAM_TYPE_NETMASK_ADDR, (u8*)this->ap_netmask, &param_len, &status) == 0) {
-        printk("Get AP_PARAM_TYPE_NETMASK_ADDR ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
+        module_error("AP netmask query", status);
     }
 
     if (reset) {
@@ -834,28 +834,27 @@ u8 WifiProvider::M8266WIFI_Module_Init_Via_SPI()
 
     // Step 3: Select SPI interface
     if (M8266HostIf_SPI_Select((uint32_t)M8266WIFI_INTERFACE_SPI, spi_clk, &status) == 0) {
-        printk("M8266HostIf_SPI_Select ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
+        module_error("SPI select", status);
         return 0;
     }
 
     // Step 4: Communication test
     u8 byte;
     if (M8266WIFI_SPI_Interface_Communication_OK(&byte) == 0) {
-        printk("Communication test ERROR!\n");
+        printk("error:wifi SPI test failed\n");
         return 0;
     }
 
-	int i = 100000;
-	int j = M8266WIFI_SPI_Interface_Communication_Stress_Test(i);
-	if( (j < i) && (i - j > 5)) 		//  if SPI Communication stress test failed (Chinese: SPI底层通信压力测试失败，表明你的主机板或接线支持不了当前这么高的SPI频率设置)
-	{
-		printk("Wifi Module Stress test ERROR!\n");
-		return 0;
-	}
+    const int tries = 100000;
+    int passed = M8266WIFI_SPI_Interface_Communication_Stress_Test(tries);
+    if (passed < tries && tries - passed > 5) {
+        printk("error:wifi SPI stress test failed\n");
+        return 0;
+    }
 
     // Step 5: Configure module
     if (M8266WIFI_SPI_Set_Tx_Max_Power(68, &status) == 0) {
-        printk("M8266WIFI_SPI_Set_Tx_Max_Power ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
+        module_error("set TX power", status);
         return 0;
     }
 
@@ -877,14 +876,14 @@ uint8_t WifiProvider::initializeTcpServer(uint16_t local_port, uint8_t max_clien
 
     // Setup the connection
     if (M8266WIFI_SPI_Setup_Connection(connection_type, local_port, const_cast<char*>("0.0.0.0"), 0, link_no, timeout, &status) == 0) {
-        printk("Setup_Connection ERROR on link %d, status: %d\n", link_no, status);
+        module_error("TCP server setup", status);
         return 0xFF;
     }
 
     // Configure the maximum number of clients allowed for a TCP server
     if (connection_type == 2) {
         if (M8266WIFI_SPI_Config_Max_Clients_Allowed_To_A_Tcp_Server(link_no, max_clients, &status) == 0) {
-            printk("Config_Max_Clients ERROR on link %d, status: %d\n", link_no, status);
+            module_error("TCP server max clients", status);
             return 0xFF;
         }
     }
@@ -910,7 +909,7 @@ bool WifiProvider::closeTcpConnection(const uint8_t* remote_ip, uint16_t remote_
 
     // Get the list of clients connected to the TCP server
     if (M8266WIFI_SPI_List_Clients_On_A_TCP_Server(link_no, &client_num, RemoteClients, &status) == 0) {
-        printk("Failed to list clients on link %d, status:%d\n", link_no, status);
+        module_error("client list", status);
         return false;
     }
 
@@ -922,7 +921,7 @@ bool WifiProvider::closeTcpConnection(const uint8_t* remote_ip, uint16_t remote_
         if (memcmp(client.remote_ip, remote_ip, 4) == 0 && client.remote_port == remote_port) {
             // Found the matching client, disconnect it
             if (M8266WIFI_SPI_Disconnect_TcpClient(link_no, &client, &status) == 0) {
-                printk("Failed to disconnect client on link %d, status:%d\n", link_no, status);
+                module_error("client disconnect", status);
                 return false;
             }
             return true; // Disconnected successfully
