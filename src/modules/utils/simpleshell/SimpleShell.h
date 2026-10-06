@@ -61,6 +61,7 @@ public:
     static void cancel_transfer(StreamOutput* s);
     bool parse_command(const char *cmd, string args, StreamOutput *stream);
     void print_mem(StreamOutput *stream) { mem_command("", stream); }
+    void print_state(StreamOutput *stream);
     void version_command(string parameters, StreamOutput *stream );
     void motion_command(string parameters, StreamOutput *stream );
     void prof_command(string parameters, StreamOutput *stream );

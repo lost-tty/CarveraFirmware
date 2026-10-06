@@ -33,6 +33,7 @@
 #include "modules/tools/atc/ATCHandler.h"
 #include "modules/utils/wifi/WifiProvider.h"
 #include "modules/communication/usb/UsbHost.h"
+#include "modules/communication/ConsoleWatch.h"
 #include "Persist.h"
 #include "modules/robot/Robot.h"
 #include "StepperMotor.h"
@@ -470,5 +471,6 @@ void Kernel::serve_main()
     serve_io();
     gcode_dispatch.service();
     player.service();
+    console_watch.service();
 }
 

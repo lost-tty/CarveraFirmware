@@ -1130,20 +1130,7 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
 
     } else if (what == "state") {
         // also $G and $I
-        // [G0 G54 G17 G21 G22 G90 G94 G61 M0 M5 M9 T0 F0. S0.]
-        stream->printf("[G%d %s G%d G%d G%d G%d G94 G%d M0 M%c M%c T%d F%1.4f S%1.4f]\n",
-            gcode_dispatch.get_modal_command(),
-            wcs2gcode(THEROBOT.get_current_wcs()).c_str(),
-            THEROBOT.get_plane_code(),
-            THEROBOT.get_units_code(),
-            THEROBOT.get_stroke_code(),
-            THEROBOT.get_distance_code(),
-            THEROBOT.get_path_code(),
-            get_switch_state("spindle") ? '3' : '5',
-            get_switch_state("mist") ? '7' : get_switch_state("flood") ? '8' : '9',
-            persist.tool(),
-            THEROBOT.from_millimeters(THEROBOT.get_feed_rate(gcode_dispatch.get_modal_command())),
-            THEROBOT.get_s_value());
+        print_state(stream);
 
     } else if (what == "status") {
         // also ? on serial and usb
@@ -1161,6 +1148,24 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
     } else {
         stream->printf("error: unknown option %s\n", what.c_str());
     }
+}
+
+// [G0 G54 G17 G21 G22 G90 G94 G61 M0 M5 M9 T0 F0. S0.]
+void SimpleShell::print_state(StreamOutput *stream)
+{
+    stream->printf("[G%d %s G%d G%d G%d G%d G94 G%d M0 M%c M%c T%d F%1.4f S%1.4f]\n",
+        gcode_dispatch.get_modal_command(),
+        wcs2gcode(THEROBOT.get_current_wcs()).c_str(),
+        THEROBOT.get_plane_code(),
+        THEROBOT.get_units_code(),
+        THEROBOT.get_stroke_code(),
+        THEROBOT.get_distance_code(),
+        THEROBOT.get_path_code(),
+        get_switch_state("spindle") ? '3' : '5',
+        get_switch_state("mist") ? '7' : get_switch_state("flood") ? '8' : '9',
+        persist.tool(),
+        THEROBOT.from_millimeters(THEROBOT.get_feed_rate(gcode_dispatch.get_modal_command())),
+        THEROBOT.get_s_value());
 }
 
 // set or get switch state for a named switch

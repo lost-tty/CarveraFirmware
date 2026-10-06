@@ -4,7 +4,7 @@
 # The wheel scrolls the log, and dragging over it with the left button copies those lines; Ctrl-T
 # gives the mouse to the terminal for its own selection, and back.
 # While a file or script runs, its lines around the current one show beside the log when the terminal
-# is wide, above the input when it is tall; "job watch" names them, and each file is downloaded once.
+# is wide, above the input when it is tall; "watch" names them, and each file is downloaded once.
 # The running line is highlighted.
 # Typed and pasted lines queue up and go out one at a time: each waits until the machine has taken
 # the one before, so a paste never overruns its 128-byte line buffer. The prompt stays live meanwhile.
@@ -55,7 +55,7 @@ from upload import frame, Closed, Download, FrameReader, Upload, INFO, CTRL_MULT
 
 CTRL_SINGLE = 0xA1
 STATUS = 0x81
-LOAD_INFO, LOAD_FINISH, LOAD_ERROR, JOB = 0x83, 0x84, 0x85, 0x86
+LOAD_INFO, LOAD_FINISH, LOAD_ERROR, JOB, MODAL = 0x83, 0x84, 0x85, 0x86, 0x87
 LOAD_DONE = 'Load directory finished.'  # the machine's word that a listing ended, not a line of it
 FETCHED = 'Info: Download success:'  # follows each download the pane asked for
 # upload and download are left out: typed, they start a transfer this console does not drive
@@ -78,6 +78,7 @@ DEFAULT_PORT = 2222
 # FrameConsole's line buffer holds 127 bytes: a line, its newline and the "$G\n" behind it must fit
 LINE_MAX = 120
 INFO_TAIL_S = 1.0  # a line cut at a frame's end waits this long for its rest
+KEEPALIVE_S = 5.0  # a watched link still asks now and then, under wifi.tcp_timeout_s
 BEACON_PORT = 3333  # where the machines announce themselves (wifi.udp_send_port)
 POLL_S = 0.5  # status poll, also keeps the machine from dropping an idle connection (wifi.tcp_timeout_s)
 MODAL_S = 2.0  # $G poll for the modal state, which the status frame does not carry
@@ -219,7 +220,9 @@ class Console:
     def reset_session(self):
         self.want_status = False  # show the next status: a typed ? answers the same way as our polls
         self.asks = collections.deque()  # the Ask in flight, at most one
-        self.watching = False  # "job watch on" went out on this link
+        self.watching = False  # "watch on" went out on this link
+        self.pushed = False  # the machine pushes status and modal state on this link
+        self.last_status = 0.0
         self.asked = 0  # $G sent on this link
         self.answered = 0  # $G replies seen; the nth reply is the receipt of the line before the nth $G
         self.transfer = None
@@ -389,9 +392,14 @@ class Console:
             self.heads = parse_job(payload.decode(errors='replace'))
             self.redraw()
             return
+        if ftype == MODAL:
+            self.modal = payload.decode(errors='replace').strip()
+            self.pushed = True
+            self.redraw()
+            return
         text = payload.decode(errors='replace').rstrip()
         ask = self.asks[0] if self.asks else None
-        if ftype == INFO and ask is not None and ask.kind == 'watch' and text == 'job watch on':
+        if ftype == INFO and ask is not None and ask.kind == 'watch' and text == 'watch on':
             return
         # the modal state; "$#" and "get wcs" print [G54:x,y,z] and the like, which carry a colon
         if ftype == INFO and text.startswith('[G') and ':' not in text:
@@ -413,6 +421,7 @@ class Console:
         if ftype == STATUS:
             self.status = text
             if not self.want_status:
+                self.redraw()
                 return
             self.want_status = False
         self.print_frame(ftype, payload)
@@ -490,13 +499,15 @@ class Console:
             self.drop('a reply went missing, reconnecting to resync')
             return
         try:
-            self.poll_status()
+            if not self.pushed or now - self.last_status >= KEEPALIVE_S:
+                self.poll_status()
+                self.last_status = now
             if not self.watching:
-                if self.ask('job watch on', 'watch') is not None:
+                if self.ask('watch on', 'watch') is not None:
                     self.watching = True
             elif self.want_program:
                 self.fetch_missing()
-            if now - self.last_modal >= MODAL_S:
+            if not self.pushed and now - self.last_modal >= MODAL_S:
                 if self.ask(None, 'poll') is not None:
                     self.last_modal = now
         except OSError:

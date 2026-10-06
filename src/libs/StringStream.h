@@ -11,7 +11,7 @@ class StringStream : public StreamOutput {
         int puts(const char *str, int size = 0) { size_t n = size == 0 ? strlen(str) : size; output.append(str, n); return n; }
         void send(uint8_t type, const void *payload, size_t len) override { puts((const char *)payload, len); } // captures plain text, not frames
         void clear() { output.clear(); }
-        std::string getOutput() const { return output; }
+        const std::string &getOutput() const { return output; }
 
     private:
         std::string output;

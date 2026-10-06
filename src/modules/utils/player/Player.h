@@ -12,7 +12,6 @@
 class Gcode;
 #include "libs/McodeRegistry.h"
 #include "SimpleShell.h"
-#include "JobWatch.h"
 #include "Program.h"
 
 #include <stdio.h>
@@ -47,7 +46,6 @@ class Player : public Module {
         McodeRegistry::Mcode m0, m1, m27, m333, m334, m600, m601;
         void job_ended(Program::Outcome how);
         void job_status(string parameters, StreamOutput *stream);
-        void unwatch(StreamOutput *stream) { watch.remove(stream); }
         void suspend(StreamOutput *stream);
         void resume(StreamOutput *stream);
 
@@ -68,7 +66,6 @@ class Player : public Module {
         void goto_command( string parameters, StreamOutput* stream );
         void buffer_command( string parameters, StreamOutput* stream );
         void job_command( string parameters, StreamOutput* stream );
-        void job_watch( string parameters, StreamOutput* stream );
         const char *phase_name() const;
         void test_command(string parameters, StreamOutput* stream );
 
@@ -80,7 +77,6 @@ class Player : public Module {
 
         TickType_t run_ticks = 0, sampled_at = 0;
         bool m1_stops = false;   // M334 turns it on, M333 off
-        JobWatch watch{*this};
         // owns the path; the job's goes when it ends
         struct Last {
             Program::Head head;

@@ -2,14 +2,14 @@
 
 #include "modules/utils/wifi/WifiProvider.h"
 #include "SimpleShell.h"
-#include "Player.h"
+#include "ConsoleWatch.h"
 
 #include <string>
 
 void Session::bind(WifiProvider* provider, uint8_t link, const uint8_t ip[4], uint16_t port)
 {
     SimpleShell::cancel_transfer(this);
-    player.unwatch(this);
+    console_watch.remove(this);
     provider->drop_held(this);
     owner = provider;
     this->link = link;
@@ -24,7 +24,7 @@ void Session::bind(WifiProvider* provider, uint8_t link, const uint8_t ip[4], ui
 void Session::release()
 {
     SimpleShell::cancel_transfer(this);
-    player.unwatch(this);
+    console_watch.remove(this);
     if (owner) owner->drop_held(this);
     set_transferring(false);
     drop_queued();

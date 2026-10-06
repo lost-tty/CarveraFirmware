@@ -29,6 +29,7 @@
 #include "modules/communication/GcodeDispatch.h"
 #include "modules/communication/WirelessProbe.h"
 #include "modules/communication/usb/UsbHost.h"
+#include "modules/communication/ConsoleWatch.h"
 #include "checksumm.h"
 #include "ConfigTable.h"
 #include "Robot.h"
@@ -147,6 +148,7 @@ SwitchPool switch_pool;
 TemperatureControlPool temperature_control_pool;
 ZProbe zprobe;
 UsbHost usb_host;
+ConsoleWatch console_watch;
 
 Kernel* THEKERNEL = &kernel;
 
@@ -184,6 +186,7 @@ void init() {
 
     // Create and add main modules
     THEKERNEL->add_module(&player);
+    THEKERNEL->add_module(&console_watch);
     THEKERNEL->add_module(&atc_handler);
     THEKERNEL->add_module(&program);
     THEKERNEL->add_module(&wireless_probe);

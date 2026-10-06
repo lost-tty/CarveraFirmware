@@ -293,12 +293,10 @@ void Player::progress_command( string parameters, StreamOutput *stream )
 void Player::service()
 {
     sample_runtime();
-    watch.tick();
 }
 
 const SimpleShell::Sub<Player> Player::JOB_SUBS[] = {
     {"status", &Player::job_status, "job state"},
-    {"watch",  &Player::job_watch,  "on|off: push status changes"},
     {"load",   &Player::job_load,   "<file>: load without starting"},
     {nullptr, nullptr, nullptr},
 };
@@ -352,21 +350,6 @@ void Player::job_status( string, StreamOutput *stream )
     unsigned long secs = calculate_elapsed_secs();
     for (unsigned i = 0; i < n; i++) {
         print_head(stream, phase_name(), "-", secs, heads[i]);
-    }
-}
-
-void Player::job_watch( string parameters, StreamOutput *stream )
-{
-    string what = shift_parameter(parameters);
-    if (what == "off") {
-        watch.remove(stream);
-        stream->printf("job watch off\r\n");
-    } else if (what != "on") {
-        stream->printf("error:job watch on|off\r\n");
-    } else if (watch.add(stream)) {
-        stream->printf("job watch on\r\n");
-    } else {
-        stream->printf("error:%d consoles watch already\r\n", JobWatch::WATCHERS);
     }
 }
 
