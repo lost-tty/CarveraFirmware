@@ -1701,7 +1701,9 @@ void SimpleShell::config_default_command( string parameters, StreamOutput *strea
 
 void SimpleShell::upload_command(std::string parameters, StreamOutput* stream) {
     std::string filename = absolute_from_relative(shift_parameter(parameters), stream);
-    if(being_played(filename, stream)) return;
+    // a .lz upload replaces the file without the suffix
+    if(being_played(filename.substr(0, filename.find(FileTransfer::LZ_SUFFIX)), stream))
+        return;
 
     transfer.upload(filename, stream);
 }

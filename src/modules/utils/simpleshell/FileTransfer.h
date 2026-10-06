@@ -17,6 +17,8 @@ public:
 
     void service();
 
+    static constexpr const char *LZ_SUFFIX = ".lz";
+
     void cancel_if(StreamOutput* s);
 
 

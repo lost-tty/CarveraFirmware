@@ -42,11 +42,11 @@ void FileTransfer::start_upload(const std::string& filename, StreamOutput* strea
     check_and_make_path(path_lz);
 
     // .lz uploads land in the .lz shadow directory and are decompressed to filename afterwards
-    is_lz = filename.find(".lz") != string::npos;
+    is_lz = filename.find(LZ_SUFFIX) != string::npos;
     datafile = filename;
     if (is_lz) {
-        datafile = path_lz.substr(0, path_lz.rfind(".lz"));
-        path_md5 = path_md5.substr(0, path_md5.find(".lz"));
+        datafile = path_lz.substr(0, path_lz.rfind(LZ_SUFFIX));
+        path_md5 = path_md5.substr(0, path_md5.find(LZ_SUFFIX));
     }
     want_md5_file = filename.find("firmware.bin") == string::npos;
     hash_on_wire = !is_lz;
@@ -263,7 +263,7 @@ void FileTransfer::last_packet()
         return;
     }
 
-    dest = filename.substr(0, filename.find(".lz"));
+    dest = filename.substr(0, filename.find(LZ_SUFFIX));
     packed_size = file_size;
     if (packed_size < BLOCK_HEADER_SIZE + 2) {
         active_stream->printf("Error: decompression failed\r\n");
