@@ -8,10 +8,19 @@
 #pragma once
 
 #include "libs/LPC17xx/sLPC17xx.h" // smoothed mbed.h lib
+#include "FreeRTOS.h"
+#include "task.h"
 
-// an interrupt above configMAX_SYSCALL_INTERRUPT_PRIORITY may not notify a task itself: this pends
-// the RIT, which Kernel::init parks at the syscall priority to do the notifying
-static inline void defer_wake()
+// An interrupt above configMAX_SYSCALL_INTERRUPT_PRIORITY may not notify a task: the RIT does.
+enum DeferredWaiter : uint8_t { WAKE_MACHINE, WAKE_WIFI, WAKE_MAIN, WAKE_WAITERS };
+
+extern volatile bool deferred_due[WAKE_WAITERS];
+
+void defer_wake_to(DeferredWaiter who, TaskHandle_t task, UBaseType_t index);
+extern "C" void RIT_IRQHandler(void);
+
+static inline void defer_wake(DeferredWaiter who = WAKE_MACHINE)
 {
+    deferred_due[who] = true;
     NVIC_SetPendingIRQ(RIT_IRQn);
 }

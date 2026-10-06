@@ -17,6 +17,7 @@ using std::string;
 #include "libs/SerialMessage.h"
 #include "libs/StreamOutput.h"
 #include "libs/Logging.h"
+#include "libs/DeferredWake.h"
 
 // Serial reading module
 SerialConsole::SerialConsole( PinName rx_pin, PinName tx_pin, int baud_rate )
@@ -41,6 +42,7 @@ void SerialConsole::on_serial_char_received() {
 		char c = this->serial->getc();
 		if (rx_raw.size() < rx_raw.capacity()) rx_raw.push_back(c);
     }
+    defer_wake(WAKE_MAIN);
 }
 
 void SerialConsole::service()

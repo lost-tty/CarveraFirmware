@@ -577,19 +577,10 @@ void Conveyor::queue_head_block()
 }
 
 
-// called from step ticker ISR
-
-// the step ticker is above configMAX_SYSCALL_INTERRUPT_PRIORITY, so it cannot notify directly
-extern "C" void RIT_IRQHandler(void)
+void Conveyor::wake_on_block(TaskHandle_t t)
 {
-    THECONVEYOR.wake_server();
-}
-
-void Conveyor::wake_server()
-{
-    BaseType_t woken= pdFALSE;
-    if(server != nullptr) vTaskNotifyGiveIndexedFromISR(server, k_notify_index, &woken);
-    portYIELD_FROM_ISR(woken);
+    server= t;
+    defer_wake_to(WAKE_MACHINE, t, k_notify_index);
 }
 
 // called from step ticker ISR when block is finished, do not do anything slow here

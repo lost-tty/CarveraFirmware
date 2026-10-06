@@ -22,8 +22,6 @@ class Block;
 #define BLOCK_QUEUE_LENGTH 64
 #endif
 
-extern "C" void RIT_IRQHandler(void);
-
 class Conveyor : public Module, public Killable
 {
 public:
@@ -35,7 +33,7 @@ public:
     void cleanup() override;
 
     void service();
-    void wake_on_block(TaskHandle_t t) { server= t; }
+    void wake_on_block(TaskHandle_t t);
     bool wait_for_idle(bool wait_for_motors=true); // false when a halt cut the wait short
 
     Block *take_block(unsigned int i);
@@ -43,7 +41,6 @@ public:
     // true if the newest queued block can still get a blend window of w steps at its end
     bool can_blend(uint32_t w) const;
     void block_finished();
-    void wake_server();
 
     void flush_queue(void);
 

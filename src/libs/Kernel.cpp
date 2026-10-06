@@ -15,6 +15,7 @@
 #include "checksumm.h"
 
 #include "libs/StepTicker.h"
+#include "libs/DeferredWake.h"
 #include "libs/Watchdog.h"
 #include "modules/robot/MachineTask.h"
 #include "modules/utils/script/Program.h"

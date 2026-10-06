@@ -17,6 +17,7 @@ using std::string;
 #include "libs/RingBuffer.h"
 #include "libs/SerialMessage.h"
 #include "libs/Logging.h"
+#include "libs/DeferredWake.h"
 #include "libs/StreamOutput.h"
 #include "SwitchPublicAccess.h"
 #include "SwitchPool.h"
@@ -82,6 +83,7 @@ void WirelessProbe::on_serial_char_received() {
         if ( received == '\r' ) { received = '\n'; }
         this->buffer.push_back(received);
     }
+    defer_wake(WAKE_MAIN);
 }
 
 void WirelessProbe::service() {
