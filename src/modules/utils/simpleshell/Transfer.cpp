@@ -498,7 +498,8 @@ void Transfer::down_frame(uint8_t type, const uint8_t* p, uint16_t plen)
             else if (last_sent == SENT_VIEW)
                 down_view();
             else if (last_sent == SENT_DATA) {
-                next_send = last_seq;
+                // acked = first frame the client is missing
+                next_send = acked;
                 down_more();
             }
 
@@ -531,7 +532,9 @@ void Transfer::down_view()
 // the next frame the window allows, once the one before has gone
 void Transfer::down_more()
 {
-    if (frame.busy || next_send > total_packets || next_send >= acked + DOWNLOAD_WINDOW)
+    // wait for the first request, the client drops data frames until it has the view
+    if (frame.busy || acked == 0 || next_send > total_packets
+        || next_send >= acked + DOWNLOAD_WINDOW)
         return;
 
     down_data(next_send++);
