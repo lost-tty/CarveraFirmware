@@ -298,6 +298,8 @@ def main():
     print(f'{args.source_file}: {len(up.data)} bytes, {up.total} packets, md5 {up.md5.decode()}')
 
     sock = socket.create_connection((args.host, args.port), timeout=TIMEOUT)
+    # a packet's short last segment must not wait for the machine's delayed ack
+    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     reader = FrameReader(sock)
     for f in up.start():
         sock.sendall(f)
@@ -328,6 +330,16 @@ def main():
     if up.result != 'done':
         sys.exit(f'upload {up.result}')
     print(f'upload complete, {up.progress.summary()}')
+    # the machine may say more after its success line
+    while True:
+        try:
+            ftype, payload = reader.next(0.5)
+        except Closed:
+            break
+        if ftype is None:
+            break
+        if ftype == INFO:
+            print(payload.decode(errors='replace'), end='')
 
     if args.reset:
         sock.sendall(frame(CTRL_MULTI, b'reset'))
