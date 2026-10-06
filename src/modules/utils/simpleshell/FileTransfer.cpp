@@ -382,6 +382,7 @@ void FileTransfer::open_send_file()
     total_packets = ((uint32_t)size + DOWNLOAD_CHUNK - 1) / DOWNLOAD_CHUNK;
 
     last_len = Frame::encode(Frame::FILE_MD5, md5_str, 32, xbuff);
+    StreamOutput::flush_gathered();
     active_stream->puts((char*)xbuff, last_len);
 
     enter(DOWN_WAIT);

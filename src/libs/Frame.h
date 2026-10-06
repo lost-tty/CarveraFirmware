@@ -34,6 +34,7 @@ enum Type : uint8_t {
 static const uint16_t HEADER   = 0x8668;
 static const uint16_t FOOTER   = 0x55AA;
 static const size_t   OVERHEAD = 9;      // header 2 + len 2 + type 1 + crc 2 + footer 2
+static const size_t   PAYLOAD_AT = 5;
 
 uint16_t crc16(uint16_t crc, const uint8_t *data, size_t len);
 

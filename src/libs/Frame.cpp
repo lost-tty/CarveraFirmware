@@ -55,12 +55,14 @@ size_t encode(uint8_t type, const void *payload, size_t len, uint8_t *out)
     out[2] = flen >> 8;
     out[3] = flen & 0xFF;
     out[4] = type;
-    if (len) memcpy(out + 5, payload, len);
+    // StreamOutput gathers text directly at out + PAYLOAD_AT
+    if (len && payload != out + PAYLOAD_AT) memcpy(out + PAYLOAD_AT, payload, len);
     uint16_t crc = crc16(0, out + 2, flen);
-    out[5 + len] = crc >> 8;
-    out[6 + len] = crc & 0xFF;
-    out[7 + len] = FOOTER >> 8;
-    out[8 + len] = FOOTER & 0xFF;
+    uint8_t *end = out + PAYLOAD_AT + len;
+    end[0] = crc >> 8;
+    end[1] = crc & 0xFF;
+    end[2] = FOOTER >> 8;
+    end[3] = FOOTER & 0xFF;
     return len + OVERHEAD;
 }
 

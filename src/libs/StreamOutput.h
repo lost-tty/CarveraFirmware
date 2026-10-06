@@ -38,6 +38,20 @@ class StreamOutput {
         virtual void set_transferring(bool) {}
         virtual bool is_transferring() const { return false; }
         virtual bool accept_event() const { return !is_transferring(); }
+
+        // Collects INFO text sent to s into as few frames as possible. They are sent when the
+        // Gather is destroyed, a frame is full, or any other output is sent.
+        class Gather {
+            public:
+                explicit Gather(StreamOutput *s);
+                ~Gather();
+                Gather(const Gather &) = delete;
+                Gather &operator=(const Gather &) = delete;
+            private:
+                StreamOutput *prev;
+        };
+        // call before writing with puts(): the text gathered so far goes out first
+        static void flush_gathered();
         virtual const std::string &cwd() const;
         virtual void set_cwd(const std::string &path);
 };

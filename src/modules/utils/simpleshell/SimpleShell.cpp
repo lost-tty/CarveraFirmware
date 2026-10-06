@@ -193,6 +193,9 @@ void SimpleShell::run_command(const std::string &line, StreamOutput *stream)
         return;
     }
 
+    // one frame for the command's output instead of one per printf
+    StreamOutput::Gather gather(stream);
+
     // it is a grbl compatible command
     if(possible_command[0] == '$' && possible_command.size() >= 2) {
         switch(possible_command[1]) {

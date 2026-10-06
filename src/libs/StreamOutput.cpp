@@ -34,11 +34,63 @@ void StreamOutput::unlock_broadcast() { xSemaphoreGive(broadcast_lock); }
 static const size_t MAX_FRAME_PAYLOAD = 512;
 static uint8_t frame_buf[MAX_FRAME_PAYLOAD + Frame::OVERHEAD];
 
+// the gathered text sits at the payload offset of frame_buf, so encode() needs no copy
+static uint8_t *const gather_buf = frame_buf + Frame::PAYLOAD_AT;
+static StreamOutput *gather_to = nullptr;
+static size_t gathered = 0;
+
+// caller holds output_lock
+static void send_gathered()
+{
+    if (gathered == 0)
+        return;
+
+    size_t total = Frame::encode(Frame::INFO, gather_buf, gathered, frame_buf);
+    gathered = 0;
+    gather_to->puts(reinterpret_cast<const char *>(frame_buf), total);
+}
+
+void StreamOutput::flush_gathered()
+{
+    lock_output();
+    send_gathered();
+    unlock_output();
+}
+
+StreamOutput::Gather::Gather(StreamOutput *s)
+{
+    lock_output();
+    send_gathered();
+    prev = gather_to;
+    gather_to = s;
+    unlock_output();
+}
+
+StreamOutput::Gather::~Gather()
+{
+    lock_output();
+    send_gathered();
+    gather_to = prev;
+    unlock_output();
+}
+
 void StreamOutput::send(uint8_t type, const void *payload, size_t len)
 {
     lock_output();
 
     const uint8_t *p = static_cast<const uint8_t *>(payload);
+    if (type == Frame::INFO && gather_to == this && len <= MAX_FRAME_PAYLOAD) {
+        if (gathered + len > MAX_FRAME_PAYLOAD)
+            send_gathered();
+
+        memcpy(gather_buf + gathered, p, len);
+        gathered += len;
+        unlock_output();
+        return;
+    }
+
+    // send the gathered text before this output
+    send_gathered();
     do {
         size_t n = len > MAX_FRAME_PAYLOAD ? MAX_FRAME_PAYLOAD : len;
         size_t total = Frame::encode(type, p, n, frame_buf);
