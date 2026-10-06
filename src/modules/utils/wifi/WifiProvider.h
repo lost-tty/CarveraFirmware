@@ -32,6 +32,16 @@ using namespace std;
 #define MAX_WLAN_SIGNALS 8
 #define MAX_SESSIONS 4                   // console clients at once, matching the module's own cap
 
+// A network to join, and how joining it went (the wlan shell command).
+struct ap_conn_info {
+    char ssid[32];
+    char password[64];
+    char ip_address[16];
+    bool has_error;
+    char error_info[64];
+    bool disconnect;
+};
+
 class WifiProvider : public Module, public StreamOutput
 {
 public:

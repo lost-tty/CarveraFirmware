@@ -12,7 +12,6 @@
 #include "SimpleShell.h"
 #include "modules/utils/simpleshell/FileTransfer.h"
 
-#include "brd_cfg.h"
 #include "M8266HostIf.h"
 
 #include "libs/Module.h"
@@ -22,7 +21,6 @@
 #include "Gcode.h"
 #include "libs/Logging.h"
 #include "libs/StreamOutput.h"
-#include "WifiPublicAccess.h"
 #include "libs/utils.h"
 #include "Logging.h"
 #include "utils.h"

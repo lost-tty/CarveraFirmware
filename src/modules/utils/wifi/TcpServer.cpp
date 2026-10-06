@@ -60,8 +60,6 @@ bool TcpServer::sendData(const Endpoint& endpoint, const std::string& data)
 
         if (!success) {
             printk("TcpServer: Failed to send data to %s\n", endpoint.to_c_string());
-        } else {
-            printk("TcpServer: Sent data to %s\n", endpoint.to_c_string());
         }
 
         return success;

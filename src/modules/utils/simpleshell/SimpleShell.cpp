@@ -48,7 +48,6 @@
 #include "MainButton.h"
 #include "system_LPC17xx.h"
 #include "LPC17xx.h"
-#include "WifiPublicAccess.h"
 #include "WifiProvider.h"
 #include "FileTransfer.h"
 #include "Frame.h"
