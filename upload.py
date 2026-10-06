@@ -5,6 +5,7 @@ import binascii
 import collections
 import hashlib
 import select
+import os
 import socket
 import struct
 import sys
@@ -14,7 +15,10 @@ HEADER = b'\x86\x68'
 FOOTER = b'\x55\xaa'
 INFO, CTRL_MULTI, FILE_START = 0x90, 0xA2, 0xB0
 MD5, VIEW, DATA, END, CAN, RETRY = 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6
-PACKET_SIZE = 8192
+PACKET_SIZE = int(os.environ.get('CARVERA_PACKET', 8192))
+# how many packets are sent per request: the machine keeps the one it expects next and drops
+# the others; CARVERA_WINDOW=1 sends only the packet asked for
+WINDOW = int(os.environ.get('CARVERA_WINDOW', 2))
 SUCCESS, FAILURE = 'Info: upload success', 'Upload failed for file'  # FileTransfer::finish, the last word
 TIMEOUT = 10
 RESET_SETTLE_S = 0.5
@@ -83,6 +87,8 @@ class Upload:
         self.began = None  # when FILE_START went out
         self.started = False  # the machine has asked for something
         self.ended = False  # FILE_END seen: all data is in, a .lz still unpacks and ignores a cancel
+        self.asked = 0  # the latest packet the machine asked for
+        self.sent = 0  # the last packet sent
         # 'done', 'failed', 'cancelled' or 'refused'; FILE_END is not the end, a .lz still unpacks after it
         self.result = None
 
@@ -111,7 +117,17 @@ class Upload:
         if ftype == DATA and len(payload) >= 4:
             seq = struct.unpack('>I', payload[:4])[0]
             self.progress.update((seq - 1) * PACKET_SIZE)  # a request for seq confirms the ones before it
-            return frame(DATA, payload[:4] + self.data[(seq - 1) * PACKET_SIZE: seq * PACKET_SIZE])
+            # the same packet asked for again: the ones sent ahead were dropped, send them again
+            if seq <= self.asked:
+                self.sent = seq - 1
+            self.asked = seq
+            out = b''
+            while self.sent < min(seq + WINDOW - 1, self.total):
+                self.sent += 1
+                n = self.sent
+                chunk = self.data[(n - 1) * PACKET_SIZE: n * PACKET_SIZE]
+                out += frame(DATA, struct.pack('>I', n) + chunk)
+            return out if out else None
         if ftype == END:
             self.ended = True
             self.progress.update(len(self.data))
