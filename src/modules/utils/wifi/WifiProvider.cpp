@@ -53,6 +53,12 @@ static void wifi_config_changed(const ConfigTable::Group *, const void *c)
 CONFIG_GROUPS(wifi_provider_config_groups,
     CFG_GROUP("wifi", wifi_config_keys, WifiConfig, wifi_config_changed));
 
+// status: the module's status register in the high byte, the error code in the low byte
+static void module_error(const char* what, u16 status)
+{
+    printk("error:wifi %s failed, status 0x%04x\n", what, status);
+}
+
 // Ports take effect on the next connection setup, the name on the next broadcast.
 void WifiProvider::configure(const void *cfg)
 {
@@ -128,6 +134,13 @@ namespace {
         ModuleLock(const ModuleLock&) = delete;
         ModuleLock& operator=(const ModuleLock&) = delete;
     };
+
+    template <typename F>
+    auto locked(F f) -> decltype(f())
+    {
+        ModuleLock lock;
+        return f();
+    }
 
     StaticSemaphore_t tx_lock_store;
     SemaphoreHandle_t tx_lock = xSemaphoreCreateMutexStatic(&tx_lock_store);
@@ -287,82 +300,80 @@ void WifiProvider::get_broadcast_from_ip_and_netmask(char* broadcast_addr, char*
     int_to_ip(i_broadcast, broadcast_addr);
 }
 
-// M482.<n>: what the module knows about the network it joined
-void WifiProvider::query_sta_param(Gcode *gcode)
-{
-    static const struct { STA_PARAM_TYPE type; const char *name; } params[]= {
-        {STA_PARAM_TYPE_SSID,         "ssid"},
-        {STA_PARAM_TYPE_PASSWORD,     "password"},
-        {STA_PARAM_TYPE_CHANNEL,      "channel"},
-        {STA_PARAM_TYPE_HOSTNAME,     "hostname"},
-        {STA_PARAM_TYPE_MAC,          "mac"},
-        {STA_PARAM_TYPE_IP_ADDR,      "ip"},
-        {STA_PARAM_TYPE_GATEWAY_ADDR, "gateway"},
-        {STA_PARAM_TYPE_NETMASK_ADDR, "netmask"},
+namespace {
+    enum ParamKind : uint8_t { TEXT, NUMBER, MAC, HOSTNAME };
+    struct ParamRow { uint8_t type; const char* name; ParamKind kind; };
+
+    const ParamRow sta_params[] = {
+        {STA_PARAM_TYPE_SSID,         "ssid",     TEXT},
+        {STA_PARAM_TYPE_PASSWORD,     "password", TEXT},
+        {STA_PARAM_TYPE_CHANNEL,      "channel",  NUMBER},
+        // the hostname has its own command; querying parameter type 3 returns an empty string
+        {STA_PARAM_TYPE_HOSTNAME,     "hostname", HOSTNAME},
+        {STA_PARAM_TYPE_MAC,          "mac",      MAC},
+        {STA_PARAM_TYPE_IP_ADDR,      "ip",       TEXT},
+        {STA_PARAM_TYPE_GATEWAY_ADDR, "gateway",  TEXT},
+        {STA_PARAM_TYPE_NETMASK_ADDR, "netmask",  TEXT},
     };
-    const unsigned n= sizeof(params) / sizeof(params[0]);
+    const ParamRow ap_params[] = {
+        {AP_PARAM_TYPE_SSID,         "ssid",     TEXT},
+        {AP_PARAM_TYPE_PASSWORD,     "password", TEXT},
+        {AP_PARAM_TYPE_CHANNEL,      "channel",  NUMBER},
+        {AP_PARAM_TYPE_AUTHMODE,     "authmode", NUMBER},
+        {AP_PARAM_TYPE_IP_ADDR,      "ip",       TEXT},
+        {AP_PARAM_TYPE_GATEWAY_ADDR, "gateway",  TEXT},
+        {AP_PARAM_TYPE_NETMASK_ADDR, "netmask",  TEXT},
+        {AP_PARAM_TYPE_PHY_MODE,     "phymode",  NUMBER},
+    };
 
-    if(gcode->subcode() >= n) {
-        printk("error:M482 takes a subcode 0 to %u\r\n", n - 1);
-        return;
-    }
+    // M482.<n> queries the joined network, M483.<n> the machine's own hotspot
+    template <size_t N>
+    void query_param(unsigned m, const ParamRow (&rows)[N], bool sta, unsigned sub)
+    {
+        if (sub >= N) {
+            printk("error:M%u takes a subcode 0 to %u\r\n", m, (unsigned)N - 1);
+            return;
+        }
 
-    u8 value[64]{};
-    u8 len= 0;
-    u16 status= 0;
-    if(M8266WIFI_SPI_Query_STA_Param(params[gcode->subcode()].type, value, &len, &status) == 0) {
-        printk("error:wifi query failed, status %u\r\n", status);
-        return;
-    }
+        const ParamRow& row = rows[sub];
+        // one byte more than the longest value, a 64-byte password, so it always ends in a NUL
+        u8 value[65]{};
+        u8 len = 0;
+        u16 status = 0;
+        u8 ok = locked([&] {
+            if (row.kind == HOSTNAME)
+                return M8266WIFI_SPI_Get_STA_Hostname((char*)value, &status);
 
-    const char *name= params[gcode->subcode()].name;
-    if(params[gcode->subcode()].type == STA_PARAM_TYPE_MAC) {
-        printk("%s: %02X:%02X:%02X:%02X:%02X:%02X\r\n",
-                              name, value[0], value[1], value[2], value[3], value[4], value[5]);
-    } else if(params[gcode->subcode()].type == STA_PARAM_TYPE_CHANNEL) {
-        printk("%s: %u\r\n", name, value[0]);
-    } else {
-        value[sizeof(value) - 1]= 0;
-        printk("%s: %s\r\n", name, (const char *)value);
+            if (sta)
+                return M8266WIFI_SPI_Query_STA_Param((STA_PARAM_TYPE)row.type, value, &len,
+                                                     &status);
+
+            return M8266WIFI_SPI_Query_AP_Param((AP_PARAM_TYPE)row.type, value, &len, &status);
+        });
+        if (!ok) {
+            module_error(row.name, status);
+            return;
+        }
+
+        if (row.kind == MAC) {
+            printk("%s: %02X:%02X:%02X:%02X:%02X:%02X\r\n", row.name, value[0], value[1],
+                   value[2], value[3], value[4], value[5]);
+        } else if (row.kind == NUMBER) {
+            printk("%s: %u\r\n", row.name, value[0]);
+        } else {
+            printk("%s: %s\r\n", row.name, (const char*)value);
+        }
     }
 }
 
-// M483.<n>: the same for the hotspot this machine offers
+void WifiProvider::query_sta_param(Gcode *gcode)
+{
+    query_param(482, sta_params, true, gcode->subcode());
+}
+
 void WifiProvider::query_ap_param(Gcode *gcode)
 {
-    static const struct { AP_PARAM_TYPE type; const char *name; } params[]= {
-        {AP_PARAM_TYPE_SSID,         "ssid"},
-        {AP_PARAM_TYPE_PASSWORD,     "password"},
-        {AP_PARAM_TYPE_CHANNEL,      "channel"},
-        {AP_PARAM_TYPE_AUTHMODE,     "authmode"},
-        {AP_PARAM_TYPE_IP_ADDR,      "ip"},
-        {AP_PARAM_TYPE_GATEWAY_ADDR, "gateway"},
-        {AP_PARAM_TYPE_NETMASK_ADDR, "netmask"},
-        {AP_PARAM_TYPE_PHY_MODE,     "phymode"},
-    };
-    const unsigned n= sizeof(params) / sizeof(params[0]);
-
-    if(gcode->subcode() >= n) {
-        printk("error:M483 takes a subcode 0 to %u\r\n", n - 1);
-        return;
-    }
-
-    u8 value[64]{};
-    u8 len= 0;
-    u16 status= 0;
-    if(M8266WIFI_SPI_Query_AP_Param(params[gcode->subcode()].type, value, &len, &status) == 0) {
-        printk("error:wifi query failed, status %u\r\n", status);
-        return;
-    }
-
-    AP_PARAM_TYPE type= params[gcode->subcode()].type;
-    const char *name= params[gcode->subcode()].name;
-    if(type == AP_PARAM_TYPE_CHANNEL || type == AP_PARAM_TYPE_AUTHMODE || type == AP_PARAM_TYPE_PHY_MODE) {
-        printk("%s: %u\r\n", name, value[0]);
-    } else {
-        value[sizeof(value) - 1]= 0;
-        printk("%s: %s\r\n", name, (const char *)value);
-    }
+    query_param(483, ap_params, false, gcode->subcode());
 }
 
 void WifiProvider::report_status(Gcode *gcode)
@@ -529,8 +540,9 @@ u16 WifiProvider::send_to_client(const u8 ip[4], u16 port, u8 link, const u8* da
 void WifiProvider::set_wifi_op_mode(u8 op_mode)
 {
     u16 status = 0;
-    if (M8266WIFI_SPI_Set_Opmode(op_mode, 1, &status) == 0) {
-        printk("M8266WIFI_SPI_Set_Opmode, ERROR, status: %d!\n", status);
+    u8 ok = locked([&] { return M8266WIFI_SPI_Set_Opmode(op_mode, 1, &status); });
+    if (ok == 0) {
+        module_error("set opmode", status);
     } else if (op_mode == 1) {
         printk("WiFi Access Point Disabled...\n");
     } else if (op_mode == 3) {
@@ -649,45 +661,47 @@ void WifiProvider::connect_ap(struct ap_conn_info *s)
     }
 }
 
-void WifiProvider::set_ap_channel(uint8_t channel)
+bool WifiProvider::config_ap(AP_PARAM_TYPE type, u8* value, u8 len, const char* what)
 {
     u16 status = 0;
-    u8 ap_channel = channel;
-    if (M8266WIFI_SPI_Config_AP_Param(AP_PARAM_TYPE_CHANNEL, &ap_channel, 1, 1, &status) == 0) {
-        printk("WiFi set AP Channel ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
-    } else {
-        printk("WiFi AP Channel changed to %d\n", ap_channel);
-    }
+    u8 ok = locked([&] { return M8266WIFI_SPI_Config_AP_Param(type, value, len, 1, &status); });
+    if (!ok)
+        module_error(what, status);
+
+    return ok;
+}
+
+void WifiProvider::set_ap_channel(uint8_t channel)
+{
+    if (config_ap(AP_PARAM_TYPE_CHANNEL, &channel, 1, "set AP channel"))
+        printk("WiFi AP Channel changed to %d\n", channel);
 }
 
 void WifiProvider::set_ap_ssid(const char *ssid)
 {
-    u16 status = 0;
-    if (M8266WIFI_SPI_Config_AP_Param(AP_PARAM_TYPE_SSID, (u8*)ssid, strlen(ssid), 1, &status) == 0) {
-        printk("WiFi set AP SSID ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
-    } else {
+    if (config_ap(AP_PARAM_TYPE_SSID, (u8*)ssid, strlen(ssid), "set AP SSID"))
         printk("WiFi AP SSID changed to %s\n", ssid);
-    }
 }
 
 void WifiProvider::set_ap_password(const char *password)
 {
     u16 status = 0;
     u8 op_mode;
-    // Ensure module is in AP mode
-    if (M8266WIFI_SPI_Get_Opmode(&op_mode, &status) == 0) {
-        printk("WiFi get OP mode ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
-    } else {
-        if (op_mode != 3) {
-            printk("WiFi cannot set password when not in AP mode!\n");
-        } else {
-            u8 authmode = strlen(password) == 0 ? 0 : 4;
-            if (M8266WIFI_SPI_Config_AP_Param(AP_PARAM_TYPE_PASSWORD, (u8*)password, strlen(password), 1, &status) > 0) {
-                printk("WiFi AP Password changed to %s\n", password);
-            }
-            M8266WIFI_SPI_Config_AP_Param(AP_PARAM_TYPE_AUTHMODE, &authmode, 1, 1, &status);
-        }
+    if (!locked([&] { return M8266WIFI_SPI_Get_Opmode(&op_mode, &status); })) {
+        module_error("opmode query", status);
+        return;
     }
+
+    if (op_mode != 3) {
+        printk("WiFi cannot set password when not in AP mode!\n");
+        return;
+    }
+
+    u8 authmode = strlen(password) == 0 ? 0 : 4;
+    if (config_ap(AP_PARAM_TYPE_PASSWORD, (u8*)password, strlen(password), "set AP password"))
+        printk("WiFi AP Password changed to %s\n", password);
+
+    config_ap(AP_PARAM_TYPE_AUTHMODE, &authmode, 1, "set AP authmode");
 }
 
 void WifiProvider::set_ap_enabled(bool on)
@@ -706,8 +720,11 @@ void WifiProvider::query_wifi_status()
     u8 flash_size;
     char fw_ver[24] = "";
     printk("M8266WIFI_SPI_Get_Module_Info...\n");
-    if (M8266WIFI_SPI_Get_Module_Info(&esp8266_id, &flash_size, fw_ver, &status) == 0) {
-        printk("M8266WIFI_SPI_Get_Module_Info ERROR, status:%d, high: %d, low: %d!\n", status, int(status >> 8), int(status & 0xff));
+    u8 ok = locked([&] {
+        return M8266WIFI_SPI_Get_Module_Info(&esp8266_id, &flash_size, fw_ver, &status);
+    });
+    if (ok == 0) {
+        module_error("module info", status);
     } else {
         printk("esp8266_id:%ld, flash_size:%d, fw_ver:%s!\n", esp8266_id, flash_size, fw_ver);
     }

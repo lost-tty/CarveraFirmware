@@ -85,6 +85,7 @@ private:
     volatile bool beacon_due{false};
     void query_sta_param(Gcode *);
     void query_ap_param(Gcode *);
+    bool config_ap(AP_PARAM_TYPE type, u8* value, u8 len, const char* what);
     void report_status(Gcode *);
 
     McodeRegistry::Mcode m482, m483, m489;
