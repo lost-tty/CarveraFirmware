@@ -30,6 +30,7 @@ using namespace std;
 #define WIFI_TX_RETRIES 50
 #define WIFI_TX_RETRIES_SHORT 5
 #define MAX_WLAN_SIGNALS 8
+#define WIFI_TCP_WINDOW 8                // the console server's receive window, in segments
 #define MAX_SESSIONS 4                   // console clients at once, matching the module's own cap
 
 // A network to join, and how joining it went (the wlan shell command).
@@ -94,7 +95,7 @@ private:
     void M8266WIFI_Module_Hardware_Reset(void);
     u8 M8266WIFI_Module_Init_Via_SPI();
 
-    void init_wifi_module(bool reset);
+    void init_wifi_module();
     void query_wifi_status();
 
     uint32_t ip_to_int(char* ip_addr);

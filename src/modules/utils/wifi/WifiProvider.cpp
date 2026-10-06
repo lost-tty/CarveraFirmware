@@ -91,7 +91,7 @@ void WifiProvider::on_module_loaded()
 
 
     // Initialize WiFi module
-    this->init_wifi_module(false);
+    this->init_wifi_module();
 
     // Set up interrupt for WiFi data reception
     Pin* smoothie_pin = new Pin();
@@ -730,55 +730,53 @@ void WifiProvider::query_wifi_status()
     }
 }
 
-void WifiProvider::init_wifi_module(bool reset)
+void WifiProvider::init_wifi_module()
 {
     u16 status = 0;
-    char address[16];
     u8 param_len = 0;
 
-    if (reset) {
-        // Reset module: delete connections and remove stream
-        M8266WIFI_SPI_Delete_Connection(udp_link_no, &status);
-        M8266WIFI_SPI_Delete_Connection(tcp_link_no, &status);
-        THEKERNEL->streams.remove_stream(this);
-    }
-
-    // Initialize module via SPI
     M8266HostIf_Init();
     if (M8266WIFI_Module_Init_Via_SPI() == 0) {
         printk("error:wifi module init failed\n");
     }
 
-    // Set up TCP and UDP connections
-    snprintf(address, sizeof(address), "192.168.4.10");
-    if (M8266WIFI_SPI_Setup_Connection(2, this->tcp_port, address, 0, tcp_link_no, 3, &status) == 0) {
+    // the router gets this name by DHCP, from the module's next lease on
+    if (M8266WIFI_SPI_Set_STA_Hostname(this->machine_name, &status) == 0) {
+        module_error("set hostname", status);
+    }
+
+    // a TCP server ignores the remote address
+    if (M8266WIFI_SPI_Setup_Connection(2, tcp_port, const_cast<char*>("0.0.0.0"), 0, tcp_link_no,
+                                       3, &status) == 0) {
         module_error("console server setup", status);
     }
-    snprintf(address, sizeof(address), "192.168.4.255");
-    if (M8266WIFI_SPI_Setup_Connection(0, this->udp_recv_port, address, 0, udp_link_no, 3, &status) == 0) {
+    // The module's default window of 2 segments makes an upload wait for every ACK. A
+    // connection keeps the window its server had when it connected, so this comes first.
+    if (M8266WIFI_SPI_Config_Tcp_Window_num(tcp_link_no, WIFI_TCP_WINDOW, &status) == 0) {
+        module_error("set TCP window", status);
+    }
+    if (M8266WIFI_SPI_Setup_Connection(0, udp_recv_port, const_cast<char*>("192.168.4.255"), 0,
+                                       udp_link_no, 3, &status) == 0) {
         module_error("beacon link setup", status);
     }
 
-    if (M8266WIFI_SPI_Config_Max_Clients_Allowed_To_A_Tcp_Server(tcp_link_no, MAX_SESSIONS, &status) == 0) {
+    if (M8266WIFI_SPI_Config_Max_Clients_Allowed_To_A_Tcp_Server(tcp_link_no, MAX_SESSIONS,
+                                                                  &status) == 0) {
         module_error("console server max clients", status);
     }
-
-    // Set TCP server auto-disconnect timeout
-    if (M8266WIFI_SPI_Set_TcpServer_Auto_Discon_Timeout(tcp_link_no, this->tcp_timeout_s, &status) == 0) {
+    if (M8266WIFI_SPI_Set_TcpServer_Auto_Discon_Timeout(tcp_link_no, tcp_timeout_s,
+                                                        &status) == 0) {
         module_error("console server timeout", status);
     }
 
-    // Load current AP IP and Netmask
-    if (M8266WIFI_SPI_Query_AP_Param(AP_PARAM_TYPE_IP_ADDR, (u8*)this->ap_address, &param_len, &status) == 0) {
+    // the beacon's broadcast address comes from these
+    if (M8266WIFI_SPI_Query_AP_Param(AP_PARAM_TYPE_IP_ADDR, (u8*)ap_address, &param_len,
+                                     &status) == 0) {
         module_error("AP address query", status);
     }
-    if (M8266WIFI_SPI_Query_AP_Param(AP_PARAM_TYPE_NETMASK_ADDR, (u8*)this->ap_netmask, &param_len, &status) == 0) {
+    if (M8266WIFI_SPI_Query_AP_Param(AP_PARAM_TYPE_NETMASK_ADDR, (u8*)ap_netmask, &param_len,
+                                     &status) == 0) {
         module_error("AP netmask query", status);
-    }
-
-    if (reset) {
-        // Re-append stream after reset
-        THEKERNEL->streams.append_stream(this);
     }
 
     wifi_init_ok = true;
