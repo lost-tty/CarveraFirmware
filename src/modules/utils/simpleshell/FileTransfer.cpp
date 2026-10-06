@@ -304,6 +304,12 @@ void FileTransfer::unpack_step()
     block_size = ((uint32_t)hdr[0] << 24) | ((uint32_t)hdr[1] << 16) | ((uint32_t)hdr[2] << 8) | hdr[3];
     if (!block_size || block_size > XBUFF_SIZE) { unpack_finish(false); return; }
     if (fread(xbuff, 1, block_size, f_in) != block_size) { unpack_finish(false); return; }
+    // qlz_decompress reads and writes what the block's own header claims
+    if (qlz_size_compressed((const char*)xbuff) > block_size
+        || qlz_size_decompressed((const char*)xbuff) > DCOMPRESS_BUFFER_SIZE) {
+        unpack_finish(false);
+        return;
+    }
 
     uint32_t out = qlz_decompress((const char*)xbuff, lzbuff, &qlz);
     if (!out) { unpack_finish(false); return; }
