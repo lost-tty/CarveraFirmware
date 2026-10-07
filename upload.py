@@ -223,7 +223,7 @@ class Download:
         self.began = time.monotonic()
         return [frame(CTRL_MULTI, f'download {self.remote}'.encode())]
 
-    # the reply frame, b'' when the frame ends the transfer, None when it is not part of it
+    # the reply frame, b'' when none is due, None when the frame is not part of the transfer
     def answer(self, ftype, payload):
         if ftype == INFO:
             text = payload.decode(errors='replace').strip()
@@ -241,8 +241,13 @@ class Download:
             return frame(DATA, struct.pack('>I', 1)) if self.total else frame(END)
         if ftype == DATA and len(payload) >= 4:
             seq = struct.unpack('>I', payload[:4])[0]
-            if seq != len(self.chunks) + 1:
-                return frame(DATA, struct.pack('>I', len(self.chunks) + 1))
+            want = len(self.chunks) + 1
+            # a copy of a packet already here, or one of an earlier transfer: asking again
+            # would only bring more copies
+            if self.total is None or seq < want:
+                return b''
+            if seq > want:
+                return frame(DATA, struct.pack('>I', want))
             self.chunks.append(payload[4:])
             self.progress.update(sum(len(c) for c in self.chunks))
             return frame(DATA, struct.pack('>I', seq + 1)) if seq < self.total else frame(END)
