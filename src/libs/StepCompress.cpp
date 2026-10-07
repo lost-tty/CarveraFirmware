@@ -25,18 +25,17 @@ struct Point {
     float j{0.0F};
 };
 
-// v(t) = v0 + a0 t + j0 t^2/2 + c3 t^3 + c4 t^4 + c5 t^5, reaching v1 at zero acceleration and
-// zero jerk after distance D. Steps are marched from the last one, so the step after the
-// previous call's costs one solve
+// v(t) = v0 + a0 t + j0 t^2/2 + c3 t^3 + c4 t^4 + c5 t^5: v1 at D, acceleration and jerk 0
 struct Leg {
     bool valid{false};
     float v0, a0, j0, v1, D, T, c3, c4, c5;
-    double t;          // summed over every step of the leg: a float loses the last step
+    double t;   // a float loses the last step
     double s;
-    uint32_t k;
-    float ds;
-    float dt;
-    bool solved;
+    float v, a, j, s4;
+    float tf, left;
+    float taylor[6];   // the distance from here in time, highest power first
+    bool located;
+    float hint;
 
     float v_at(float tt) const
     {
@@ -90,71 +89,123 @@ struct Leg {
         c5= (6.0F * dv - 3.0F * a0 * T - 0.5F * j0 * T2) / (T3 * T2);
         t= 0.0;
         s= 0.0;
-        k= 0;
-        solved= false;
+        hint= 0.0F;
+        located= false;
         valid= true;
     }
 
-    void solve(float step)
+    void locate()
     {
-        ds= step;
-        solved= true;
-        if(s + step >= D - 0.5 * step && v1 < 1e-3F) {
-            // a leg to rest ends flat: its last step is what is left of T, not a solve at v = 0
-            float rest= T - (float)t;
-            dt= rest > 0.0F ? rest : step / 1e-3F;
+        if(located)
             return;
-        }
 
         float tt= (float)t;
-        float v= v_at(tt);
-        float a= a_at(tt);
-        float j= j_at(tt);
-        float s4= 6.0F * c3 + (24.0F * c4 + 60.0F * c5 * tt) * tt;
-        float s5= 24.0F * c4 + 120.0F * c5 * tt;
-        float s6= 120.0F * c5;
-        if(v < 0.0F) v= 0.0F;
+        tf= tt;
+        left= (float)(D - s);
+        v= v_at(tt);
+        a= a_at(tt);
+        j= j_at(tt);
+        s4= 6.0F * c3 + (24.0F * c4 + 60.0F * c5 * tt) * tt;
+        if(v < 0.0F)
+            v= 0.0F;
 
-        // where the speed is too small to carry the step, the jerk's or the snap's own time
-        // seeds the solve instead of step/v
-        float d= v > 1e-3F ? step / v : 1.0F;
-        if(j > 0.0F) {
-            float dj= cbrtf(6.0F * step / j);
-            if(dj < d) d= dj;
+        taylor[0]= c5 * (1.0F / 6.0F);
+        taylor[1]= 0.2F * c4 + c5 * tt;
+        taylor[2]= s4 * (1.0F / 24.0F);
+        taylor[3]= j * (1.0F / 6.0F);
+        taylor[4]= 0.5F * a;
+        taylor[5]= v;
+        located= true;
+    }
+
+    __attribute__((noinline)) float time_to(float d, float step, float seed, float &speed) const
+    {
+        if(v1 < 1e-3F && d + 0.5F * step >= left) {
+            // to rest: the last step is what is left of T, no solve at v = 0
+            float rest= T - tf;
+            speed= 0.0F;
+            return rest > 0.0F ? rest : d / 1e-3F;
         }
-        if(s4 > 0.0F) {
-            float dsn= sqrtf(sqrtf(24.0F * step / s4));
-            if(dsn < d) d= dsn;
+
+        float u= seed;
+        if(u <= 0.0F) {
+            float r= v * v + 2.0F * a * d;
+            u= r > 0.0F ? 2.0F * d / (v + sqrtf(r)) : v > 1e-3F ? d / v : 1.0F;
+            if(j > 0.0F && v * u < 0.5F * d) {
+                float uj= cbrtf(6.0F * d / j);
+                if(uj < u)
+                    u= uj;
+            }
+            if(s4 > 0.0F && v * u < 0.5F * d) {
+                float us= sqrtf(sqrtf(24.0F * d / s4));
+                if(us < u)
+                    u= us;
+            }
         }
+        speed= v;
         for (uint8_t i = 0; i < 8; i++) {
-            float g= (((((s6 / 720.0F * d + s5 / 120.0F) * d + s4 / 24.0F) * d + j / 6.0F) * d
-                       + a * 0.5F) * d + v) * d - step;
-            float dg= ((((s6 / 120.0F * d + s5 / 24.0F) * d + s4 / 6.0F) * d + j * 0.5F) * d + a) * d + v;
-            if(dg <= 0.0F) break;
+            // p the distance, q its derivative
+            float p= taylor[0], q= taylor[0];
+            for (uint8_t k = 1; k < 6; k++) {
+                p= p * u + taylor[k];
+                q= q * u + p;
+            }
+            float g= p * u - d, dg= q;
+            if(dg <= 0.0F)
+                break;
+
+            speed= dg;
             float move= g / dg;
-            d-= move;
-            if(fabsf(move) < 1e-7F * d) break;
+            u-= move;
+            if(fabsf(move) <= 4e-7F * u)
+                break;
         }
-        dt= d > 0.0F ? d : step / (v > 1e-3F ? v : 1e-3F);
+        return u > 0.0F ? u : d / (v > 1e-3F ? v : 1e-3F);
     }
 
-    void advance_to(uint32_t to, float step)
+    float interval_at(float d, float step, float before, float to, float speed) const
     {
-        while(k < to) {
-            if(!solved) solve(step);
-            t+= dt;
-            s+= ds;
-            k++;
-            solved= false;
-        }
+        float unused;
+        float seed= speed > 1e-3F ? to - step / speed : 0.0F;
+        return to - time_to(d - step, before, seed, unused);
     }
 
-    // forward only: at is never behind the step the leg stands at
-    float interval(uint32_t at, float step)
+    uint32_t reach(float step, float tol, uint32_t most) const
     {
-        advance_to(at, step);
-        if(!solved) solve(step);
-        return dt;
+        if(most <= 2 || v < 1e-3F)
+            return most < 2 ? most : 2;
+
+        float bend= fabsf(3.0F * a * a - j * v);
+        float n= v * v * sqrtf(4.0F * tol / (step * step * (bend + 1e-9F)));
+        if(n > (float)most)
+            n= (float)most;
+
+        float tt= tf + n * step / v;
+        if(tt > T)
+            tt= T;
+
+        float ve= v_at(tt), ae= a_at(tt), je= j_at(tt);
+        if(ve < 1e-3F)
+            return 2;
+
+        float slow= ve < v ? ve : v;
+        float bend_e= fabsf(3.0F * ae * ae - je * ve);
+        if(bend_e > bend)
+            bend= bend_e;
+
+        n= slow * slow * sqrtf(4.0F * tol / (step * step * (bend + 1e-9F)));
+        if(n > (float)most)
+            return most;
+
+        return n < 2.0F ? 2 : (uint32_t)n;
+    }
+
+    void advance(float d, float seconds, float last)
+    {
+        t+= seconds;
+        s+= d;
+        hint= last;
+        located= false;
     }
 
     Point point() const
@@ -186,6 +237,15 @@ void StepCompress::rewind()
 
 float StepCompress::profile_v() { return leg.valid ? leg.point().v : point.v; }
 float StepCompress::profile_a() { return leg.valid ? leg.point().a : point.a; }
+
+static bool within(float played, float exact, float tolerance)
+{
+    float allow= exact * tolerance;
+    if(allow < 1.0F)
+        allow= 1.0F;
+
+    return fabsf(played - exact) <= allow;
+}
 
 uint32_t StepCompress::plateau(StepStream &out, float v, const Span &s, uint32_t offset, uint32_t steps)
 {
@@ -226,7 +286,6 @@ uint32_t StepCompress::ramp(StepStream &out, const Target &t, const Span &s, uin
         if(leg.valid) point= leg.point();
         leg.derive(point, t);
     }
-    uint32_t base= leg.k - done;
     const float hz= timer_hz_;
 
     uint32_t i= done;
@@ -234,43 +293,69 @@ uint32_t StepCompress::ramp(StepStream &out, const Target &t, const Span &s, uin
         if(out.full()) {
             break;
         }
+        leg.locate();
 
-        float first= leg.interval(base + i, s.step(offset + i)) * hz;
-        if(i + 1 >= steps) {
-            out.push((uint32_t)(first + 0.5F), 1, 0);
+        uint32_t at= offset + i;
+        float step= s.step(at);
+        float speed;
+        float first= leg.time_to(step, step, leg.hint, speed);
+        uint32_t ticks= (uint32_t)(first * hz + 0.5F);
+
+        uint32_t most= s.stretch(at, steps - i);
+        if(most > 0xFFFFU)
+            most= 0xFFFFU;
+        if(most < 2) {
+            out.push(ticks, 1, 0);
+            leg.advance(step, first, first);
             i++;
-            break;
+            continue;
         }
 
-        float last= leg.interval(base + i + 1, s.step(offset + i + 1)) * hz;
-        float add= last - first;
-        uint32_t k= 2;
-        float want= first + last;
-
-        while(i + k < steps && k < 0xFFFFU) {
-            float exact= leg.interval(base + i + k, s.step(offset + i + k)) * hz;
-            float allow= exact * tolerance_;
-            if(allow < 1.0F) allow= 1.0F;
-            if(fabsf(first + k * add - exact) > allow) {
-                break;
+        const float half= 0.5F * tolerance_;
+        uint32_t n= leg.reach(step, tolerance_, most);
+        float d, total, last;
+        int32_t add;
+        for (;;) {
+            d= s.dist(at, at + n);
+            float last_step= s.step(at + n - 1);
+            total= leg.time_to(d, last_step, 0.0F, speed);
+            last= total - first;
+            float mean= total / (float)n * hz;
+            if(n > 2) {
+                last= leg.interval_at(d, last_step, s.step(at + n - 2), total, speed);
+                ticks= (uint32_t)(mean - 0.5F * (last - first) * hz + 0.5F);
             }
-            want+= exact;
-            last= exact;
-            k++;
+            float fit= 2.0F * (mean - (float)ticks) / (float)(n - 1);
+            float scaled= fit * (1 << StepStream::k_add_shift);
+            add= (int32_t)(scaled < 0 ? scaled - 0.5F : scaled + 0.5F);
+            if(n == 2)
+                break;
+
+            // the line misses the first and the last interval by the same amount; a cubic
+            // error peaks at 0.21 of the run
+            float slope= (float)add / (1 << StepStream::k_add_shift);
+            float e= fabsf(mean - 0.5F * (first + last) * hz);
+            e+= 0.5F * (float)(n - 1) / (1 << StepStream::k_add_shift);
+            bool ok= e <= fmaxf(1.0F, half * hz * fminf(first, last));
+            if(ok && n > 8) {
+                uint32_t m= (uint32_t)(0.211F * (float)n) + 1;
+                float dm= s.dist(at, at + m);
+                float mid_step= s.step(at + m - 1);
+                float to= leg.time_to(dm, mid_step, 0.0F, speed);
+                float mid= leg.interval_at(dm, mid_step, mid_step, to, speed);
+                ok= within((float)ticks + (float)(m - 1) * slope, mid * hz, half);
+            }
+            if(ok)
+                break;
+
+            n= n * 5 / 8;
+            if(n < 2)
+                n= 2;
         }
 
-        float fit= (want - k * first) / (k * (k - 1) * 0.5F);
-        float allow= last * tolerance_;
-        if(allow < 1.0F) allow= 1.0F;
-        if(fabsf(first + (k - 1) * fit - last) > allow) {
-            fit= add;
-        }
-
-        float scaled= fit * (1 << StepStream::k_add_shift);
-        out.push((uint32_t)(first + 0.5F), k, (int32_t)(scaled < 0 ? scaled - 0.5F : scaled + 0.5F));
-        i+= k;
+        out.push(ticks, n, add);
+        leg.advance(d, total, last);
+        i+= n;
     }
-    // the next span, or a new target, starts from where the ring stands
-    leg.advance_to(base + i, s.ds);
     return i;
 }

@@ -387,6 +387,104 @@ int main()
         CHECK(fabs(was - 30.0) < 0.3);
     }
 
+    {
+        struct Run { uint32_t interval, count; int32_t add; };
+        const Run runs[] = {{5000, 300, -37}, {1201, 7, 911}, {3000000, 2000, 0}, {977, 1500, 13}};
+        const size_t n = sizeof(runs) / sizeof(runs[0]);
+        StepStream ring;
+        for (const Run &r : runs) ring.push(r.interval, r.count, r.add);
+        bool exact = true, steady = true;
+        for (size_t i = 0; i < n; i++) {
+            uint32_t before = ring.ticks_queued();
+            for (uint32_t k = 0; k < runs[i].count; k++) {
+                uint32_t t = ring.take();
+                if (runs[i].add == 0 && k + 1 < runs[i].count) {
+                    if (before - ring.ticks_queued() != t)
+                        steady = false;
+
+                    before = ring.ticks_queued();
+                }
+            }
+            StepStream rest;
+            for (size_t j = i + 1; j < n; j++) rest.push(runs[j].interval, runs[j].count, runs[j].add);
+            if (ring.ticks_queued() != rest.ticks_queued())
+                exact = false;
+        }
+        CHECK(exact);
+        CHECK(steady);
+        CHECK(ring.empty() && ring.ticks_queued() == 0);
+    }
+
+    {
+        struct Case { float v0, v1; uint32_t steps; };
+        const Case cases[] = {{0.0F, 66.7F, 334}, {0.0F, 266.7F, 5336}, {266.7F, 0.0F, 5336},
+                              {10.0F, 30.0F, 4000}};
+        size_t runs_at[2] = {0, 0};
+        for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
+            const Case &k = cases[c];
+            Span s = ramp_span(ds, k.steps, k.v0, k.v1, 1.0F);
+            s.whole = k.steps;
+            Target t;
+            t.v1 = k.v1;
+            t.d = (float)k.steps * ds;
+            StepStream ring;
+            StepCompress::rewind();
+            if (k.v0 > 0) {
+                StepCompress::plateau(ring, k.v0, steps_of(ds), 0, 1);
+                while (ring.take() != 0) {}
+            }
+            std::vector<double> dt;
+            size_t runs = 0;
+            uint32_t at = 0;
+            while (at < k.steps) {
+                at = StepCompress::ramp(ring, t, s, 0, k.steps, at);
+                runs += ring.used();
+                for (uint32_t x = ring.take(); x != 0; x = ring.take()) dt.push_back(x / HZ);
+            }
+            CHECK(dt.size() == k.steps);
+            if (dt.size() != k.steps)
+                continue;
+
+            if (c < 2)
+                runs_at[c] = runs;
+
+            const double D = (double)k.steps * ds, T = 2.0 * D / ((double)k.v0 + k.v1);
+            const double dv = (double)k.v1 - k.v0;
+            double tk = 0, played = 0, worst = 0, off = 0;
+            for (uint32_t i = 1; i <= k.steps; i++) {
+                double next = T;
+                if (i < k.steps) {
+                    double lo = tk, hi = T;
+                    for (int it = 0; it < 60; it++) {
+                        double mid = 0.5 * (lo + hi), u = mid / T, u4 = u * u * u * u;
+                        double at_mid = k.v0 * mid + dv * T * (2.5 * u4 - 3.0 * u4 * u + u4 * u * u);
+                        if (at_mid < (double)i * ds)
+                            lo = mid;
+                        else
+                            hi = mid;
+                    }
+                    next = 0.5 * (lo + hi);
+                }
+                double exact = next - tk;
+                played += dt[i - 1];
+                bool ends = i <= 2 || i + 2 > k.steps;
+                if (!ends) {
+                    double allow = fmax(0.001 * exact, 1.0 / HZ) + 0.6 / HZ;
+                    worst = fmax(worst, fabs(dt[i - 1] - exact) / allow);
+                    off = fmax(off, fabs(played - next) / exact);
+                }
+                tk = next;
+            }
+            printf("%6.1f -> %6.1f mm/s over %5u steps: %3zu runs, worst interval %.2f of its "
+                   "allowance, worst step %.3f of an interval off its time, %.4f s for %.4f\n",
+                   k.v0, k.v1, k.steps, runs, worst, off, played, T);
+            CHECK(worst <= 1.0);
+            CHECK(off <= 1.0);
+            CHECK(fabs(played - T) < 1e-4 * T + 2e-4);
+        }
+        CHECK(runs_at[1] < 4 * runs_at[0]);
+    }
+
     if (fails == 0) printf("all ok\n");
     return fails == 0 ? 0 : 1;
 }
