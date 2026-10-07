@@ -1601,8 +1601,12 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode
 
     DEBUG_PRINTF("distance: %f, aux_move: %d\n", distance, auxilliary_move);
 
-    // use default acceleration to start with
-    float acceleration = default_acceleration;
+    float axis_accel[3];
+    for (size_t i = X_AXIS; i <= Z_AXIS; i++) {
+        float ma = actuators[i]->get_acceleration();
+        axis_accel[i] = isnan(ma) ? default_acceleration : ma;
+    }
+    float acceleration = auxilliary_move ? default_acceleration : INFINITY;
 
     float isecs = distance / rate_mm_s;
 
@@ -1669,20 +1673,14 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode
 
 		// adjust acceleration to lowest found, for all actuators as this also corrects
 		// the math for a tiny X move and large A move
-		float ma = actuators[actuator]->get_acceleration(); // in mm / sec² or degree / sec² for A axis
-		if (!isnan(ma)) {  // if axis does not have acceleration set then it uses the default_acceleration
-			float ca = (d / distance) * acceleration;
-			if (ca > ma) {
-				if (actuator == A_AXIS) {
-					acceleration *= (ma * 3 / ca);
-				} else {
-					acceleration *= (ma / ca);
-				}
-				DEBUG_PRINTF("new acceleration: %f\n", acceleration);
-				// printk("Reduce acceleration from %1.2f to %1.2f, %f\n", ca, acceleration, rate_mm_s);
-			}
-		}
+		float ma = actuator <= Z_AXIS ? axis_accel[actuator] : actuators[actuator]->get_acceleration();
+		if (isnan(ma))
+			continue;
+
+		acceleration = std::min(acceleration, ma * distance / d);
 	}
+	if (isinf(acceleration))
+		acceleration = default_acceleration;
 
     // Append the block to the planner
     // NOTE that distance here should be either the distance travelled by the XYZ axis, or the E mm travel if a solo E move
