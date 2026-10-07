@@ -39,7 +39,6 @@ public:
     Block *take_block(unsigned int i);
     Block *next_block() { return queue.item_ref(queue.next(queue.isr_tail_i)); }
     // true if the newest queued block can still get a blend window of w steps at its end
-    bool can_blend(uint32_t w) const;
     void block_finished();
 
     void flush_queue(void);
@@ -135,7 +134,6 @@ private:
     void sweep();
     bool span_of(unsigned int i, uint32_t from, float entry2, float &exit2,
                  StepCompress::Span &s) const;
-    void window_out(unsigned int i, StepCompress::Span &s) const;
 
 
     bool initialized{false};

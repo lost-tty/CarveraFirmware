@@ -328,7 +328,7 @@ void StepTicker::stand()
 
 uint32_t StepTicker::held_path() const
 {
-    return state_ == HELD ? mix.pos : 0;
+    return state_ == HELD ? player.made : 0;
 }
 
 void StepTicker::release(bool resume)
@@ -343,7 +343,7 @@ void StepTicker::release(bool resume)
     held_block= resume ? current_block : nullptr;
     current_block= nullptr;
     if(!resume) {
-        mix.reset();
+        player.reset();
     }
 
     state_= IDLE;
@@ -382,7 +382,7 @@ inline uint32_t StepTicker::run_tick (void)
         stream.clear();
         current_block= nullptr;
         held_block= nullptr;
-        mix.reset();
+        player.reset();
         current_tick= 0;
         state_= IDLE;
         THECONVEYOR.drop_queue();
@@ -435,7 +435,6 @@ inline uint32_t StepTicker::run_tick (void)
     uint32_t ticks= stream.take();
 
     if(ticks == 0) {
-        if(mix.owing()) pulse(nullptr);
         if(current_block != nullptr && played_out()) end_block(motion);
         if(!ring_low) {
             defer_wake();
@@ -474,19 +473,21 @@ inline uint32_t StepTicker::run_tick (void)
     return issue_step(ticks, motion);
 }
 
-inline void StepTicker::pulse(StepMix::Player *p)
+inline void StepTicker::pulse()
 {
+    if(!player.tick())
+        return;
+
     uint32_t fire= 0;
     for (uint8_t m = 0; m < num_motors; m++) {
-        uint8_t does= mix.motor(p, m);
-        if(does == 0) continue;
-        if(does == StepMix::TURNED) {
-            motor[m]->set_direction((mix.pin_dirs >> m) & 1);
+        if(!player.motor(m))
             continue;
-        }
+
         fire|= step_bit[m];
-        if(!motor[m]->count_step()) mix.drop(m);   // its moving flag was cleared from outside
-        if(!mix.busy(m)) motor[m]->stop_moving();
+        if(!motor[m]->count_step())
+            player.drop(m);   // its moving flag was cleared from outside
+        if(!player.busy(m))
+            motor[m]->stop_moving();
     }
 
     // every motor due steps in the one write; TIMER1 takes the pins down again after the pulse
@@ -500,7 +501,6 @@ inline void StepTicker::pulse(StepMix::Player *p)
 
 void StepTicker::end_block(Motion motion)
 {
-    // steps that cancelled across a corner end a motor without a pulse
     for (uint8_t m = 0; m < num_motors; m++) motor[m]->stop_moving();
     current_tick= 0;
     if(current_block != nullptr) THECONVEYOR.block_finished();
@@ -511,15 +511,7 @@ void StepTicker::end_block(Motion motion)
 
 inline uint32_t StepTicker::issue_step(uint32_t ticks, Motion motion)
 {
-    StepMix::Player *p= mix.tick();
-    uint32_t w= current_block != nullptr ? current_block->blend_out : 0;
-    if(mix.wants_next(w)) {
-        mix.open(*THECONVEYOR.next_block(), w);
-        for (uint8_t m = 0; m < num_motors; m++) {
-            if(mix.other.left[m] != 0) motor[m]->start_moving();
-        }
-    }
-    pulse(p);
+    pulse();
 
     current_tick++;
 
@@ -560,26 +552,25 @@ bool StepTicker::start_next_block()
     bool resume= current_block == held_block;
     held_block= nullptr;
 
-    if(!resume && mix.two && mix.first_half) {
-        mix.swap_at_mark();
-    } else if(!resume) {
-        mix.n= num_motors;
-        mix.start(*current_block);
-        uint8_t pins= 0;
+    if(!resume) {
+        player.n= num_motors;
+        player.start(*current_block);
         for (uint8_t m = 0; m < num_motors; m++) {
-            if(mix.lead.left[m] != 0) {
-                bool dir= (current_block->direction_bits >> m) & 1;
-                if(motor[m]->which_direction() != dir) dir_lead= dir_lead_ticks;
-                motor[m]->set_direction(dir);
-            }
-            if(motor[m]->which_direction()) pins|= 1 << m;
+            if(!player.busy(m))
+                continue;
+
+            bool dir= (current_block->direction_bits >> m) & 1;
+            if(motor[m]->which_direction() != dir)
+                dir_lead= dir_lead_ticks;
+            motor[m]->set_direction(dir);
         }
-        mix.pin_dirs= pins;
     }
 
     bool ok= false;
     for (uint8_t m = 0; m < num_motors; m++) {
-        if(!mix.busy(m)) continue;
+        if(!player.busy(m))
+            continue;
+
         ok= true;
         motor[m]->start_moving();
     }

@@ -25,7 +25,6 @@ private:
     bool append_block(ActuatorCoordinates &target, uint8_t n_motors, float rate_mm_s, float distance, float unit_vec[], float accleration, float s_value, bool cutting, uint32_t mark);
     // 2024
     // bool append_block(ActuatorCoordinates &target, uint8_t n_motors, float rate_mm_s, float distance, float unit_vec[], float accleration, float *s_values, int s_count, bool cutting, uint32_t mark);
-    bool blend(Block *prev, Block *block, float cos_theta, float &speed);
     float previous_unit_vec[N_PRIMARY_AXIS];
     float tolerance;             // mm, 0: exact path
     float default_tolerance;     // Setting

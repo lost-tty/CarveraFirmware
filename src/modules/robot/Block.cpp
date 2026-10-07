@@ -53,8 +53,6 @@ void Block::clear()
     millimeters         = 0.0F;
     acceleration        = 100.0F; // we don't want to get divide by zeroes if this is not set
     max_entry_speed     = 0.0F;
-    blend_in            = 0;
-    blend_out           = 0;
     cutting             = false;
     s_value             = 0;
 

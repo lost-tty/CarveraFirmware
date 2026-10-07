@@ -58,37 +58,6 @@ void Planner::config_load(const void *cfg)
     this->tolerance = this->default_tolerance;
 }
 
-bool Planner::blend(Block *prev, Block *block, float cos_theta, float &speed)
-{
-    if(!prev->cutting || !block->cutting) return false;
-    for (uint8_t i = Z_AXIS + 1; i < k_max_actuators; ++i) {
-        if(prev->steps[i] != 0 || block->steps[i] != 0) return false;
-    }
-
-    float s= sqrtf(0.5F * (1.0F + cos_theta));   // sine of half the turn
-    if(s < 1e-4F) return false;
-    uint32_t n_prev= prev->steps_event_count();
-    uint32_t n= block->steps_event_count();
-    float ds_prev= prev->millimeters / (float)n_prev;
-    float ds= block->millimeters / (float)n;
-    float longer= std::max(ds_prev, ds);
-    float shorter= std::min(ds_prev, ds);
-
-    // the longer side at 2 tolerance / sin(turn / 2) keeps the parabola within it of the vertex
-    float steps= 2.0F * tolerance / (s * longer);
-    uint32_t most= std::min(std::min(n_prev, n) / 2, (uint32_t)65535);
-    uint32_t w= steps < (float)most ? (uint32_t)steps : most;
-    if(w == 0 || !THECONVEYOR.can_blend(w)) return false;
-    prev->blend_out= w;
-    block->blend_in= w;
-
-    // the turn takes v^2 s longer / (w shorter^2), held to the profile's peak
-    float a= std::min(prev->acceleration, block->acceleration) * StepCompress::k_peak_over_mean;
-    speed= sqrtf(a * (float)w * shorter * shorter / (longer * s));
-    return true;
-}
-
-
 // Append a block to the queue, compute it's speed factors
 // 2024
 bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors, float rate_mm_s, float distance, float *unit_vec, float acceleration, float s_value, bool cutting, uint32_t mark)
@@ -229,10 +198,8 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
                 if (cos_theta >= -0.9999F) {
                     // Compute maximum junction velocity based on maximum acceleration and junction deviation
                     float sin_theta_d2 = sqrtf(0.5F * (1.0F - cos_theta)); // Trig half angle identity. Always positive.
-                    float limit;
-                    if(tolerance <= 0.0F || !blend(prev_block, block, cos_theta, limit)) {
-                        limit = sqrtf(acceleration * junction_deviation * sin_theta_d2 / (1.0F - sin_theta_d2));
-                    }
+                    float limit = sqrtf(acceleration * junction_deviation * sin_theta_d2
+                                        / (1.0F - sin_theta_d2));
                     vmax_junction = std::min(vmax_junction, limit);
                 }
             }

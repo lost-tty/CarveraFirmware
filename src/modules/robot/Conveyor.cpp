@@ -85,19 +85,6 @@ void Conveyor::cleanup()
     flush_queue();
 }
 
-bool Conveyor::can_blend(uint32_t w) const
-{
-    if(queue.is_empty() || fed_i == queue.head_i) return false;
-    if(fence.on && fence.at == queue.head_i)
-        return false;
-
-    if(pending_actions.waiting_after(queued)) return false;
-    if(fed_i != queue.prev(queue.head_i)) return true;
-    // a block being fed can still blend while in its plateau, with the window not yet written
-    if(fed_started && (fed_steps < fed.up || fed_steps >= fed.up + fed.flat)) return false;
-    return fed_from + fed_steps + w <= queue.item_ref(fed_i)->steps_event_count();
-}
-
 void Conveyor::resume_held()
 {
     StepTicker &ticker= THEKERNEL->step_ticker;
@@ -166,22 +153,9 @@ bool Conveyor::span_of(unsigned int i, uint32_t from, float entry2, float &exit2
 
     s.at0= from;
     s.whole= whole;
-    s.in= 0;
-    // the previous block may already be freed: the rest of its corner then uses this step length
-    if(b->blend_in != 0 && i != queue.tail_i) {
-        s.in= b->blend_in;
-        s.ds_in= 0.5F * (step_length(queue.item_ref(queue.prev(i))) + s.ds);
-    }
-    window_out(i, s);
 
     plan(b, entry2, exit2, s);
     return true;
-}
-
-void Conveyor::window_out(unsigned int i, StepCompress::Span &s) const
-{
-    s.out= queue.item_ref(i)->blend_out;
-    if(s.out != 0) s.ds_out= 0.5F * (s.ds + step_length(queue.item_ref(queue.next(i))));
 }
 
 // reverse pass, in squared speeds
@@ -230,15 +204,14 @@ void Conveyor::feed_stream()
                 continue;
             }
         } else if(fed_steps >= fed.up && fed_steps < fed.up + fed.flat) {
-            // replan the unwritten plateau when the exit speed has risen or a blend was added
+            // replan the unwritten plateau when the exit speed has risen
             float nominal2= b->nominal_speed * b->nominal_speed;
             if(exit2 > nominal2) exit2= nominal2;
-            if(exit2 > fed_exit2 || b->blend_out != fed.out) {
+            if(exit2 > fed_exit2) {
                 fed_from+= fed_steps;
                 fed_steps= 0;
                 fed_exit2= exit2;
                 fed.at0= fed_from;
-                window_out(fed_i, fed);
                 plan(b, fed.v_flat * fed.v_flat, fed_exit2, fed);
             }
         }
@@ -300,7 +273,7 @@ void Conveyor::feed_stream()
 
         if(fed_steps < up) {
             StepCompress::Target t= StepCompress::target(StepCompress::ACCEL, fed_steps, s, next);
-            fed_steps= StepCompress::ramp(ticker.steps(), t, s, 0, up, fed_steps);
+            fed_steps= StepCompress::ramp(ticker.steps(), t, s, up, fed_steps);
             if(fed_steps < up) {
                 break;                   // the ring filled inside the ramp
             }
@@ -322,12 +295,12 @@ void Conveyor::feed_stream()
             }
             float room= (float)(most - queued) * s.v_flat / (hz * s.ds);
             if(room < (float)steps) steps= (uint32_t)room + 1;
-            fed_steps+= StepCompress::plateau(ticker.steps(), s.v_flat, s, fed_steps, steps);
+            fed_steps+= StepCompress::plateau(ticker.steps(), s.v_flat, s, steps);
         }
 
         if(fed_steps >= plateau_end && fed_steps < total) {
             StepCompress::Target t= StepCompress::target(StepCompress::DECEL, fed_steps, s, next);
-            uint32_t into= StepCompress::ramp(ticker.steps(), t, s, plateau_end, s.down,
+            uint32_t into= StepCompress::ramp(ticker.steps(), t, s, s.down,
                                               fed_steps - plateau_end);
             fed_steps= plateau_end + into;
         }
@@ -477,15 +450,8 @@ bool Conveyor::fence_after_playing()
         return false;
 
     unsigned int i= queue.isr_tail_i;
-    if(i != queue.head_i) {
-        const Block *b= queue.item_ref(i);
-        uint32_t at= m == StepTicker::HELD ? ticker.held_path() : fed_from;
-        bool in_corner= at + b->blend_out > b->steps_event_count();
+    if(i != queue.head_i)
         i= past_line(i);
-        // stopped in the corner into the next line, that line ends first
-        if(in_corner && i != queue.head_i && queue.prev(i) == queue.isr_tail_i)
-            i= past_line(i);
-    }
     place_fence(i);
     return true;
 }
@@ -496,12 +462,6 @@ void Conveyor::place_fence(unsigned int i)
     unsigned int behind= (queue.head_i + BLOCK_QUEUE_LENGTH - i) % BLOCK_QUEUE_LENGTH;
     fence.edge= queued - behind;
     fence.edge_mark= i == queue.isr_tail_i ? executed : queue.item_ref(queue.prev(i))->mark;
-    if(i != queue.head_i)
-        queue.item_ref(i)->blend_in= 0;
-
-    if(i != queue.isr_tail_i)
-        queue.item_ref(queue.prev(i))->blend_out= 0;
-
     fence.at= i;
     fence.on= true;
 }

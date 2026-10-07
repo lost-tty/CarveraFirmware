@@ -15,8 +15,6 @@
 //     the blocks, whatever their step lengths
 //   - a leg whose end moves while it is being written stays continuous in speed and acceleration
 //   - a junction without slack ends the leg there
-//   - across a blend window the step's length passes from one block's to the next one's, and
-//     the speed along the path does not notice
 //
 // c++ -std=c++11 -I ../src/libs stepcompress_test.cpp ../src/libs/StepCompress.cpp
 #include "StepCompress.h"
@@ -66,13 +64,13 @@ struct Plan {
             while (at < total) {
                 if (at < s.up) {
                     Target t = StepCompress::target(StepCompress::ACCEL, at, s, next);
-                    at = StepCompress::ramp(ring, t, s, 0, s.up, at);
+                    at = StepCompress::ramp(ring, t, s, s.up, at);
                 } else if (at < s.up + s.flat) {
-                    at += StepCompress::plateau(ring, s.v_flat, s, at, s.up + s.flat - at);
+                    at += StepCompress::plateau(ring, s.v_flat, s, s.up + s.flat - at);
                 } else {
                     Target t = StepCompress::target(StepCompress::DECEL, at, s, next);
                     uint32_t flat_end = s.up + s.flat;
-                    at = flat_end + StepCompress::ramp(ring, t, s, flat_end, s.down, at - flat_end);
+                    at = flat_end + StepCompress::ramp(ring, t, s, s.down, at - flat_end);
                 }
                 drain(ring);
             }
@@ -125,7 +123,8 @@ static void check_single(float v0, float v1, uint32_t steps)
     StepCompress::rewind();
     if (v0 > 0) {
         StepStream ring;
-        StepCompress::plateau(ring, v0, steps_of(ds), 0, 1);   // the profile stands at v0 before the leg
+        // the profile stands at v0 before the leg
+        StepCompress::plateau(ring, v0, steps_of(ds), 1);
     }
     p.run();
     const std::vector<double> &dt = p.dt;
@@ -181,8 +180,8 @@ int main()
         up.spans.push_back(ramp_span(ds, 2000, 5.0F, V, 1.0F));
         down.spans.push_back(ramp_span(ds, 2000, V, 5.0F, 1.0F));
         StepStream ring;
-        StepCompress::rewind(); StepCompress::plateau(ring, 5.0F, steps_of(ds), 0, 1); up.run();
-        StepCompress::rewind(); StepCompress::plateau(ring, V, steps_of(ds), 0, 1);    down.run();
+        StepCompress::rewind(); StepCompress::plateau(ring, 5.0F, steps_of(ds), 1); up.run();
+        StepCompress::rewind(); StepCompress::plateau(ring, V, steps_of(ds), 1);    down.run();
         double worst = 0;
         for (size_t i = 0; i < up.dt.size(); i++) {
             double e = fabs(up.dt[i] - down.dt[down.dt.size() - 1 - i]) / up.dt[i];
@@ -287,7 +286,7 @@ int main()
         p.spans.push_back(ramp_span(ds, 4000, 5.0F, 20.0F, 1.0F));   // 20 mm to 20 mm/s
         StepStream ring;
         StepCompress::rewind();
-        StepCompress::plateau(ring, 5.0F, steps_of(ds), 0, 1);
+        StepCompress::plateau(ring, 5.0F, steps_of(ds), 1);
         p.drain(ring);
         p.dt.clear();
         // write the first 10 mm against that plan
@@ -296,7 +295,7 @@ int main()
                                         [&](uint8_t j, Span &o) { return p.next_from(0, j, o); });
         uint32_t at = 0;
         while (at < 2000) {
-            at = StepCompress::ramp(ring, t, steps_of(ds), 0, 2000, at);
+            at = StepCompress::ramp(ring, t, steps_of(ds), 2000, at);
             p.drain(ring);
         }
         float v_cut = StepCompress::profile_v(), a_cut = StepCompress::profile_a();
@@ -307,7 +306,7 @@ int main()
         uint32_t n2 = 12000;
         at = 0;
         while (at < n2) {
-            at = StepCompress::ramp(ring, t2, steps_of(ds), 0, n2, at);
+            at = StepCompress::ramp(ring, t2, steps_of(ds), n2, at);
             p.drain(ring);
         }
         CHECK(p.dt.size() == 2000 + 12000);
@@ -319,72 +318,6 @@ int main()
         CHECK(fabs(v_after - v_before) < 0.01 * v_before);
         CHECK(fabs(after - before) < 0.15 * fabs(before) + 0.2);
         CHECK(fabs(ds / p.dt.back() - 30.0) < 0.6);
-    }
-
-    // 7. an axis block into a diagonal one through a blend window of 400 steps each side: the
-    //    step grows by root two across it. At constant speed and along one leg the speed over
-    //    the path stays what the profile says, and the two blocks take the polygon's time
-    {
-        const float diag = ds * sqrtf(2.0F);
-        auto corner = [&](float v0, float v1, float accel) {
-            Plan p;
-            Span a = ramp_span(ds, 2000, v0, 0.5F * (v0 + v1), accel);
-            Span b = ramp_span(diag, 2000, 0.5F * (v0 + v1), v1, accel);
-            if (v0 == v1) {
-                a.up = b.up = 0;
-                a.flat = b.flat = 2000;
-                a.down = b.down = 0;
-            }
-            a.whole = b.whole = 2000;
-            a.out = b.in = 400;
-            a.ds_out = b.ds_in = 0.5F * (ds + diag);
-            p.spans.push_back(a);
-            p.spans.push_back(b);
-            StepStream ring;
-            StepCompress::rewind();
-            StepCompress::plateau(ring, v0, steps_of(ds), 0, 1);
-            p.run();
-            return p;
-        };
-        double length = 2000 * ds + 2000 * diag;
-
-        Plan flat = corner(20.0F, 20.0F, 1.0F);
-        CHECK(flat.dt.size() == 4000);
-        double T = 0, worst = 0;
-        for (size_t k = 0; k < flat.dt.size(); k++) {
-            T += flat.dt[k];
-            const Span &s = flat.spans[k / 2000];
-            worst = fmax(worst, fabs(s.step(k % 2000) / flat.dt[k] - 20.0));
-        }
-        printf("window at 20 mm/s: %.4f s for %.4f, speed within %.3f mm/s, "
-               "interval %.1f -> %.1f us at the mark\n",
-               T, length / 20.0, worst, flat.dt[1999] * 1e6, flat.dt[2000] * 1e6);
-        CHECK(fabs(T - length / 20.0) < 1e-4 * T);
-        CHECK(worst < 0.02);
-        CHECK(fabs(flat.dt[2000] - flat.dt[1999]) < 0.002 * flat.dt[1999]);
-
-        float mean = (30.0F * 30.0F - 10.0F * 10.0F) / (2.0F * (float)length);
-        Plan leg = corner(10.0F, 30.0F, mean);
-        CHECK(leg.dt.size() == 4000);
-        T = 0;
-        double jump = 0, was = 10.0;
-        size_t where = 0;
-        for (size_t k = 0; k < leg.dt.size(); k++) {
-            T += leg.dt[k];
-            double v = leg.spans[k / 2000].step(k % 2000) / leg.dt[k];
-            if (fabs(v - was) > jump * was) {
-                jump = fabs(v - was) / was;
-                where = k;
-            }
-            was = v;
-        }
-        printf("window inside a leg 10 -> 30 mm/s: %.4f s for %.4f, "
-               "largest speed change between steps %.2f %% at step %zu\n",
-               T, 2.0 * length / 40.0, 100.0 * jump, where);
-        CHECK(fabs(T - 2.0 * length / 40.0) < 0.003 * T);
-        // a run is within 0.2 % of the exact interval, so two that meet within 0.4 %
-        CHECK(jump < 0.004);
-        CHECK(fabs(was - 30.0) < 0.3);
     }
 
     {
@@ -430,14 +363,14 @@ int main()
             StepStream ring;
             StepCompress::rewind();
             if (k.v0 > 0) {
-                StepCompress::plateau(ring, k.v0, steps_of(ds), 0, 1);
+                StepCompress::plateau(ring, k.v0, steps_of(ds), 1);
                 while (ring.take() != 0) {}
             }
             std::vector<double> dt;
             size_t runs = 0;
             uint32_t at = 0;
             while (at < k.steps) {
-                at = StepCompress::ramp(ring, t, s, 0, k.steps, at);
+                at = StepCompress::ramp(ring, t, s, k.steps, at);
                 runs += ring.used();
                 for (uint32_t x = ring.take(); x != 0; x = ring.take()) dt.push_back(x / HZ);
             }

@@ -247,7 +247,7 @@ static bool within(float played, float exact, float tolerance)
     return fabsf(played - exact) <= allow;
 }
 
-uint32_t StepCompress::plateau(StepStream &out, float v, const Span &s, uint32_t offset, uint32_t steps)
+uint32_t StepCompress::plateau(StepStream &out, float v, const Span &s, uint32_t steps)
 {
     if(v < 1e-3F) {
         return 0;
@@ -257,27 +257,18 @@ uint32_t StepCompress::plateau(StepStream &out, float v, const Span &s, uint32_t
     point.j= 0.0F;
     leg.valid= false;
 
-    // one run per stretch of linear step length: at constant speed the interval is linear too
-    float per_mm= timer_hz_ / v;
-    uint32_t done= 0;
-    while(done < steps) {
-        if(out.full()) {
-            break;
-        }
-        uint32_t k= offset + done;
-        uint32_t n= s.stretch(k, steps - done);
-        float first= per_mm * s.step(k);
-        float add= n > 1 ? per_mm * (s.step(k + 1) - s.step(k)) * (1 << StepStream::k_add_shift) : 0.0F;
-        uint32_t interval= (uint32_t)(first + 0.5F);
-        if(interval < 1) interval= 1;
-        out.push(interval, n, (int32_t)(add < 0 ? add - 0.5F : add + 0.5F));
-        done+= n;
+    if(steps == 0 || out.full()) {
+        return 0;
     }
-    return done;
+    uint32_t interval= (uint32_t)(timer_hz_ / v * s.ds + 0.5F);
+    if(interval < 1)
+        interval= 1;
+    out.push(interval, steps, 0);
+    return steps;
 }
 
-uint32_t StepCompress::ramp(StepStream &out, const Target &t, const Span &s, uint32_t offset,
-                            uint32_t steps, uint32_t done)
+uint32_t StepCompress::ramp(StepStream &out, const Target &t, const Span &s, uint32_t steps,
+                            uint32_t done)
 {
     // a new leg starts from where the profile stands, so speed and acceleration stay continuous
     bool same= leg.valid && fabsf(leg.v1 - t.v1) <= 1e-3F * (t.v1 + 1.0F)
@@ -295,13 +286,12 @@ uint32_t StepCompress::ramp(StepStream &out, const Target &t, const Span &s, uin
         }
         leg.locate();
 
-        uint32_t at= offset + i;
-        float step= s.step(at);
+        float step= s.ds;
         float speed;
         float first= leg.time_to(step, step, leg.hint, speed);
         uint32_t ticks= (uint32_t)(first * hz + 0.5F);
 
-        uint32_t most= s.stretch(at, steps - i);
+        uint32_t most= steps - i;
         if(most > 0xFFFFU)
             most= 0xFFFFU;
         if(most < 2) {
@@ -316,13 +306,12 @@ uint32_t StepCompress::ramp(StepStream &out, const Target &t, const Span &s, uin
         float d, total, last;
         int32_t add;
         for (;;) {
-            d= s.dist(at, at + n);
-            float last_step= s.step(at + n - 1);
-            total= leg.time_to(d, last_step, 0.0F, speed);
+            d= (float)n * step;
+            total= leg.time_to(d, step, 0.0F, speed);
             last= total - first;
             float mean= total / (float)n * hz;
             if(n > 2) {
-                last= leg.interval_at(d, last_step, s.step(at + n - 2), total, speed);
+                last= leg.interval_at(d, step, step, total, speed);
                 ticks= (uint32_t)(mean - 0.5F * (last - first) * hz + 0.5F);
             }
             float fit= 2.0F * (mean - (float)ticks) / (float)(n - 1);
@@ -339,10 +328,9 @@ uint32_t StepCompress::ramp(StepStream &out, const Target &t, const Span &s, uin
             bool ok= e <= fmaxf(1.0F, half * hz * fminf(first, last));
             if(ok && n > 8) {
                 uint32_t m= (uint32_t)(0.211F * (float)n) + 1;
-                float dm= s.dist(at, at + m);
-                float mid_step= s.step(at + m - 1);
-                float to= leg.time_to(dm, mid_step, 0.0F, speed);
-                float mid= leg.interval_at(dm, mid_step, mid_step, to, speed);
+                float dm= (float)m * step;
+                float to= leg.time_to(dm, step, 0.0F, speed);
+                float mid= leg.interval_at(dm, step, step, to, speed);
                 ok= within((float)ticks + (float)(m - 1) * slope, mid * hz, half);
             }
             if(ok)

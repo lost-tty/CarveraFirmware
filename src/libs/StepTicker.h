@@ -20,7 +20,7 @@
 #include "Pin.h"
 #include "TSRingBuffer.h"
 #include "StepStream.h"
-#include "StepMix.h"
+#include "StepPlayer.h"
 
 class StepperMotor;
 class Block;
@@ -99,9 +99,12 @@ class StepTicker{
         void arm(uint32_t ticks);
         __attribute__((always_inline)) inline uint32_t run_tick(void);
         __attribute__((always_inline)) inline uint32_t issue_step(uint32_t ticks, Motion motion);
-        __attribute__((always_inline)) inline void pulse(StepMix::Player *p);
+        __attribute__((always_inline)) inline void pulse();
         void end_block(Motion motion);
-        bool played_out() const { return mix.pos >= mix.lead.total && !stream.at_mark() && mix.idle(); }
+        bool played_out() const
+        {
+            return player.made >= player.total && !stream.at_mark() && player.idle();
+        }
         Motion check_watch();
         Motion check_limits();
 
@@ -127,7 +130,7 @@ class StepTicker{
         uint32_t current_tick{0};
 
         StepStream &stream;
-        StepMix mix;
+        StepPlayer player;
         const Block *held_block{nullptr};
 
         int32_t poll_ticks{0};
