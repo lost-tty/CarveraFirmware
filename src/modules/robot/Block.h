@@ -21,11 +21,13 @@ class Block {
         void ready() { is_ready= true; }
         void clear();
 
-        // 0.32 fraction, rounded up so the last step is never short; 0 is the longest axis.
-        // A byte at a time, so the interrupt gets by on the core's 32-bit divide
+        // 0.32 fraction, rounded up so the last step is never short; all ones for the longest
+        // axis. A byte at a time, so the interrupt gets by on the core's 32-bit divide
         static uint32_t share_of(uint32_t steps, uint32_t longest)
         {
-            if(steps >= longest) return 0;
+            if(steps >= longest)
+                return 0xFFFFFFFFUL;
+
             if(longest >= (1UL << 24)) {
                 return (uint32_t)((((uint64_t)steps << 32) + longest - 1) / longest);
             }

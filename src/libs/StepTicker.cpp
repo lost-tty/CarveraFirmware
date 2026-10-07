@@ -484,9 +484,8 @@ inline void StepTicker::pulse()
             continue;
 
         fire|= step_bit[m];
-        if(!motor[m]->count_step())
-            player.drop(m);   // its moving flag was cleared from outside
-        if(!player.busy(m))
+        motor[m]->count_step();
+        if(player.left[m] == 0)
             motor[m]->stop_moving();
     }
 
@@ -557,10 +556,9 @@ bool StepTicker::start_next_block()
     held_block= nullptr;
 
     if(!resume) {
-        player.n= num_motors;
-        player.start(*current_block);
+        player.start(*current_block, num_motors);
         for (uint8_t m = 0; m < num_motors; m++) {
-            if(!player.busy(m))
+            if(player.left[m] == 0)
                 continue;
 
             bool dir= (current_block->direction_bits >> m) & 1;
@@ -572,7 +570,7 @@ bool StepTicker::start_next_block()
 
     bool ok= false;
     for (uint8_t m = 0; m < num_motors; m++) {
-        if(!player.busy(m))
+        if(player.left[m] == 0)
             continue;
 
         ok= true;

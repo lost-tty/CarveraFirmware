@@ -103,7 +103,7 @@ class StepTicker{
         void end_block(Motion motion);
         bool played_out() const
         {
-            return player.made >= player.total && !stream.at_mark() && player.idle();
+            return player.made >= player.total && !stream.at_mark();
         }
         Motion check_watch();
         Motion check_limits();
