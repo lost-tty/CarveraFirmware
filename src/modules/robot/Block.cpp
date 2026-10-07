@@ -52,6 +52,7 @@ void Block::clear()
     nominal_speed       = 0.0F;
     millimeters         = 0.0F;
     acceleration        = 100.0F; // we don't want to get divide by zeroes if this is not set
+    share[0]= share[1]= share[2]= 0.0F;
     max_entry_speed     = 0.0F;
     cutting             = false;
     s_value             = 0;

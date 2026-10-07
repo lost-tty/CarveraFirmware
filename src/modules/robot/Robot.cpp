@@ -17,6 +17,8 @@
 #include "Robot.h"
 #include "libs/Profile.h"
 #include "Conveyor.h"
+#include "Block.h"
+#include "StepCompress.h"
 #include "MachineTask.h"
 #include "Endstops.h"
 #include "ATCHandler.h"
@@ -61,9 +63,23 @@ static const ConfigTable::Override keepout_2_ov[] = {
     CFG_SET(RobotActuatorConfigT, en_pin, en), \
     CFG_SET(RobotActuatorConfigT, steps_per_mm, spm), \
     CFG_SET(RobotActuatorConfigT, max_rate, rate)
-static const ConfigTable::Override alpha_ov[] = { ACTUATOR("1.28", "1.29", "nc", 200.0f, 4000.0f) };
-static const ConfigTable::Override beta_ov[] = { ACTUATOR("1.26", "1.27", "nc", 200.0f, 4000.0f) };
-static const ConfigTable::Override gamma_ov[] = { ACTUATOR("1.24", "1.25", "nc", 200.0f, 4000.0f) };
+// torque curves measured 2026-10-06; Y as X
+#define TORQUE(knee, end, floor) \
+    CFG_SET(RobotActuatorConfigT, torque_knee, knee), \
+    CFG_SET(RobotActuatorConfigT, torque_end, end), \
+    CFG_SET(RobotActuatorConfigT, torque_floor, floor)
+static const ConfigTable::Override alpha_ov[] = {
+    ACTUATOR("1.28", "1.29", "nc", 200.0f, 4000.0f),
+    TORQUE(6000.0f, 10000.0f, 200.0f),
+};
+static const ConfigTable::Override beta_ov[] = {
+    ACTUATOR("1.26", "1.27", "nc", 200.0f, 4000.0f),
+    TORQUE(6000.0f, 10000.0f, 200.0f),
+};
+static const ConfigTable::Override gamma_ov[] = {
+    ACTUATOR("1.24", "1.25", "nc", 200.0f, 4000.0f),
+    TORQUE(3000.0f, 8000.0f, 300.0f),
+};
 static const ConfigTable::Override delta_ov[] = {
     ACTUATOR("1.18", "1.20!", "3.26", 26.666667f, 10800.0f),
     CFG_SET(RobotActuatorConfigT, acceleration, 360.0f),
@@ -73,6 +89,7 @@ static const ConfigTable::Override epsilon_ov[] = {
     CFG_SET(RobotActuatorConfigT, acceleration, 10.0f),
 };
 #undef ACTUATOR
+#undef TORQUE
 
 static void robot_config_changed(const ConfigTable::Group *g, const void *c);
 enum {
@@ -141,6 +158,8 @@ void Robot::init()
     this->disable_segmentation= false;
     this->disable_arm_solution= false;
     this->n_motors= 0;
+    for (size_t i = X_AXIS; i <= Z_AXIS; i++)
+        set_torque(i, NAN, NAN, NAN);
 }
 
 //Called when the module has just been loaded
@@ -228,6 +247,8 @@ void Robot::load_config()
         actuators[a]->change_steps_per_mm(ac.steps_per_mm);
         actuators[a]->set_max_rate(ac.max_rate / 60.0F); // it is in mm/min and converted to mm/sec
         actuators[a]->set_acceleration(configured_acceleration(a)); // mm/secs²
+        if (a <= Z_AXIS)
+            set_torque(a, ac.torque_knee, ac.torque_end, ac.torque_floor);
     }
 
     check_max_actuator_speeds(); // check the configs are sane
@@ -280,6 +301,7 @@ void Robot::configure(int group, const void *c)
         this->max_s_value = rc.laser_module_maximum_s_value;
         if(this->max_s_value <= 0.0F) this->max_s_value = 1.0F;
         this->default_acceleration= rc.acceleration; // mm/s²; per-axis settings override it.
+        accel_stamp++;
         cfg.mm_per_arc_segment = rc.mm_per_arc_segment;
         cfg.mm_max_arc_error = rc.mm_max_arc_error;
         cfg.arc_correction = rc.arc_correction;
@@ -313,8 +335,18 @@ void Robot::configure(int group, const void *c)
         size_t a= group - ACTUATOR_GROUP;
         actuators[a]->set_max_rate(ac.max_rate / 60.0F);
         actuators[a]->set_acceleration(configured_acceleration(a));
+        if (a <= Z_AXIS)
+            set_torque(a, ac.torque_knee, ac.torque_end, ac.torque_floor);
+
+        accel_stamp++;
         check_max_actuator_speeds();
     }
+}
+
+void Robot::set_torque(size_t axis, float knee, float end, float floor)
+{
+    torque[axis]= {knee / 60.0F, end / 60.0F, floor};
+    accel_stamp++;
 }
 
 uint8_t Robot::register_motor(StepperMotor *motor)
@@ -1046,6 +1078,7 @@ void Robot::set_acceleration(Gcode *gcode)
             actuators[i]->set_acceleration(acc);
         }
     }
+    accel_stamp++;
 }
 
 // M205 X junction deviation, Z its Z-only variant, S the minimum planner speed
@@ -1491,6 +1524,85 @@ void Robot::reset_position_from_current_actuator_position()
     #endif
 }
 
+float Robot::full_accel(size_t axis) const
+{
+    float ma = actuators[axis]->get_acceleration();
+    return isnan(ma) ? default_acceleration : ma;
+}
+
+// axis i's limit on block b's acceleration along its path at speed v; 3 is the block's own
+float Robot::accel_term(const Block &b, uint8_t i, float v) const
+{
+    if (i == 3)
+        return b.acceleration;
+
+    float s = b.share[i];
+    if (s <= 0.0F)
+        return INFINITY;
+
+    return torque[i].of(full_accel(i), v * s) / (s * StepCompress::k_peak_over_mean);
+}
+
+float Robot::path_accel(const Block &b, float v) const
+{
+    float a = accel_term(b, 3, v);
+    for (uint8_t i = 0; i < 3; i++)
+        a = std::min(a, accel_term(b, i, v));
+    return a;
+}
+
+uint8_t Robot::accel_knots(const Block &b, float w[], float a[]) const
+{
+    auto lowest = [&](float at) {
+        uint8_t low = 3;
+        for (uint8_t i = 0; i < 3; i++) {
+            if (accel_term(b, i, at) < accel_term(b, low, at))
+                low = i;
+        }
+        return low;
+    };
+
+    float at[7];
+    uint8_t n = 0;
+    at[n++] = 0.0F;
+    for (size_t i = X_AXIS; i <= Z_AXIS; i++) {
+        float s = b.share[i];
+        if (s <= 0.0F || !torque[i].on())
+            continue;
+
+        at[n++] = torque[i].knee / s;
+        at[n++] = torque[i].end / s;
+    }
+    std::sort(at, at + n);
+
+    // between two of these each term is linear in speed^2: where the lowest changes, the two
+    // cross
+    uint8_t m = 0;
+    for (uint8_t k = 0; k < n; k++) {
+        if (k > 0 && at[k] <= at[k - 1])
+            continue;
+
+        if (k > 0) {
+            float l = at[k - 1], r = at[k];
+            uint8_t i = lowest(l), j = lowest(r);
+            if (i != j) {
+                float dl = accel_term(b, i, l) - accel_term(b, j, l);
+                float dr = accel_term(b, i, r) - accel_term(b, j, r);
+                float x = l * l + (r * r - l * l) * dl / (dl - dr);
+                if (x > l * l && x < r * r) {
+                    w[m] = x;
+                    a[m] = path_accel(b, sqrtf(x));
+                    m++;
+                }
+            }
+        }
+        w[m] = at[k] * at[k];
+        a[m] = path_accel(b, at[k]);
+        m++;
+    }
+    return m;
+}
+
 // Convert target (in machine coordinates) to machine_position, then convert to actuator position and append this to the planner
 // target is in machine coordinates without the compensation transform, however we save a compensated_machine_position that includes
 // all transforms and is what we actually convert to actuator positions
@@ -1685,7 +1797,15 @@ bool Robot::append_milestone(const float target[], float rate_mm_s, Gcode *gcode
     // Append the block to the planner
     // NOTE that distance here should be either the distance travelled by the XYZ axis, or the E mm travel if a solo E move
     // NOTE this call blocks until there is room in the block queue
-    if(THEKERNEL->planner.append_block( actuator_pos, n_motors, rate_mm_s, distance, auxilliary_move ? nullptr : unit_vec, acceleration, s_value, cutting, gcode != nullptr ? gcode->mark : 0)) {
+    float share[3] = {0.0F, 0.0F, 0.0F};
+    if (!auxilliary_move) {
+        for (size_t i = X_AXIS; i <= Z_AXIS; i++)
+            share[i] = fabsf(unit_vec[i]);
+    }
+    if(THEKERNEL->planner.append_block( actuator_pos, n_motors, rate_mm_s, distance,
+                                        auxilliary_move ? nullptr : unit_vec, acceleration,
+                                        share, s_value, cutting,
+                                        gcode != nullptr ? gcode->mark : 0)) {
         // this is the new compensated machine position
         memcpy(this->compensated_machine_position, transformed_target, n_motors * sizeof(float));
         return true;

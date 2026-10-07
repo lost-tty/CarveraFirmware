@@ -61,7 +61,10 @@ CONFIG_STRUCT(RobotKeepoutToolzConfigT, ROBOT_KEEPOUT_TOOLZ_CONFIG);
     X(pin,   en_pin,        "en_pin",        "nc") \
     X(float, steps_per_mm,  "steps_per_mm",  80.0f) \
     X(float, max_rate,      "max_rate",      30000.0f) \
-    X(float, acceleration,  "acceleration",  NAN)
+    X(float, acceleration,  "acceleration",  NAN) \
+    X(float, torque_knee,   "torque_knee",   NAN) \
+    X(float, torque_end,    "torque_end",    NAN) \
+    X(float, torque_floor,  "torque_floor",  NAN)
 
 CONFIG_STRUCT(RobotActuatorConfigT, ROBOT_ACTUATOR_CONFIG);
 

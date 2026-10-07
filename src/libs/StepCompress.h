@@ -24,12 +24,13 @@ public:
     static void configure(float timer_hz, float tolerance);
     static void rewind();
 
-    // mm per path step, the three spans in steps, speeds in mm/s
+    // mm per path step, the three spans in steps, speeds in mm/s; the block's acceleration at
+    // v_flat, v_entry and v_exit
     struct Span {
         float ds;
         uint32_t up, flat, down;
         float v_entry, v_flat, v_exit;
-        float v_max_entry, accel;
+        float v_max_entry, accel, accel_in, accel_out;
 
         // the span starts at step at0 of the block's `whole`
         uint32_t at0{0}, whole{0};
@@ -44,7 +45,7 @@ public:
     static Target target(Kind kind, uint32_t at, const Span &first, F next)
     {
         Target t;
-        Span prev= first;
+        float accel= first.accel_out;
         if(kind == ACCEL) {
             t.d= first.dist(at, first.up);
             if(first.flat + first.down != 0) { t.v1= first.v_flat; return t; }
@@ -54,7 +55,9 @@ public:
         t.v1= first.v_exit;
         for (uint8_t j = 1; ; j++) {
             Span s;
-            if(!next(j, s) || !mergeable(prev, s)) return t;
+            if(!next(j, s) || !mergeable(accel, s))
+                return t;
+
             if(kind == ACCEL) {
                 if(s.up == 0) return t;
                 t.d+= s.dist(0, s.up);
@@ -64,7 +67,7 @@ public:
                 t.d+= s.dist(0, s.down);
             }
             t.v1= s.v_exit;
-            prev= s;
+            accel= s.accel_out;
         }
     }
 
@@ -79,10 +82,10 @@ public:
 private:
     // The quintic runs up to 1.3x faster than the planner's constant-acceleration ramp through
     // the second half of a leg, so a junction inside a leg needs that slack below its limit;
-    // and a leg has one acceleration, so the blocks in it have to agree on theirs
-    static bool mergeable(const Span &a, const Span &b)
+    // and a leg has one acceleration, so the blocks in it have to agree on theirs where they meet
+    static bool mergeable(float accel, const Span &b)
     {
-        return b.v_entry * 1.35F <= b.v_max_entry && fabsf(b.accel - a.accel) <= 0.1F * a.accel;
+        return b.v_entry * 1.35F <= b.v_max_entry && fabsf(b.accel_in - accel) <= 0.1F * accel;
     }
 
     static float timer_hz_;

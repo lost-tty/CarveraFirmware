@@ -60,7 +60,9 @@ void Planner::config_load(const void *cfg)
 
 // Append a block to the queue, compute it's speed factors
 // 2024
-bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors, float rate_mm_s, float distance, float *unit_vec, float acceleration, float s_value, bool cutting, uint32_t mark)
+bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors, float rate_mm_s,
+                            float distance, float *unit_vec, float acceleration,
+                            const float share[3], float s_value, bool cutting, uint32_t mark)
 // bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors, float rate_mm_s, float distance, float *unit_vec, float acceleration, float *s_values, int s_count, bool cutting, unsigned int _line)
 {
     PROFILE("append_block");
@@ -151,6 +153,7 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
     }
 
     block->acceleration = acceleration; // save in block
+    memcpy(block->share, share, sizeof(block->share));
 
     block->millimeters = distance;
     block->nominal_speed = distance > 0.0F ? rate_mm_s : 0.0F; // (mm/s)
@@ -198,7 +201,8 @@ bool Planner::append_block( ActuatorCoordinates &actuator_pos, uint8_t n_motors,
                 if (cos_theta >= -0.9999F) {
                     // Compute maximum junction velocity based on maximum acceleration and junction deviation
                     float sin_theta_d2 = sqrtf(0.5F * (1.0F - cos_theta)); // Trig half angle identity. Always positive.
-                    float limit = sqrtf(acceleration * junction_deviation * sin_theta_d2
+                    float a = THEROBOT.path_accel(*block, vmax_junction);
+                    float limit = sqrtf(a * junction_deviation * sin_theta_d2
                                         / (1.0F - sin_theta_d2));
                     vmax_junction = std::min(vmax_junction, limit);
                 }

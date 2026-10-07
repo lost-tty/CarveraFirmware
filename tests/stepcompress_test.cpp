@@ -98,7 +98,7 @@ static Span ramp_span(float ds, uint32_t steps, float v0, float v1, float accel)
     s.v_flat = v1 > v0 ? v1 : v0;
     s.v_exit = v1;
     s.v_max_entry = 1e9F;
-    s.accel = accel;
+    s.accel = s.accel_in = s.accel_out = accel;
     return s;
 }
 

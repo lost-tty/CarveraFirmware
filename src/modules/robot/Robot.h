@@ -11,6 +11,7 @@
 #include <string>
 using std::string;
 #include <string.h>
+#include <math.h>
 #include <functional>
 #include <stack>
 #include <vector>
@@ -24,6 +25,7 @@ using std::string;
 #include "nuts_bolts.h"
 
 class Gcode;
+class Block;
 class BaseSolution;
 class StepperMotor;
 
@@ -126,6 +128,14 @@ class Robot : public Module {
         int32_t  motor_step(uint8_t i) const;
         float    motor_steps_per_mm(uint8_t i) const;
         float    motor_max_rate(uint8_t i) const;
+        // block b's acceleration along its path at speed v, the mean a ramp plans with
+        float    path_accel(const Block &b, float v) const;
+        // path_accel's knots in speed^2, ascending from 0: linear in speed^2 between them,
+        // constant past the last
+        static const uint8_t k_max_knots= 13;   // 7 knots and up to 6 crossings
+        uint8_t  accel_knots(const Block &b, float w[], float a[]) const;
+        // bumped by every acceleration or torque change
+        uint32_t accel_stamp{0};
         void     stop_motor(uint8_t i);
         void     stop_motors();
         void clearLaserOffset();
@@ -227,6 +237,27 @@ class Robot : public Module {
 
         float max_speeds[3];                                 // Set from config, changed by M203.
         float max_speed;                                     // Set from config, changed by M203 S.
+        // the drives' torque falls with speed: above the knee an axis' acceleration falls
+        // linearly in speed^2 to the floor at end, and stays there; mm/s and mm/s^2, NAN: no
+        // curve
+        struct Torque {
+            float knee, end, floor;
+
+            bool on() const { return !isnan(knee) && !isnan(end) && !isnan(floor); }
+            float of(float a, float speed) const
+            {
+                if(!on() || speed <= knee)
+                    return a;
+
+                float f= speed >= end || end <= knee ? floor
+                    : a + (floor - a) * (speed * speed - knee * knee) / (end * end - knee * knee);
+                return f < a ? f : a;
+            }
+        };
+        Torque torque[3];
+        void set_torque(size_t axis, float knee, float end, float floor);   // mm/min, mm/s^2
+        float full_accel(size_t axis) const;
+        float accel_term(const Block &b, uint8_t i, float v) const;
 
         float soft_endstop_min[3], soft_endstop_max[3];
         Settings::Sink settings_slot;

@@ -49,9 +49,11 @@ class Block {
         float nominal_speed;      // Nominal speed in mm per second
         float millimeters;        // Distance for this move
         float acceleration;       // the acceleration for this block
+        float share[3];           // mm of X, Y and Z per mm of path
 
         float max_entry_speed;
         uint32_t mark;
+        uint32_t serial;          // one per block queued
 
         uint8_t direction_bits;   // one bit per motor
 

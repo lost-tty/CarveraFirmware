@@ -93,6 +93,7 @@ void Conveyor::resume_held()
     ticker.steps().clear();
     StepCompress::rewind();
     fed_i= queue.isr_tail_i;
+    swept= false;
     fed_from= ticker.held_path();
     fed_steps= 0;
     fed_started= false;
@@ -104,41 +105,194 @@ static float step_length(const Block *b)
     return b->millimeters / (float)b->steps_event_count();
 }
 
-// plans the speeds for the rest of the block, from step at0 to its end
-static void plan(const Block *b, float entry2, float &exit2, StepCompress::Span &s)
-{
-    uint32_t total= s.whole - s.at0;
-    float a2= 2.0F * b->acceleration;
-    float d= s.dist(0, total);
-    float per_step= d / (float)total;
-    float nominal2= b->nominal_speed * b->nominal_speed;
-    if(entry2 > nominal2) entry2= nominal2;
-    if(exit2 > nominal2) exit2= nominal2;
-    if(exit2 > entry2 + a2 * d) exit2= entry2 + a2 * d;
-    // within rounding the asked exit stands: a block ending at rest ends at zero
-    if(exit2 < entry2 - a2 * d - 1e-3F * entry2) exit2= entry2 - a2 * d;
+// A block's acceleration against speed^2, linear between knots, constant past the last; D at
+// each knot is the mm from rest.
+struct AccelCurve {
+    float w[Robot::k_max_knots], a[Robot::k_max_knots], D[Robot::k_max_knots];
+    uint8_t n;
 
-    float peak2= 0.5F * (a2 * d + entry2 + exit2);
-    if(peak2 > nominal2) peak2= nominal2;
-    if(peak2 < entry2) peak2= entry2;
-    if(peak2 < exit2) peak2= exit2;
-    uint32_t up= (uint32_t)((peak2 - entry2) / (a2 * per_step) + 0.5F);
-    uint32_t down= (uint32_t)((peak2 - exit2) / (a2 * per_step) + 0.5F);
-    if(up > total) up= total;
-    if(down > total - up) down= total - up;
+    void of(const Block *b)
+    {
+        n= THEROBOT.accel_knots(*b, w, a);
+        D[0]= 0.0F;
+        for (uint8_t k = 1; k < n; k++)
+            D[k]= D[k - 1] + span(a[k - 1], slope(k - 1), w[k] - w[k - 1]);
+    }
+
+    float slope(uint8_t k) const
+    {
+        return k + 1 < n ? (a[k + 1] - a[k]) / (w[k + 1] - w[k]) : 0.0F;
+    }
+
+    // mm for dw of speed^2 on a piece where a = a0 + be (w - w0)
+    static float span(float a0, float be, float dw)
+    {
+        return be == 0.0F ? dw / (2.0F * a0) : log1pf(be * dw / a0) / (2.0F * be);
+    }
+
+    // speed^2 gained over x mm on such a piece
+    static float unspan(float a0, float be, float x)
+    {
+        return be == 0.0F ? 2.0F * a0 * x : a0 * expm1f(2.0F * be * x) / be;
+    }
+
+    // mm from rest to speed^2 v2
+    float dist(float v2) const
+    {
+        uint8_t k= n - 1;
+        while(k > 0 && w[k] > v2)
+            k--;
+        return D[k] + span(a[k], slope(k), v2 - w[k]);
+    }
+
+    // speed^2 after x mm from rest
+    float speed2(float x) const
+    {
+        if(!(x > 0.0F))
+            return 0.0F;
+
+        uint8_t k= n - 1;
+        while(k > 0 && D[k] > x)
+            k--;
+        return w[k] + unspan(a[k], slope(k), x - D[k]);
+    }
+};
+
+// the curves of the blocks one feed pass plans
+struct CurveCache {
+    static const uint8_t k_size= 3;
+    AccelCurve curve[k_size];
+    const Block *block[k_size];
+    uint8_t next;
+
+    void clear()
+    {
+        for (uint8_t i = 0; i < k_size; i++)
+            block[i]= nullptr;
+    }
+
+    const AccelCurve &of(const Block *b)
+    {
+        for (uint8_t i = 0; i < k_size; i++) {
+            if(block[i] == b)
+                return curve[i];
+        }
+        uint8_t i= next;
+        next= (uint8_t)((next + 1) % k_size);
+        block[i]= b;
+        curve[i].of(b);
+        return curve[i];
+    }
+};
+static CurveCache curves;
+
+// plans the speeds for the rest of the block, from step at0 to its end, on the block's a(v)
+static void solve(const Block *b, float entry2, float &exit2, StepCompress::Span &s)
+{
+    const AccelCurve &c= curves.of(b);
+    uint32_t total= s.whole - s.at0;
+    float d= s.dist(0, total);
+    float per_mm= (float)total / d;
+    float nominal2= b->nominal_speed * b->nominal_speed;
+    if(entry2 > nominal2)
+        entry2= nominal2;
+    if(exit2 > nominal2)
+        exit2= nominal2;
+
+    float de= c.dist(entry2), dx= c.dist(exit2);
+    if(dx > de + d) {
+        dx= de + d;
+        exit2= c.speed2(dx);
+    }
+    // within rounding the asked exit stands: a block ending at rest ends at zero
+    if(dx < de - d - 1e-3F * de) {
+        dx= de - d;
+        exit2= c.speed2(dx);
+    }
+
+    float dp= 0.5F * (d + de + dx);
+    float peak2= c.speed2(dp);
+    if(peak2 > nominal2) {
+        peak2= nominal2;
+        dp= c.dist(peak2);
+    }
+    if(dp < de) {
+        dp= de;
+        peak2= entry2;
+    }
+    if(dp < dx) {
+        dp= dx;
+        peak2= exit2;
+    }
+
+    uint32_t up= (uint32_t)((dp - de) * per_mm + 0.5F);
+    uint32_t down= (uint32_t)((dp - dx) * per_mm + 0.5F);
+    if(up > total)
+        up= total;
+    if(down > total - up)
+        down= total - up;
     s.up= up;
     s.down= down;
     s.flat= total - up - down;
 
     // plateau
-    float reach2= entry2 + a2 * (float)up * per_step;
-    if(up != 0 && reach2 < peak2) peak2= reach2;
-    reach2= exit2 + a2 * (float)down * per_step;
-    if(down != 0 && reach2 < peak2) peak2= reach2;
+    float most= dp;
+    if(up != 0 && de + (float)up / per_mm < most)
+        most= de + (float)up / per_mm;
+    if(down != 0 && dx + (float)down / per_mm < most)
+        most= dx + (float)down / per_mm;
+    if(most < dp)
+        peak2= c.speed2(most);
 
     s.v_entry= sqrtf(entry2);
     s.v_flat= sqrtf(peak2);
     s.v_exit= sqrtf(exit2);
+    s.accel= THEROBOT.path_accel(*b, s.v_flat);
+    s.accel_in= THEROBOT.path_accel(*b, s.v_entry);
+    s.accel_out= THEROBOT.path_accel(*b, s.v_exit);
+}
+
+// the spans solve() worked out lately
+struct PlanMemo {
+    static const uint8_t k_size= 8;
+    struct Entry {
+        bool used;
+        uint32_t serial, at0, stamp;
+        float entry2, asked2, exit2;
+        uint32_t up, flat, down;
+        float v_entry, v_flat, v_exit, accel, accel_in, accel_out;
+    } e[k_size];
+    uint8_t next;
+};
+static PlanMemo memo;
+
+static void plan(const Block *b, float entry2, float &exit2, StepCompress::Span &s)
+{
+    uint32_t stamp= THEROBOT.accel_stamp;
+    for (uint8_t k = 0; k < PlanMemo::k_size; k++) {
+        const PlanMemo::Entry &m= memo.e[k];
+        if(!m.used || m.serial != b->serial || m.at0 != s.at0 || m.stamp != stamp
+           || m.entry2 != entry2 || m.asked2 != exit2)
+            continue;
+
+        s.up= m.up;
+        s.flat= m.flat;
+        s.down= m.down;
+        s.v_entry= m.v_entry;
+        s.v_flat= m.v_flat;
+        s.v_exit= m.v_exit;
+        s.accel= m.accel;
+        s.accel_in= m.accel_in;
+        s.accel_out= m.accel_out;
+        exit2= m.exit2;
+        return;
+    }
+    float asked2= exit2;
+    solve(b, entry2, exit2, s);
+    PlanMemo::Entry &m= memo.e[memo.next];
+    memo.next= (uint8_t)((memo.next + 1) % PlanMemo::k_size);
+    m= {true, b->serial, s.at0, stamp, entry2, asked2, exit2, s.up, s.flat, s.down,
+        s.v_entry, s.v_flat, s.v_exit, s.accel, s.accel_in, s.accel_out};
 }
 
 bool Conveyor::span_of(unsigned int i, uint32_t from, float entry2, float &exit2,
@@ -149,7 +303,6 @@ bool Conveyor::span_of(unsigned int i, uint32_t from, float entry2, float &exit2
     if(whole <= from || b->millimeters <= 0.0F) return false;
     s.ds= step_length(b);
     s.v_max_entry= b->max_entry_speed;
-    s.accel= b->acceleration;
 
     s.at0= from;
     s.whole= whole;
@@ -158,22 +311,44 @@ bool Conveyor::span_of(unsigned int i, uint32_t from, float entry2, float &exit2
     return true;
 }
 
-// reverse pass, in squared speeds
+// reverse pass, in squared speeds; it stops at the first old block whose limit is unchanged
 void Conveyor::sweep()
 {
     float rest= THEKERNEL->planner.rest_speed();
     float next2= rest * rest;
-    unsigned int i= end_i();
+    unsigned int end= end_i();
+    if(end == fed_i)
+        return;
+
+    uint32_t stamp= THEROBOT.accel_stamp;
+    bool again= swept && stamp == swept_stamp;
+    if(again && end == swept_end)
+        return;
+
+    unsigned int last= queue.prev(swept_end);
+    bool old= false;
+    unsigned int i= queue.prev(end);
     while(i != fed_i) {
-        i= queue.prev(i);
-        if(i == fed_i) break;
         const Block *b= queue.item_ref(i);
         float l2= b->max_entry_speed * b->max_entry_speed;
-        float reach2= next2 + 2.0F * b->acceleration * b->millimeters;
-        if(reach2 < l2) l2= reach2;
+        if(l2 > next2) {
+            const AccelCurve &c= curves.of(b);
+            float reach2= c.speed2(c.dist(next2) + b->millimeters);
+            if(reach2 < l2)
+                l2= reach2;
+        }
+        if(i == last)
+            old= true;
+        if(again && old && limit2[i] == l2)
+            break;
+
         limit2[i]= l2;
         next2= l2;
+        i= queue.prev(i);
     }
+    swept= true;
+    swept_end= end;
+    swept_stamp= stamp;
 }
 
 void Conveyor::feed_stream()
@@ -184,6 +359,7 @@ void Conveyor::feed_stream()
     if(flush || fed_i == end) {
         return;
     }
+    curves.clear();
     sweep();
     float rest= THEKERNEL->planner.rest_speed();
     float rest2= rest * rest;
@@ -222,8 +398,8 @@ void Conveyor::feed_stream()
         // costs a controlled stop at worst, never a stand at speed
         float hz= ticker.rate();
         float ahead= k_feed_ahead_ms / 1000.0F;
-        if(b->acceleration > 0.0F) {
-            ahead+= 1.5F * s.v_flat / (b->acceleration * StepCompress::k_peak_over_mean);
+        if(s.accel > 0.0F) {
+            ahead+= 1.5F * s.v_flat / (s.accel * StepCompress::k_peak_over_mean);
         }
         uint32_t margin= (uint32_t)(hz * ahead);
         if(!fed_started && ticker.steps().ticks_queued() >= margin) {
@@ -236,7 +412,7 @@ void Conveyor::feed_stream()
 
         if(!fed_started) {
             // the planner's acceleration is the mean; a brake decelerates at the profile's peak
-            int32_t decel= (int32_t)(b->acceleration * StepCompress::k_peak_over_mean / s.ds);
+            int32_t decel= (int32_t)(s.accel * StepCompress::k_peak_over_mean / s.ds);
             if(decel < 1) decel= 1;
             if(!ticker.steps().push_mark(fed_i, decel)) {
                 break;
@@ -332,6 +508,7 @@ void Conveyor::service()
         fence.on= false;
         flush= false;
         fed_i= queue.head_i;
+        swept= false;
         fed_from= 0;
         fed_steps= 0;
         fed_started= false;
@@ -364,6 +541,7 @@ void Conveyor::collect()
         pending_actions.clear();
         fence.on= false;
         fed_i= queue.isr_tail_i;
+        swept= false;
         fed_from= 0;
         fed_steps= 0;
         fed_started= false;
@@ -529,6 +707,7 @@ void Conveyor::queue_head_block()
         return;
     }
 
+    queue.head_ref()->serial= queued;
     queue.produce_head();
     queued++;
 

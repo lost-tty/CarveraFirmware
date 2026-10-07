@@ -123,6 +123,9 @@ private:
     float fed_exit2{0.0F};
     float entry2{0.0F};
     float limit2[BLOCK_QUEUE_LENGTH];
+    bool swept{false};             // limit2 holds a pass to swept_end at swept_stamp
+    unsigned int swept_end{0};
+    uint32_t swept_stamp{0};
     struct FenceState {
         volatile Fence op{FENCE_LIFT};
         volatile uint8_t asked{0}, done{0};
