@@ -35,7 +35,6 @@ class Player : public Module {
         static void shell(void *self, const char *name, std::string args, StreamOutput *stream);
         bool m1_stops_program() const { return m1_stops; }
         bool get_progress(struct pad_progress &p);
-        void on_gcode_received(Gcode *argument);
         void program_stop(Gcode *);
         void optional_stop(Gcode *);
         void suspend_gcode(Gcode *);

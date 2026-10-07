@@ -43,7 +43,6 @@ extern SDFAT mounter;
 void Player::on_module_loaded()
 {
     for (unsigned i= 0; COMMANDS[i].name != nullptr; i++) SimpleShell::add_command(shell_slots[i], COMMANDS[i].name, &Player::shell, this, COMMANDS[i].help);
-    GcodeDispatch::add_handler(this);
     ADD_MCODE(m0, 0, BARRIER, Player::program_stop);
     ADD_MCODE(m27, 27, BESIDE_JOB, Player::progress_report);
     ADD_MCODE(m333, 333, IMMEDIATE, Player::optional_stop_mode);
@@ -69,16 +68,6 @@ void Player::sample_runtime()
     sampled_at = now;
 }
 
-
-// only G codes come through here; the M codes are registered
-void Player::on_gcode_received(Gcode *argument)
-{
-    Gcode *gcode = argument;
-    if(!gcode->has_g() || gcode->g() != 28) return;
-
-    // homing cancels suspend
-    if (program.suspended()) program.resume();
-}
 
 // M0: stop the program until the operator resumes it
 // a barrier runs on the machine task, which cannot wait for itself to drain: the main loop

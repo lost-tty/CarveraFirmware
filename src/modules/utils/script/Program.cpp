@@ -118,8 +118,15 @@ bool Program::call_line(const std::string &text, StreamOutput *stream, std::stri
 Program::Next Program::step(SerialMessage &msg)
 {
     follow_fence();
-    if(!busy() || machine_task.is_halted() || frozen())
+    if(!busy() || frozen())
         return NOTHING;
+
+    // an alarm suspends every level: after the unlock nothing runs on until resumed
+    if(machine_task.is_halted()) {
+        pause= ALL;
+        printk("Suspended by the alarm: resume to continue playing, or abort\n");
+        return NOTHING;
+    }
 
     if(!stopping)
         return advance(msg);
