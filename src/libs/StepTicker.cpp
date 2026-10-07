@@ -511,6 +511,21 @@ void StepTicker::end_block(Motion motion)
 
 inline uint32_t StepTicker::issue_step(uint32_t ticks, Motion motion)
 {
+    // polled before the pulse, so a switch seen now stops the axis without this step
+    poll_left-= (int32_t)ticks;
+    if(poll_left <= 0) {
+        poll_left= poll_ticks;
+        if(watch != nullptr && !watch->hit) {
+            motion= check_watch();
+        }
+        if(n_limits != 0 && !limit_tripped) {
+            motion= check_limits();
+        }
+        if(state_ == HELD || limit_tripped) {
+            return 0;
+        }
+    }
+
     pulse();
 
     current_tick++;
@@ -527,17 +542,6 @@ inline uint32_t StepTicker::issue_step(uint32_t ticks, Motion motion)
         defer_wake();
     }
     ring_low= low;
-
-    poll_left-= (int32_t)ticks;
-    if(poll_left <= 0) {
-        poll_left= poll_ticks;
-        if(watch != nullptr && !watch->hit) {
-            motion= check_watch();
-        }
-        if(n_limits != 0 && !limit_tripped) {
-            motion= check_limits();
-        }
-    }
 
     if(played_out()) end_block(motion);
 
